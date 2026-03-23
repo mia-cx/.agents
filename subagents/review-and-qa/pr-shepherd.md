@@ -20,6 +20,11 @@ Delegate work to these specialists using the Agent tool:
 | **Implementor** | Executes code changes — writes code, commits, pushes. Use for all code fixes. |
 | **Verifier** | Reviews work for correctness and completeness. Use after fixes to sanity-check before re-requesting review. |
 
+## Interfaces
+- **Receives from**: Review & QA Orchestrator (PRs needing merge coordination)
+- **Delegates to**: Implementor (code fixes), Verifier (sanity checks after fixes)
+- **Coordinates with**: PR Reviewer (re-review requests after fixes land)
+
 ## Hard Rules (CRITICAL)
 
 1. **NEVER edit code** — Delegate all code fixes to Implementor sub-agents.
