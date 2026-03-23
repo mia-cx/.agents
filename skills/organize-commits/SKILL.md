@@ -43,7 +43,7 @@ When a single file has edits that span two concerns, assign it to the dominant c
 **Do not ask for approval — run the commits immediately.** Use the Bash tool for each commit in order:
 
 1. `git add <paths>`
-2. `git commit` with subject, flavourful body, issue refs (if any), and trailer
+2. `git commit` with subject, flavourful body, issue refs (if any), and a `Co-Authored-By` trailer reflecting **your own model name** (e.g. `Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>` — use whatever model you actually are)
 
 After all commits are done, run:
 ```
@@ -121,6 +121,8 @@ Fixes #12
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ```
+
+> **Note on the trailer:** Always use your actual model name — if you're Claude Opus 4.5, write `Claude Opus 4.5`; if you're Claude Sonnet 4.6, write `Claude Sonnet 4.6`, etc. Don't hardcode a model name that isn't yours.
 
 ## Checklist before finishing
 
