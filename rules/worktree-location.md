@@ -1,3 +1,8 @@
+---
+description: Worktree placement for local git repos. Apply when creating or moving project worktrees. Put new worktrees inside the repo root's `./.worktrees/` directory so each repo keeps its own worktree set together and agents avoid scattering them across tool-specific folders.
+alwaysApply: false
+---
+
 # Worktree Location
 
 Create new project worktrees inside the repo root's `./.worktrees/` directory.
