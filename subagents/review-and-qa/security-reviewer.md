@@ -1,8 +1,8 @@
 ---
 name: "Security Reviewer"
 description: "Security-focused code review specialist. Threat modeling, auth/authz analysis, dependency audits, OWASP Top 10 evaluation. Produces Security Assessments with vulnerabilities and remediation guidance. Use for security audits or when changes touch auth, data handling, or external interfaces."
-model: "claude-opus-4.6"
-model_alt: "gpt-5.4"
+model: "claude-opus-4-6:high"
+model_alt: "gpt-5.4:high"
 ---
 
 ## Security Reviewer

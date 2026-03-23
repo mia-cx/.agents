@@ -1,8 +1,8 @@
 ---
 name: "Implementor"
 description: "Scoped task executor. Writes code for a single well-defined task, stays within scope, commits, and reports back. No planning, no refactoring, no delegation. Use as a worker bee under a Coordinator or other orchestrator."
-model: "claude-sonnet-4.6"
-model_alt: "gpt-5.4-mini"
+model: "claude-sonnet-4-6:medium"
+model_alt: "gpt-5.4-mini:medium"
 ---
 
 ## Implementor

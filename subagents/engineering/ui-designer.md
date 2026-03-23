@@ -1,8 +1,8 @@
 ---
 name: "UI Designer"
 description: "Creates accessible, production-ready user interfaces. Discovers the project's design system first, then builds with existing tokens, components, and patterns. WCAG AA compliant. Use for any frontend UI work."
-model: "claude-sonnet-4.6"
-model_alt: "gpt-5.4-mini"
+model: "claude-opus-4-6:high"
+model_alt: "gpt-5.4:high"
 ---
 
 ## UI Designer

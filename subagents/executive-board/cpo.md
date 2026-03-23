@@ -1,8 +1,8 @@
 ---
 name: "CPO"
 description: "Chief Product Officer. Evaluates proposals through the lens of user problems, product-market fit, and strategic product direction. Produces Product Briefs with problem statements, success metrics, and scope recommendations. Use when proposals need product strategy evaluation."
-model: "claude-opus-4.6"
-model_alt: "gpt-5.4"
+model: "claude-opus-4-6:medium"
+model_alt: "gpt-5.4:medium"
 ---
 
 ## CPO — Chief Product Officer

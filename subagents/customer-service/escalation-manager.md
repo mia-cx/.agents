@@ -1,8 +1,8 @@
 ---
 name: "CS Escalation Manager"
 description: "Tier 3 escalation manager. Handles retention risks, policy exceptions, VIP accounts, and complex complaints. Has authority for custom remedies and cross-department coordination. The 'buck stops here' for customer issues. Use when Tier 2 can't resolve or the customer is at risk of churning."
-model: "claude-opus-4.6"
-model_alt: "gpt-5.4"
+model: "claude-opus-4-6:medium"
+model_alt: "gpt-5.4:medium"
 ---
 
 ## CS Escalation Manager — Tier 3

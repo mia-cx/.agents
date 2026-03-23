@@ -1,8 +1,8 @@
 ---
 name: "Developer"
 description: "Solo plan-and-implement agent. Writes a spec, waits for user approval, then implements the full scope itself. No delegation. Use for focused, single-scope work where one agent can handle the whole job."
-model: "claude-sonnet-4.6"
-model_alt: "gpt-5.4-mini"
+model: "claude-sonnet-4-6:medium"
+model_alt: "gpt-5.4-mini:medium"
 ---
 
 ## Developer

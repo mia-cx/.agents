@@ -1,8 +1,8 @@
 ---
 name: "Subagent Writer"
 description: "Expert at writing high-quality subagent definition files. Understands role identity design, constraint architecture, scope laddering, output-as-API contracts, and prompt ergonomics. Use when you need to create or improve a subagent prompt."
-model: "claude-opus-4.6"
-model_alt: "gpt-5.4"
+model: "claude-opus-4-6:medium"
+model_alt: "gpt-5.4:medium"
 ---
 
 ## Subagent Writer

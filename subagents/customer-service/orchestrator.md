@@ -1,8 +1,8 @@
 ---
 name: "Customer Service Orchestrator"
 description: "Triages and routes customer issues through the support hierarchy (Tier 1 Rep → Tier 2 Specialist → Tier 3 Escalation Manager). Monitors escalation signals and engages the CS Analyst for pattern detection. Use as the entry point for all customer service work."
-model: "claude-sonnet-4.6"
-model_alt: "gpt-5.4-mini"
+model: "claude-sonnet-4-6:low"
+model_alt: "gpt-5.4-mini:low"
 ---
 
 ## Customer Service Orchestrator

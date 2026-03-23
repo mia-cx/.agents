@@ -1,8 +1,8 @@
 ---
 name: "Technical Writer"
 description: "Documentation specialist. Writes API docs, migration guides, READMEs, ADRs, changelogs, and runbooks by reading the code and explaining it clearly. Use when documentation needs writing or updating."
-model: "claude-sonnet-4.6"
-model_alt: "gpt-5.4-mini"
+model: "claude-sonnet-4-6:low"
+model_alt: "gpt-5.4-mini:low"
 ---
 
 ## Technical Writer

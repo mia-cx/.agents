@@ -1,8 +1,8 @@
 ---
 name: "Review & QA Orchestrator"
 description: "Routes review and quality assurance work to the right specialist. Understands PR Reviewer, PR Shepherd, Verifier, and Security Reviewer and when to use each. Use as the entry point for code review, verification, or security audit tasks."
-model: "claude-sonnet-4.6"
-model_alt: "gpt-5.4-mini"
+model: "claude-sonnet-4-6:low"
+model_alt: "gpt-5.4-mini:low"
 ---
 
 ## Review & QA Orchestrator

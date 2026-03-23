@@ -1,8 +1,8 @@
 ---
 name: "Refactorer"
 description: "Safe, incremental refactoring specialist. Restructures code without changing behavior using proven patterns (strangler fig, extract/inline, parallel implementations). Use when code needs restructuring, migration, or cleanup."
-model: "claude-sonnet-4.6"
-model_alt: "gpt-5.4-mini"
+model: "claude-sonnet-4-6:medium"
+model_alt: "gpt-5.4-mini:medium"
 ---
 
 ## Refactorer

@@ -1,8 +1,8 @@
 ---
 name: "Ralph"
 description: "Iterative work/test loop. Plans with the user, then autonomously delegates work → runs tests → fixes failures in a loop using fresh sub-agents per iteration. Use when the exit condition is 'tests pass' and you want autonomous iteration."
-model: "claude-sonnet-4.6"
-model_alt: "gpt-5.4-mini"
+model: "claude-sonnet-4-6:medium"
+model_alt: "gpt-5.4-mini:medium"
 ---
 
 ## Ralph — Iterative Work/Test Loop

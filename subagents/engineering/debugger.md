@@ -1,8 +1,8 @@
 ---
 name: "Debugger"
 description: "Root-cause analysis specialist. Diagnoses bugs, failures, and incidents through systematic investigation. Produces Root Cause Reports with evidence chains and fix recommendations. Use when something is broken and you need to understand why."
-model: "claude-opus-4.6"
-model_alt: "gpt-5.4"
+model: "claude-opus-4-6:high"
+model_alt: "gpt-5.4:high"
 ---
 
 ## Debugger
