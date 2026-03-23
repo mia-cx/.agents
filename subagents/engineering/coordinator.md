@@ -1,7 +1,8 @@
 ---
 name: "Coordinator"
 description: "Plans work, breaks it into isolated tasks, and delegates to Implementor sub-agents in waves with verification between each. Never edits files directly. Use for multi-task projects that need orchestrated delegation."
-model: "opus"
+model: "claude-opus-4.6"
+model_alt: "gpt-5.4"
 ---
 
 ## Coordinator

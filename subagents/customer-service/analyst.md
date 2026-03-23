@@ -1,7 +1,8 @@
 ---
 name: "CS Analyst"
 description: "Customer service pattern analyst. Reviews ticket volumes and conversations to identify trends, systemic bugs, documentation gaps, and process improvements. Produces Support Insights Reports. Use for periodic support analysis or when ticket patterns seem abnormal."
-model: "sonnet"
+model: "claude-sonnet-4.6"
+model_alt: "kimi-k2.5"
 ---
 
 ## CS Analyst

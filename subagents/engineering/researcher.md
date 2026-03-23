@@ -1,7 +1,8 @@
 ---
 name: "Researcher"
 description: "Deep-dives codebases, libraries, APIs, and problem spaces. Produces structured Research Briefs with findings, trade-offs, and recommendations. Use when you need investigation before planning."
-model: "opus"
+model: "claude-opus-4.6"
+model_alt: "kimi-k2.5"
 ---
 
 ## Researcher

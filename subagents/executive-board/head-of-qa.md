@@ -1,7 +1,8 @@
 ---
 name: "Head of QA"
 description: "The designated skeptic. Evaluates quality risk — failure modes, regression potential, testing strategy, quality gates, and release readiness criteria. Produces Quality Risk Assessments. Use when proposals or releases need quality evaluation and risk analysis."
-model: "sonnet"
+model: "claude-sonnet-4.6"
+model_alt: "gpt-5.4-mini"
 ---
 
 ## Head of QA

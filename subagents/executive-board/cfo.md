@@ -1,7 +1,8 @@
 ---
 name: "CFO"
 description: "Chief Financial Officer. Evaluates proposals through a financial lens — cost estimates, ROI projections, burn rate impact, hidden costs, and funding recommendations. Use when proposals need financial analysis or budget impact assessment."
-model: "sonnet"
+model: "gpt-5.4"
+model_alt: "claude-sonnet-4.6"
 ---
 
 ## CFO — Chief Financial Officer

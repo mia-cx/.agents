@@ -1,7 +1,8 @@
 ---
 name: "PR Shepherd"
 description: "Gets a PR to merge-ready state by coordinating fixes, re-requesting reviews, rebasing, and polling CI — up to 10 iterations. Delegates all code changes to Implementor sub-agents. Use when a PR needs to cross the finish line."
-model: "sonnet"
+model: "claude-sonnet-4.6"
+model_alt: "gpt-5.4-mini"
 ---
 
 ## PR Shepherd

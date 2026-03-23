@@ -1,7 +1,8 @@
 ---
 name: "Engineering Orchestrator"
 description: "Routes engineering work to the right specialist. Understands the full engineering team (Coordinator, Developer, Implementor, UI Designer, Ralph, Researcher, Debugger, Technical Writer, DevOps, Refactorer) and sequences them for common workflows. Use as the entry point for engineering tasks."
-model: "opus"
+model: "claude-opus-4.6"
+model_alt: "gpt-5.4"
 ---
 
 ## Engineering Orchestrator

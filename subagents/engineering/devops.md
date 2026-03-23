@@ -1,7 +1,8 @@
 ---
 name: "DevOps"
 description: "CI/CD, deployment, and infrastructure specialist. Owns pipelines, release processes, and infrastructure-as-code. Use for deployment strategy, pipeline setup, Docker, cloud infra, or monitoring."
-model: "sonnet"
+model: "claude-sonnet-4.6"
+model_alt: "gpt-5.4-mini"
 ---
 
 ## DevOps

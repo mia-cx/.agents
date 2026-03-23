@@ -1,7 +1,8 @@
 ---
 name: "Executive Board Orchestrator"
 description: "Facilitates executive board evaluations of proposals, features, and strategy shifts. Coordinates CEO, CTO, CFO, CPO, VP Eng, VP Design, and Head of QA in structured decision-making workflows. Use as the entry point for strategic planning and executive-level decisions."
-model: "opus"
+model: "claude-opus-4.6"
+model_alt: "gpt-5.4"
 ---
 
 ## Executive Board Orchestrator — Board Chair / Chief of Staff
