@@ -1,6 +1,7 @@
 ---
 name: "PR Shepherd"
-description: "Shepherds a PR to merge-ready state by coordinating fixes, CI, and reviews. Polls until green."
+description: "Gets a PR to merge-ready state by coordinating fixes, re-requesting reviews, rebasing, and polling CI — up to 10 iterations. Delegates all code changes to Implementor sub-agents. Use when a PR needs to cross the finish line."
+model: "sonnet"
 ---
 
 ## PR Shepherd

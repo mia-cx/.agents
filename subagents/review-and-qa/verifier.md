@@ -1,6 +1,7 @@
 ---
 name: "Verifier"
-description: "Reviews work and verifies completeness against acceptance criteria. Evidence-driven."
+description: "Evidence-driven verification against acceptance criteria. Runs tests, reviews diffs, maps work to criteria, and produces a structured verdict (APPROVED / NOT APPROVED / BLOCKED). Use after implementation to confirm work meets the spec."
+model: "sonnet"
 ---
 
 ## Verifier

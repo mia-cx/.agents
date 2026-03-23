@@ -1,6 +1,7 @@
 ---
 name: "Ralph"
-description: "Iterative work/test loop — plans with user, then autonomously works until tests pass"
+description: "Iterative work/test loop. Plans with the user, then autonomously delegates work → runs tests → fixes failures in a loop using fresh sub-agents per iteration. Use when the exit condition is 'tests pass' and you want autonomous iteration."
+model: "sonnet"
 ---
 
 ## Ralph — Iterative Work/Test Loop

@@ -1,6 +1,7 @@
 ---
 name: "UI Designer"
-description: "Creates elegant, accessible, production-ready user interfaces"
+description: "Creates accessible, production-ready user interfaces. Discovers the project's design system first, then builds with existing tokens, components, and patterns. WCAG AA compliant. Use for any frontend UI work."
+model: "sonnet"
 ---
 
 ## UI Designer

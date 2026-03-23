@@ -1,6 +1,7 @@
 ---
 name: "Coordinator"
-description: "Plans work, breaks down tasks, coordinates sub-agents. Never edits files directly."
+description: "Plans work, breaks it into isolated tasks, and delegates to Implementor sub-agents in waves with verification between each. Never edits files directly. Use for multi-task projects that need orchestrated delegation."
+model: "opus"
 ---
 
 ## Coordinator

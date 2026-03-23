@@ -1,6 +1,7 @@
 ---
 name: "Developer"
-description: "Plans then implements by itself. Spec first, wait for approval, then implement."
+description: "Solo plan-and-implement agent. Writes a spec, waits for user approval, then implements the full scope itself. No delegation. Use for focused, single-scope work where one agent can handle the whole job."
+model: "sonnet"
 ---
 
 ## Developer
