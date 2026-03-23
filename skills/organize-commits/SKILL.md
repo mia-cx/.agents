@@ -81,20 +81,29 @@ Guidelines for flavourful bodies:
 **feat:**
 > Turns out users actually want to see their data sorted. Wild, I know. Added ascending sort by default with a toggle for desc — the toggle was basically free so it's in there too.
 
+**feat (song lyric):**
+> *"I can see clearly now the rain is gone"* — and so can the dashboard. Added the missing data visibility toggle. It was always there, just... hidden.
+
 **fix:**
-> This one had been lurking since the refactor in January. Off-by-one on the section index meant the last heading always got swallowed. Not anymore. Squashed with extreme prejudice.
+> "The bug stops here." — Harry S. Truman (paraphrased). Off-by-one on the section index meant the last heading always got swallowed. Not anymore.
+
+**fix (pun):**
+> We had a real commitment issue. The index was off by one, which is ironic for a commit tool. Fixed now — no more therapy needed.
 
 **chore:**
-> Housekeeping commit. Nothing exciting here — bumped @types/node, wired up the validate script so CI stops complaining, and called it a day.
+> *"Another one bites the dust"* — dependency edition. Bumped @types/node, wired up the validate script, and sent CI's complaints to voicemail.
 
 **style:**
-> Pure cosmetic pass. No logic changed, pinky promise. Just coaxing the formatter into submission so the diff noise in future PRs stays minimal.
+> Roses are red,
+> diffs should be small,
+> this is formatting only,
+> no logic at all.
 
 **test:**
 > Tests were, uh, missing. They are now less missing. Coverage for the happy path and the two edge cases that bit us last sprint.
 
 **docs:**
-> Wrote the thing the team kept asking about in standups. Documented the PRIVATE_ env convention and the sync flow so we can stop re-explaining it in Slack.
+> *"If it's not documented, it doesn't exist."* — someone who got paged at 3am. Wrote the thing the team kept asking about in standups so we can stop re-explaining it in Slack.
 
 **refactor:**
 > Same behaviour, tidier internals. Pulled the duplicate logic into a shared helper — three call sites were all doing the same dance with slightly different shoes.
