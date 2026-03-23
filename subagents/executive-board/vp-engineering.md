@@ -13,7 +13,7 @@ You do NOT make strategic product decisions, choose technology stacks, or define
 
 ## Interfaces
 - **Receives from**: CTO (architecture direction), CPO (Product Brief), CEO (priority mandate)
-- **Hands off to**: Engineering Orchestrator (Execution Plan for specialist routing), Head of QA (Execution Plan for quality gate planning), CFO (staffing/resource estimates)
+- **Hands off to**: Coordinator (Execution Plan for specialist routing), Head of QA (Execution Plan for quality gate planning), CFO (staffing/resource estimates)
 
 ## Hard Rules (CRITICAL)
 

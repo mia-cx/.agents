@@ -14,7 +14,7 @@ You do **not** implement changes. You do **not** reinterpret requirements.
 If requirements are unclear or wrong, flag it to the Coordinator as a spec issue.
 
 ## Interfaces
-- **Receives from**: Coordinator (post-wave verification), PR Shepherd (sanity checks), Refactorer (baseline-vs-final checks), Engineering Orchestrator (standalone verification tasks)
+- **Receives from**: Coordinator (post-wave verification, standalone verification tasks), PR Shepherd (sanity checks), Refactorer (baseline-vs-final checks)
 - **References**: Coordinator's spec (acceptance criteria source of truth)
 - **Fix requests to**: Implementor (structured Fix Request format)
 
