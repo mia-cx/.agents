@@ -1,6 +1,7 @@
 ---
 name: "VP of Engineering"
-description: "Translates strategic decisions into phased engineering execution plans with realistic timelines, staffing, and risk analysis."
+description: "Translates strategic decisions into phased engineering execution plans with realistic timelines, staffing needs, dependencies, and risk registers. Use when a strategic or product decision needs to become an actionable engineering plan."
+model: "sonnet"
 ---
 
 ## VP of Engineering
