@@ -76,16 +76,41 @@ Once all agents return, combine into a single review summary:
 <1-2 sentence summary of what matters most>
 ```
 
-### 5. Post or present
+### 5. Post findings to the PR
 
-If the user asked you to post the review on GitHub:
+Always check whether a GitHub PR exists for the current branch, even if the user didn't mention one:
+
 ```bash
-gh pr review <number> --approve --body "<summary>"
-# or
-gh pr review <number> --request-changes --body "<summary>"
+gh pr view --json number,url 2>/dev/null
 ```
 
-Otherwise, present the summary to the user in chat.
+If a PR exists, post every valid finding as an **inline review comment** anchored to the specific file and line, so each finding becomes its own discussion thread the author can resolve:
+
+```bash
+# Start a review, add inline comments, then submit in one batch.
+# This creates proper review threads (not standalone comments).
+gh api repos/{owner}/{repo}/pulls/{number}/reviews -f event=COMMENT -f body="<overall summary>" -f comments='[
+  {"path": "src/foo.ts", "line": 42, "body": "🔴 **Bug**: <description>\n\n<suggested fix>"},
+  {"path": "src/bar.ts", "line": 17, "body": "🟠 **Design smell**: <description>\n\n<architectural fix>"}
+]'
+```
+
+Key rules for inline comments:
+- One comment per finding, anchored to the most relevant changed line in the diff.
+- Use the severity emoji prefix (`🔴`, `🟠`, `🟡`) so authors can triage at a glance.
+- If a finding spans multiple files, comment on the primary location and mention the others in the body.
+- If a finding applies to unchanged context lines (not part of the diff), post it as a top-level review body note instead — GitHub only allows inline comments on diff lines.
+
+The overall review verdict goes in the review body:
+
+```bash
+# For approve:
+gh pr review <number> --approve --body "<collated summary>"
+# For request changes:
+gh pr review <number> --request-changes --body "<collated summary>"
+```
+
+If no PR exists, present the summary to the user in chat and note that findings weren't posted because there's no open PR.
 
 ## Rules
 
