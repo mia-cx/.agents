@@ -1,322 +1,313 @@
 #!/bin/bash
-
-# Exit on error
+# init-artifact.sh — scaffold a SvelteKit + Tailwind v4 + shadcn-svelte + radix-svelte project
+# with Cloudflare Pages deployment via wrangler
 set -e
 
-# Detect Node version
-NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-
-echo "🔍 Detected Node.js version: $NODE_VERSION"
-
-if [ "$NODE_VERSION" -lt 18 ]; then
-  echo "❌ Error: Node.js 18 or higher is required"
-  echo "   Current version: $(node -v)"
-  exit 1
-fi
-
-# Set Vite version based on Node version
-if [ "$NODE_VERSION" -ge 20 ]; then
-  VITE_VERSION="latest"
-  echo "✅ Using Vite latest (Node 20+)"
-else
-  VITE_VERSION="5.4.11"
-  echo "✅ Using Vite $VITE_VERSION (Node 18 compatible)"
-fi
-
-# Detect OS and set sed syntax
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  SED_INPLACE="sed -i ''"
-else
-  SED_INPLACE="sed -i"
-fi
-
-# Check if pnpm is installed
-if ! command -v pnpm &> /dev/null; then
-  echo "📦 pnpm not found. Installing pnpm..."
-  npm install -g pnpm
-fi
-
-# Check if project name is provided
+# ─── Args ─────────────────────────────────────────────────────────────────────
 if [ -z "$1" ]; then
-  echo "❌ Usage: ./create-react-shadcn-complete.sh <project-name>"
+  echo "❌ Usage: bash init-artifact.sh <project-name>"
   exit 1
 fi
 
 PROJECT_NAME="$1"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPONENTS_TARBALL="$SCRIPT_DIR/shadcn-components.tar.gz"
 
-# Check if components tarball exists
-if [ ! -f "$COMPONENTS_TARBALL" ]; then
-  echo "❌ Error: shadcn-components.tar.gz not found in script directory"
-  echo "   Expected location: $COMPONENTS_TARBALL"
+# ─── Preflight ────────────────────────────────────────────────────────────────
+NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
+echo "🔍 Node.js version: $NODE_VERSION"
+
+if [ "$NODE_VERSION" -lt 20 ]; then
+  echo "❌ Node.js 20+ required (Tailwind v4 / SvelteKit latest). Current: $(node -v)"
   exit 1
 fi
 
-echo "🚀 Creating new React + Vite project: $PROJECT_NAME"
+if ! command -v pnpm &> /dev/null; then
+  echo "📦 pnpm not found — installing..."
+  npm install -g pnpm
+fi
 
-# Create new Vite project (always use latest create-vite, pin vite version later)
-pnpm create vite "$PROJECT_NAME" --template react-ts
+# ─── 1. Create SvelteKit project with Tailwind + Cloudflare adapter ──────────
+#    sv create handles: SvelteKit scaffold, Tailwind v4, adapter-cloudflare,
+#    wrangler.jsonc, and all base config.
+echo ""
+echo "🚀 Creating SvelteKit project: $PROJECT_NAME"
+pnpm dlx sv create "$PROJECT_NAME" \
+  --template minimal \
+  --types ts \
+  --add "tailwindcss=plugins:none" "sveltekit-adapter=adapter:cloudflare+cfTarget:pages" \
+  --no-install
 
-# Navigate into project directory
 cd "$PROJECT_NAME"
 
-echo "🧹 Cleaning up Vite template..."
-$SED_INPLACE '/<link rel="icon".*vite\.svg/d' index.html
-$SED_INPLACE 's/<title>.*<\/title>/<title>'"$PROJECT_NAME"'<\/title>/' index.html
-
+# ─── 2. Install base deps ────────────────────────────────────────────────────
+echo ""
 echo "📦 Installing base dependencies..."
 pnpm install
 
-# Pin Vite version for Node 18
-if [ "$NODE_VERSION" -lt 20 ]; then
-  echo "📌 Pinning Vite to $VITE_VERSION for Node 18 compatibility..."
-  pnpm add -D vite@$VITE_VERSION
-fi
+# ─── 3. Install shadcn-svelte manual deps ────────────────────────────────────
+#    We skip `shadcn-svelte init` (interactive preset prompt) and set up
+#    components.json + CSS + utils manually per the manual install docs.
+echo ""
+echo "🎨 Setting up shadcn-svelte (manual init)..."
+pnpm add tailwind-variants clsx tailwind-merge tw-animate-css
+pnpm add @lucide/svelte
 
-echo "📦 Installing Tailwind CSS and dependencies..."
-pnpm install -D tailwindcss@3.4.1 postcss autoprefixer @types/node tailwindcss-animate
-pnpm install class-variance-authority clsx tailwind-merge lucide-react next-themes
-
-echo "⚙️  Creating Tailwind and PostCSS configuration..."
-cat > postcss.config.js << 'EOF'
-export default {
-  plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
+# Create components.json
+cat > components.json << 'EOF'
+{
+  "$schema": "https://shadcn-svelte.com/schema.json",
+  "tailwind": {
+    "css": "src/routes/layout.css",
+    "baseColor": "zinc"
   },
+  "aliases": {
+    "lib": "$lib",
+    "utils": "$lib/utils",
+    "components": "$lib/components",
+    "ui": "$lib/components/ui",
+    "hooks": "$lib/hooks"
+  },
+  "typescript": true,
+  "registry": "https://shadcn-svelte.com/registry"
 }
 EOF
+echo "  ✅ components.json"
 
-echo "📝 Configuring Tailwind with shadcn theme..."
-cat > tailwind.config.js << 'EOF'
-/** @type {import('tailwindcss').Config} */
-module.exports = {
-  darkMode: ["class"],
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
-  theme: {
-    extend: {
-      colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
-        primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
-        },
-        secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))",
-        },
-        destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))",
-        },
-        muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))",
-        },
-        accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))",
-        },
-        popover: {
-          DEFAULT: "hsl(var(--popover))",
-          foreground: "hsl(var(--popover-foreground))",
-        },
-        card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))",
-        },
-      },
-      borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
-      },
-      keyframes: {
-        "accordion-down": {
-          from: { height: "0" },
-          to: { height: "var(--radix-accordion-content-height)" },
-        },
-        "accordion-up": {
-          from: { height: "var(--radix-accordion-content-height)" },
-          to: { height: "0" },
-        },
-      },
-      animation: {
-        "accordion-down": "accordion-down 0.2s ease-out",
-        "accordion-up": "accordion-up 0.2s ease-out",
-      },
-    },
-  },
-  plugins: [require("tailwindcss-animate")],
+# Create cn utility
+mkdir -p src/lib
+cat > src/lib/utils.ts << 'EOF'
+import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
 }
 EOF
+echo "  ✅ src/lib/utils.ts"
 
-# Add Tailwind directives and CSS variables to index.css
-echo "🎨 Adding Tailwind directives and CSS variables..."
-cat > src/index.css << 'EOF'
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+# Write Tailwind v4 CSS with OKLCH theme variables
+cat > src/routes/layout.css << 'EOF'
+@import "tailwindcss";
+@import "tw-animate-css";
 
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --radius: 0.5rem;
-  }
+@custom-variant dark (&:is(.dark *));
 
-  .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-  }
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.269 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.371 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.439 0 0);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }
 
 @layer base {
   * {
-    @apply border-border;
+    @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
   }
 }
 EOF
+echo "  ✅ src/routes/layout.css (Tailwind v4 + OKLCH theme)"
 
-# Add path aliases to tsconfig.json
-echo "🔧 Adding path aliases to tsconfig.json..."
-node -e "
-const fs = require('fs');
-const config = JSON.parse(fs.readFileSync('tsconfig.json', 'utf8'));
-config.compilerOptions = config.compilerOptions || {};
-config.compilerOptions.baseUrl = '.';
-config.compilerOptions.paths = { '@/*': ['./src/*'] };
-fs.writeFileSync('tsconfig.json', JSON.stringify(config, null, 2));
-"
-
-# Add path aliases to tsconfig.app.json
-echo "🔧 Adding path aliases to tsconfig.app.json..."
-node -e "
-const fs = require('fs');
-const path = 'tsconfig.app.json';
-const content = fs.readFileSync(path, 'utf8');
-// Remove comments manually
-const lines = content.split('\n').filter(line => !line.trim().startsWith('//'));
-const jsonContent = lines.join('\n');
-const config = JSON.parse(jsonContent.replace(/\/\*[\s\S]*?\*\//g, '').replace(/,(\s*[}\]])/g, '\$1'));
-config.compilerOptions = config.compilerOptions || {};
-config.compilerOptions.baseUrl = '.';
-config.compilerOptions.paths = { '@/*': ['./src/*'] };
-fs.writeFileSync(path, JSON.stringify(config, null, 2));
-"
-
-# Update vite.config.ts
-echo "⚙️  Updating Vite configuration..."
-cat > vite.config.ts << 'EOF'
-import path from "path";
-import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
-
-export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
-  },
-});
-EOF
-
-# Install all shadcn/ui dependencies
-echo "📦 Installing shadcn/ui dependencies..."
-pnpm install @radix-ui/react-accordion @radix-ui/react-aspect-ratio @radix-ui/react-avatar @radix-ui/react-checkbox @radix-ui/react-collapsible @radix-ui/react-context-menu @radix-ui/react-dialog @radix-ui/react-dropdown-menu @radix-ui/react-hover-card @radix-ui/react-label @radix-ui/react-menubar @radix-ui/react-navigation-menu @radix-ui/react-popover @radix-ui/react-progress @radix-ui/react-radio-group @radix-ui/react-scroll-area @radix-ui/react-select @radix-ui/react-separator @radix-ui/react-slider @radix-ui/react-slot @radix-ui/react-switch @radix-ui/react-tabs @radix-ui/react-toast @radix-ui/react-toggle @radix-ui/react-toggle-group @radix-ui/react-tooltip
-pnpm install sonner cmdk vaul embla-carousel-react react-day-picker react-resizable-panels date-fns react-hook-form @hookform/resolvers zod
-
-# Extract shadcn components from tarball
-echo "📦 Extracting shadcn/ui components..."
-tar -xzf "$COMPONENTS_TARBALL" -C src/
-
-# Create components.json for reference
-echo "📝 Creating components.json config..."
-cat > components.json << 'EOF'
-{
-  "$schema": "https://ui.shadcn.com/schema.json",
-  "style": "default",
-  "rsc": false,
-  "tsx": true,
-  "tailwind": {
-    "config": "tailwind.config.js",
-    "css": "src/index.css",
-    "baseColor": "slate",
-    "cssVariables": true,
-    "prefix": ""
-  },
-  "aliases": {
-    "components": "@/components",
-    "utils": "@/lib/utils",
-    "ui": "@/components/ui",
-    "lib": "@/lib",
-    "hooks": "@/hooks"
-  }
-}
-EOF
-
-echo "✅ Setup complete! You can now use Tailwind CSS and shadcn/ui in your project."
+# ─── 4. Install ALL shadcn-svelte components ─────────────────────────────────
 echo ""
-echo "📦 Included components (40+ total):"
-echo "  - accordion, alert, aspect-ratio, avatar, badge, breadcrumb"
-echo "  - button, calendar, card, carousel, checkbox, collapsible"
-echo "  - command, context-menu, dialog, drawer, dropdown-menu"
-echo "  - form, hover-card, input, label, menubar, navigation-menu"
-echo "  - popover, progress, radio-group, resizable, scroll-area"
-echo "  - select, separator, sheet, skeleton, slider, sonner"
-echo "  - switch, table, tabs, textarea, toast, toggle, toggle-group, tooltip"
+echo "📦 Installing ALL shadcn-svelte components (55+)..."
+pnpm dlx shadcn-svelte@latest add --all -y --overwrite
+
+# ─── 5. Install radix-svelte ─────────────────────────────────────────────────
 echo ""
-echo "To start developing:"
+echo "📦 Installing radix-svelte..."
+pnpm add radix-svelte
+
+# ─── 6. Install dark mode support ────────────────────────────────────────────
+echo ""
+echo "🌗 Installing mode-watcher..."
+pnpm add mode-watcher
+
+# ─── 7. Set up root layout with ModeWatcher ──────────────────────────────────
+echo ""
+echo "📝 Creating root layout + starter page..."
+mkdir -p src/routes
+
+cat > src/routes/+layout.svelte << 'SVELTE'
+<script lang="ts">
+  import "./layout.css";
+  import { ModeWatcher } from "mode-watcher";
+  let { children } = $props();
+</script>
+
+<ModeWatcher />
+{@render children?.()}
+SVELTE
+
+cat > src/routes/+page.svelte << 'SVELTE'
+<script lang="ts">
+  import { Button } from "$lib/components/ui/button/index.js";
+  import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+  } from "$lib/components/ui/card/index.js";
+  import SunIcon from "@lucide/svelte/icons/sun";
+  import MoonIcon from "@lucide/svelte/icons/moon";
+  import { toggleMode } from "mode-watcher";
+</script>
+
+<div class="flex min-h-screen items-center justify-center bg-background p-8">
+  <Card class="w-full max-w-md">
+    <CardHeader>
+      <div class="flex items-center justify-between">
+        <CardTitle>Welcome</CardTitle>
+        <Button onclick={toggleMode} variant="outline" size="icon">
+          <SunIcon
+            class="h-[1.2rem] w-[1.2rem] scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90"
+          />
+          <MoonIcon
+            class="absolute h-[1.2rem] w-[1.2rem] scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0"
+          />
+          <span class="sr-only">Toggle theme</span>
+        </Button>
+      </div>
+      <CardDescription
+        >SvelteKit + shadcn-svelte + radix-svelte</CardDescription
+      >
+    </CardHeader>
+    <CardContent>
+      <p class="text-sm text-muted-foreground">
+        Edit <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs"
+          >src/routes/+page.svelte</code
+        > to get started.
+      </p>
+    </CardContent>
+  </Card>
+</div>
+SVELTE
+
+echo ""
+echo "═══════════════════════════════════════════════════════════════════"
+echo "✅ Project ready: $PROJECT_NAME"
+echo "═══════════════════════════════════════════════════════════════════"
+echo ""
+echo "Stack:"
+echo "  • SvelteKit + TypeScript + Vite"
+echo "  • Tailwind CSS v4 (OKLCH colors, @theme inline)"
+echo "  • shadcn-svelte — ALL 55+ components installed"
+echo "  • radix-svelte primitives"
+echo "  • Lucide icons"
+echo "  • mode-watcher (dark mode)"
+echo "  • Cloudflare Pages (adapter + wrangler.jsonc from sv create)"
+echo ""
+echo "Commands:"
 echo "  cd $PROJECT_NAME"
-echo "  pnpm dev"
+echo "  pnpm dev                          # dev server on :5173"
+echo "  pnpm build                        # production build"
+echo "  pnpm exec wrangler pages dev      # local Cloudflare Pages preview"
+echo "  pnpm exec wrangler pages deploy   # deploy to Cloudflare Pages"
 echo ""
-echo "📚 Import components like:"
-echo "  import { Button } from '@/components/ui/button'"
-echo "  import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'"
-echo "  import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog'"
+echo "Imports:"
+echo '  import { Button } from "$lib/components/ui/button/index.js";'
+echo '  import { Dialog, DialogContent } from "$lib/components/ui/dialog/index.js";'
+echo '  import { Accordion } from "radix-svelte";'
+echo ""
