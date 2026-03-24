@@ -241,9 +241,9 @@ function stripNarrationMetaCommentary(text: string): string {
     /^(?:(?:spoken\s+)?narration\s+script\b(?:\s*:\s*|\s+))/i,
     /^(creating|drafting|writing|generating|preparing)\b[^.!?\n]*[.!?]\s*/i,
     /^(here is|here's)\b[^:\n]*(?::\s*|[.!?]\s*)/i,
+    /^[^.!?\n]{0,160}\b(?:here is|here's)\b[^:\n]*(?::\s*|[.!?]\s*)/i,
     /^(?:a\s+)?concise\s+tts(?:-ready)?\s+script\b[^:\n]*(?::\s*|[.!?]\s*)/i,
     /^(i am|i'm|i will|i'll)\b[^.!?\n]*[.!?]\s*/i,
-    /^(this is)\b[^.!?\n]*summary[^.!?\n]*[.!?]\s*/i,
     /^character count\s*:\s*[^.!?\n]*(?:[.!?]\s*|$)/i,
   ];
 
@@ -1187,7 +1187,10 @@ export async function generateHumanReadableSummary(
   const llmResult = await deps.summarizeMemo?.(memoPath, markdown, DEFAULT_NARRATION_MAX_CHARS);
   const llmText = typeof llmResult === "string" ? llmResult : llmResult?.text;
   const llmError = typeof llmResult === "string" ? undefined : llmResult?.error;
-  const text = llmText?.trim() || summarizeMemoForNarration(markdown);
+  const cleanedLlmText = llmText?.trim()
+    ? normalizeNarrationText(stripMarkdownSyntax(stripNarrationMetaCommentary(llmText)))
+    : "";
+  const text = cleanedLlmText || summarizeMemoForNarration(markdown);
   if (!text) return { ok: false, error: "Could not read memo for human-readable summary" };
 
   const { summaryPath } = getNarrationArtifactPaths(memoPath, outputDir);
@@ -1197,7 +1200,7 @@ export async function generateHumanReadableSummary(
       ok: true,
       summaryPath,
       summaryText: text,
-      warning: llmText?.trim()
+      warning: cleanedLlmText
         ? undefined
         : `LLM summary failed (${llmError ?? "no output"}). Fell back to deterministic narration summary.`,
     };

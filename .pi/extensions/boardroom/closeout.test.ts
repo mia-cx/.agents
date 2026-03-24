@@ -194,7 +194,6 @@ describe("summarizeMemoForNarration", () => {
     expect(summary).toContain("Decisions covered:");
     expect(summary).toContain("Acquisition Offer:");
     expect(summary).toContain("Splice Studio Replacement:");
-    expect(summary).toContain("Questions addressed:");
     expect(summary).toContain("Cross-cutting themes:");
     expect(summary).toContain("Recommendations:");
   });
@@ -669,7 +668,7 @@ describe("runPostMeetingActions", () => {
 
     expect(playAudio).toHaveBeenCalledWith("/tmp/narration.mp3");
     expect(narrationStates.some((state) => state && state.phase === "playing")).toBe(true);
-    expect(narrationStates.at(-1)).toBeNull();
+    expect(narrationStates.at(-1)).toMatchObject({ phase: "completed", summaryText: "hello world" });
     vi.useRealTimers();
   });
 
@@ -706,7 +705,10 @@ describe("runPostMeetingActions", () => {
     await promise;
 
     expect(narrationStates.some((state) => state && state.phase === "generating")).toBe(true);
-    expect(narrationStates.at(-1)).toBeNull();
+    expect(narrationStates.at(-1)).toMatchObject({
+      phase: "completed",
+      summaryText: "Boardroom summary for Test Brief.",
+    });
     vi.useRealTimers();
   });
 

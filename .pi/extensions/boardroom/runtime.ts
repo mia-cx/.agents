@@ -4,7 +4,28 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentConfig, AgentRunResult, AgentRuntimeStatus, AgentRuntimeUpdate } from "./types.js";
 
-function getPiInvocation(args: string[]): { command: string; args: string[] } {
+function getBoardroomExtensionEntry(cwd: string): string | undefined {
+  const configured = process.env.BOARDROOM_EXTENSION_ENTRY?.trim();
+  if (configured && fs.existsSync(configured)) return configured;
+
+  const localCandidate = path.join(cwd, ".pi", "extensions", "boardroom", "index.ts");
+  if (fs.existsSync(localCandidate)) return localCandidate;
+
+  const home = process.env.HOME?.trim();
+  if (home) {
+    const globalCandidate = path.join(home, ".pi", "agent", "extensions", "boardroom", "index.ts");
+    if (fs.existsSync(globalCandidate)) return globalCandidate;
+  }
+
+  return undefined;
+}
+
+function getPiInvocation(args: string[], cwd: string): { command: string; args: string[] } {
+  const extensionEntry = getBoardroomExtensionEntry(cwd);
+  if (extensionEntry) {
+    return { command: "pi", args: ["-e", extensionEntry, ...args] };
+  }
+
   const currentScript = process.argv[1];
   if (currentScript && fs.existsSync(currentScript)) {
     return { command: process.execPath, args: [currentScript, ...args] };
@@ -14,6 +35,10 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
     return { command: process.execPath, args };
   }
   return { command: "pi", args };
+}
+
+function isProcessAlive(proc: ReturnType<typeof spawn>): boolean {
+  return proc.exitCode === null && proc.signalCode === null;
 }
 
 async function writeSystemPromptFile(
@@ -224,9 +249,10 @@ export class BoardMemberSession {
         const stopProc = (proc: ReturnType<typeof spawn>, reason: "signal" | "stuck-tool-loop") => {
           if (reason === "signal") wasAborted = true;
           else forcedStopReason = reason;
+          if (!isProcessAlive(proc)) return;
           proc.kill("SIGTERM");
           setTimeout(() => {
-            if (!proc.killed) proc.kill("SIGKILL");
+            if (isProcessAlive(proc)) proc.kill("SIGKILL");
           }, 5000);
         };
         const shouldTriggerUnstick = () =>
@@ -237,7 +263,8 @@ export class BoardMemberSession {
             || repeatedToolExecutions >= getUnstickSameToolThreshold()
           );
 
-        const invocation = getPiInvocation(args);
+        const extensionEntry = getBoardroomExtensionEntry(cwd);
+        const invocation = getPiInvocation(args, cwd);
         const proc = spawn(invocation.command, invocation.args, {
           cwd,
           env: {
@@ -246,6 +273,7 @@ export class BoardMemberSession {
             BOARDROOM_EXECUTIVE_SLUG: this.slug,
             BOARDROOM_ALLOWED_WRITE_PATH: path.join(cwd, "boardroom", "scratchpads", `${this.slug}.md`),
             BOARDROOM_BRIEFS_DIR: path.join(cwd, "boardroom", "briefs"),
+            ...(extensionEntry ? { BOARDROOM_EXTENSION_ENTRY: extensionEntry } : {}),
           },
           shell: false,
           stdio: ["ignore", "pipe", "pipe"],
@@ -256,9 +284,9 @@ export class BoardMemberSession {
           if (completionRequested || wasAborted || forcedStopReason) return;
           completionRequested = true;
           completionTimer = setTimeout(() => {
-            if (!proc.killed) proc.kill("SIGTERM");
+            if (isProcessAlive(proc)) proc.kill("SIGTERM");
             completionForcedKillTimer = setTimeout(() => {
-              if (!proc.killed) proc.kill("SIGKILL");
+              if (isProcessAlive(proc)) proc.kill("SIGKILL");
             }, 2000);
           }, 100);
         };

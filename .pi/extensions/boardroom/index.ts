@@ -21,6 +21,7 @@ import {
   buildThemedCloseoutLines,
   generateHumanReadableSummary,
   NarrationPlaybackController,
+  playAudio,
   runPostMeetingActions,
 } from "./closeout.js";
 import type {
@@ -949,6 +950,8 @@ function createRosterEditorComponent(
         refresh();
         return;
       }
+      refresh();
+      return;
     }
 
     if (keybindings.matches(keyData, "tui.select.up") || keyData === "k") {
@@ -981,6 +984,7 @@ function createRosterEditorComponent(
       return;
     }
     if (keybindings.matches(keyData, "tui.select.cancel")) {
+      reset();
       onDone(undefined);
       return;
     }
@@ -1141,6 +1145,7 @@ export default function (pi: ExtensionAPI) {
   let activeMeetingTimer: ReturnType<typeof setInterval> | null = null;
   let activeNarration: ActiveNarrationState | null = null;
   let activeNarrationTimer: ReturnType<typeof setInterval> | null = null;
+  let lastCloseoutResult: MeetingResult | null = null;
   const NARRATION_CONTROLS_LABEL = "Controls: Alt+Space pause/resume · Left/Right seek · Home restart · End stop · Esc dismiss · /board-narration ...";
 
   const getWidgetLineBudget = () => {
@@ -1265,7 +1270,13 @@ export default function (pi: ExtensionAPI) {
     const ui = ctx?.ui ?? narration?.ui;
     if (ui) {
       ui.setStatus("boardroom", undefined);
-      ui.setWidget("boardroom", undefined);
+      if (lastCloseoutResult) {
+        setCloseoutWidget({ hasUI: true, ui } as any, lastCloseoutResult);
+      } else if (activeMeeting) {
+        renderMeetingUi({ hasUI: true, ui } as any, activeMeeting);
+      } else {
+        ui.setWidget("boardroom", undefined);
+      }
     }
   };
 
@@ -1307,24 +1318,67 @@ export default function (pi: ExtensionAPI) {
       if (activeNarration.controller?.completed) clearNarrationTimer();
     });
     if (!controller.isControllable) {
+      const durationSeconds = request.alignment?.characterEndTimesSeconds.at(-1) ?? controller.durationSeconds;
       activeNarration = {
         request,
         state: {
-          phase: "completed",
+          phase: request.autoplay === false ? "completed" : "playing",
           summaryText: request.summaryText,
           summaryPath: request.summaryPath,
           indicatorFrame: 0,
           elapsedSeconds: 0,
-          durationSeconds: controller.durationSeconds,
-          controlsLabel: "Install mpv for pause/rewind/forward controls. Dismiss with Escape or a new prompt.",
+          durationSeconds,
+          controlsLabel: request.autoplay === false
+            ? "Install mpv for pause/rewind/forward controls. Restart plays with system audio. Dismiss with Escape or a new prompt."
+            : "Playback controls require mpv. Dismiss with Escape or a new prompt.",
         },
         controller: null,
         ui: ctx.ui,
       };
       renderNarrationUi();
-      return request.autoplay === false
-        ? { ok: true }
-        : { ok: false, error: "Controllable playback requires mpv." };
+      if (request.autoplay === false) {
+        return { ok: true };
+      }
+
+      let indicatorFrame = 0;
+      const startedAt = Date.now();
+      const playbackTimer = setInterval(() => {
+        if (!activeNarration || activeNarration.request.audioPath !== request.audioPath) {
+          clearInterval(playbackTimer);
+          return;
+        }
+        activeNarration.state = {
+          ...activeNarration.state,
+          phase: "playing",
+          indicatorFrame,
+          elapsedSeconds: (Date.now() - startedAt) / 1000,
+          durationSeconds,
+          activeRange: request.alignment
+            ? findNarrationActiveRange(
+                request.summaryText,
+                request.alignment,
+                (Date.now() - startedAt) / 1000,
+              )
+            : undefined,
+        };
+        indicatorFrame += 1;
+        renderNarrationUi();
+      }, 200);
+
+      const playbackResult = await playAudio(request.audioPath);
+      clearInterval(playbackTimer);
+      if (activeNarration && activeNarration.request.audioPath === request.audioPath) {
+        activeNarration.state = {
+          ...activeNarration.state,
+          phase: "completed",
+          indicatorFrame: 0,
+          activeRange: undefined,
+          elapsedSeconds: durationSeconds ?? ((Date.now() - startedAt) / 1000),
+          durationSeconds,
+        };
+        renderNarrationUi();
+      }
+      return playbackResult;
     }
 
     activeNarration = {
@@ -1376,7 +1430,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     if (action === "restart") {
-      const result = await startNarrationPlayback(ctx, activeNarration.request);
+      const result = await startNarrationPlayback(ctx, { ...activeNarration.request, autoplay: true });
       if (!result.ok && result.error) ctx.ui.notify(result.error, "warning");
       return;
     }
@@ -1554,22 +1608,31 @@ export default function (pi: ExtensionAPI) {
     available: AgentConfig[],
     maxRosterSize: number | undefined,
     rationale: string,
+    signal?: AbortSignal,
   ): Promise<string[] | undefined> => {
     let selectedRosterSlugs = proposed.map((agent) => agent.slug);
     const orderedAgents = [ceo, ...orderRosterSelection(available, selectedRosterSlugs)];
+    const FORCE_CLOSE_SENTINEL = "__force_close__";
     const result = await ctx.ui.custom(
       (tui, theme, keybindings, done) => (
-        createRosterEditorComponent(
-          tui,
-          theme,
-          keybindings,
-          orderedAgents,
-          [ceo.slug, ...selectedRosterSlugs],
-          [ceo.slug],
-          maxRosterSize,
-          rationale,
-          done,
-        )
+        (() => {
+          const onAbort = () => done(FORCE_CLOSE_SENTINEL as any);
+          if (signal) {
+            if (signal.aborted) onAbort();
+            else signal.addEventListener("abort", onAbort, { once: true });
+          }
+          return createRosterEditorComponent(
+            tui,
+            theme,
+            keybindings,
+            orderedAgents,
+            [ceo.slug, ...selectedRosterSlugs],
+            [ceo.slug],
+            maxRosterSize,
+            rationale,
+            done,
+          );
+        })()
       ),
       {
         overlay: true,
@@ -1581,6 +1644,9 @@ export default function (pi: ExtensionAPI) {
         },
       },
     ) as RosterEditorResult;
+    if ((result as string | undefined) === FORCE_CLOSE_SENTINEL) {
+      throw new Error("Subagent was aborted");
+    }
     if (result === undefined) return undefined;
     selectedRosterSlugs = result.filter((slug) => slug !== ceo.slug);
     return selectedRosterSlugs;
@@ -1590,11 +1656,18 @@ export default function (pi: ExtensionAPI) {
     ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
     proposed: AgentConfig[],
     rationale: string,
+    signal?: AbortSignal,
   ): Promise<"Yes" | "Edit roster" | "No" | undefined> => {
+    const FORCE_CLOSE_SENTINEL = "__force_close__";
     return ctx.ui.custom(
-      (tui, theme, keybindings, done) => (
-        createRosterApprovalComponent(tui, theme, keybindings, proposed, rationale, done)
-      ),
+      (tui, theme, keybindings, done) => {
+        const onAbort = () => done(FORCE_CLOSE_SENTINEL as any);
+        if (signal) {
+          if (signal.aborted) onAbort();
+          else signal.addEventListener("abort", onAbort, { once: true });
+        }
+        return createRosterApprovalComponent(tui, theme, keybindings, proposed, rationale, done);
+      },
       {
         overlay: true,
         overlayOptions: {
@@ -1604,7 +1677,12 @@ export default function (pi: ExtensionAPI) {
           margin: 1,
         },
       },
-    );
+    ).then((result) => {
+      if (result === FORCE_CLOSE_SENTINEL) {
+        throw new Error("Subagent was aborted");
+      }
+      return result;
+    });
   };
 
   pi.registerCommand("board-meeting", {
@@ -1715,6 +1793,7 @@ export default function (pi: ExtensionAPI) {
       if (!ok) return;
 
       const abortController = new AbortController();
+      lastCloseoutResult = null;
       activeMeeting = {
         meetingId: "",
         brief: brief.title,
@@ -1768,7 +1847,7 @@ export default function (pi: ExtensionAPI) {
               pauseMeetingUi(ctx);
               try {
                 while (true) {
-                  const choice = await confirmRosterDecision(ctx, proposed, rationale);
+                  const choice = await confirmRosterDecision(ctx, proposed, rationale, abortController.signal);
                   if (choice === undefined || choice === "No") {
                     return { action: "reject" };
                   }
@@ -1783,6 +1862,7 @@ export default function (pi: ExtensionAPI) {
                     available,
                     constraintValues.max_roster_size,
                     rationale,
+                    abortController.signal,
                   );
                   if (edited === undefined) continue;
                   return { action: "edit", roster: edited };
@@ -1813,6 +1893,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         if (ctx.hasUI) {
+          lastCloseoutResult = result;
           setCloseoutWidget(ctx, result);
           ctx.ui.setStatus("boardroom", undefined);
         }
@@ -1950,12 +2031,20 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const cwd = getWorkingDirectory(ctx);
+      if (activeMeeting) {
+        throw new Error("A board meeting is already in progress. Use /board-close before starting another one.");
+      }
+      try {
       const config = loadConfig(cwd);
       const agents = discoverAgents(cwd);
       let agentSnapshots: AgentRuntimeUpdate[] = [];
       let lastSnapshot: MeetingProgressSnapshot | null = null;
       const startedAtMs = Date.now();
       let toolUiTimer: ReturnType<typeof setInterval> | null = null;
+      const abortController = new AbortController();
+      const forwardAbort = () => abortController.abort(signal?.reason ?? "aborted");
+
+      lastCloseoutResult = null;
 
       const renderToolUi = () => {
         if (!ctx.hasUI || !lastSnapshot) return;
@@ -1982,8 +2071,28 @@ export default function (pi: ExtensionAPI) {
       });
       const mode = params.mode ?? brief.mode ?? config.default_mode;
 
+      activeMeeting = {
+        meetingId: "",
+        brief: brief.title,
+        mode,
+        constraints: constraintsName,
+        phase: "starting",
+        startedAt: startedAtMs,
+        lastStatus: "Starting...",
+        abortController,
+        agentSnapshots: [],
+        lastSnapshot: null,
+        pausedAt: null,
+        pausedTotalMs: 0,
+      };
+      if (signal) {
+        if (signal.aborted) forwardAbort();
+        else signal.addEventListener("abort", forwardAbort, { once: true });
+      }
+
       onUpdate?.({ content: [{ type: "text", text: `Starting board meeting: ${brief.title} (${mode}, ${constraintsName})...` }] });
       if (ctx.hasUI) {
+        ctx.ui.setStatus("boardroom", "Board meeting in progress...");
         toolUiTimer = setInterval(renderToolUi, 1000);
       }
 
@@ -1992,10 +2101,20 @@ export default function (pi: ExtensionAPI) {
         result = await runMeeting(cwd, brief, agents, mode, constraintsName, constraintValues, config, {
           onStatus: (msg) => {
             onUpdate?.({ content: [{ type: "text", text: msg }] });
+            if (activeMeeting) {
+              activeMeeting.lastStatus = msg;
+              const phaseMatch = msg.match(/Phase (\d+)/i) || msg.match(/Round (\d+)/i);
+              if (phaseMatch) activeMeeting.phase = `Phase ${phaseMatch[1]}`;
+            }
             if (!lastSnapshot) ctx.ui.setStatus("boardroom", msg);
             else renderToolUi();
           },
           onAgentUpdate: (update) => {
+            if (activeMeeting) {
+              const activeIdx = activeMeeting.agentSnapshots.findIndex((snapshot) => snapshot.slug === update.slug);
+              if (activeIdx >= 0) activeMeeting.agentSnapshots[activeIdx] = update;
+              else activeMeeting.agentSnapshots.push(update);
+            }
             const idx = agentSnapshots.findIndex((snapshot) => snapshot.slug === update.slug);
             if (idx >= 0) agentSnapshots[idx] = update;
             else agentSnapshots.push(update);
@@ -2009,15 +2128,21 @@ export default function (pi: ExtensionAPI) {
           onSnapshot: (snapshot) => {
             lastSnapshot = snapshot;
             agentSnapshots = [...snapshot.agents];
+            if (activeMeeting) {
+              activeMeeting.lastSnapshot = snapshot;
+              activeMeeting.phase = snapshot.phaseLabel;
+            }
             renderToolUi();
           },
           onConfirmRoster: async () => ({ action: "approve" }),
-          signal,
+          signal: abortController.signal,
         });
       } finally {
         if (toolUiTimer) clearInterval(toolUiTimer);
+        if (signal) signal.removeEventListener("abort", forwardAbort);
       }
 
+      activeMeeting = null;
       ctx.ui.setStatus("boardroom", "Generating spoken narration summary...");
       const humanSummary = await generateHumanReadableSummary(result.memoPath, path.dirname(result.memoPath));
       if (humanSummary.ok) {
@@ -2030,7 +2155,9 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify(`Human-readable summary failed: ${humanSummary.error}`, "warning");
       }
       if (ctx.hasUI) {
+        lastCloseoutResult = result;
         setCloseoutWidget(ctx, result);
+        ctx.ui.setStatus("boardroom", undefined);
       }
 
       await runPostMeetingActions(result, {
@@ -2043,6 +2170,11 @@ export default function (pi: ExtensionAPI) {
         },
         startNarrationPlayback: (request) => startNarrationPlayback(ctx as any, request),
       });
+
+      if (!activeNarration && ctx.hasUI) {
+        setCloseoutWidget(ctx, result);
+        ctx.ui.setStatus("boardroom", undefined);
+      }
 
       const summary = buildCloseoutSummary(result);
 
@@ -2065,6 +2197,14 @@ export default function (pi: ExtensionAPI) {
       };
 
       return response;
+      } catch (err) {
+      activeMeeting = null;
+      if (!activeNarration && ctx.hasUI) {
+        ctx.ui.setStatus("boardroom", undefined);
+        ctx.ui.setWidget("boardroom", undefined);
+      }
+      throw err;
+      }
     },
 
     renderCall(args, theme, _context) {

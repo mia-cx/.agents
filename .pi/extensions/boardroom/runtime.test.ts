@@ -377,12 +377,25 @@ describe("SessionPool", () => {
     expect(snap.map(s => s.slug).sort()).toEqual(["ceo", "cfo", "cto"]);
   });
 
-  it("destroyAll marks sessions aborted and clears the pool", () => {
+  it("destroyAll clears the pool without mutating session status by default", () => {
     const pool = new SessionPool();
     const ceo = pool.getOrCreate(makeAgent("ceo", "CEO"));
     const cfo = pool.getOrCreate(makeAgent("cfo", "CFO"));
 
     pool.destroyAll();
+
+    expect(ceo.status).toBe("idle");
+    expect(cfo.status).toBe("idle");
+    expect(pool.snapshot()).toHaveLength(0);
+    expect(pool.get("ceo")).toBeUndefined();
+  });
+
+  it("destroyAll can mark sessions aborted before clearing the pool", () => {
+    const pool = new SessionPool();
+    const ceo = pool.getOrCreate(makeAgent("ceo", "CEO"));
+    const cfo = pool.getOrCreate(makeAgent("cfo", "CFO"));
+
+    pool.destroyAll(true);
 
     expect(ceo.status).toBe("aborted");
     expect(cfo.status).toBe("aborted");

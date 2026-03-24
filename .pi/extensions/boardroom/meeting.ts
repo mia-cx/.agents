@@ -92,6 +92,10 @@ function stringifyAbortReason(value: unknown): string | undefined {
   }
 }
 
+function hasUsablePartialContent(content: string | undefined): boolean {
+  return typeof content === "string" && content.trim().length > 0;
+}
+
 function describeAbortReason(
   disposition: "force-closed" | "aborted",
   err: unknown,
@@ -640,7 +644,8 @@ export async function runFreeformMeeting(
         const agent = rosterAgents[i];
         tracker.addCost(result.cost);
 
-        if (result.exitCode !== 0 || !result.content) {
+        const preservePartial = isForceCloseRequested(callbacks.signal) && hasUsablePartialContent(result.content);
+        if ((result.exitCode !== 0 || !result.content) && !preservePartial) {
           failedCount++;
           callbacks.onStatus(`${agent.name} failed: ${result.error ?? "no output"}. Continuing without.`);
           const failContent = `[${agent.name} failed to respond: ${result.error ?? "process error"}]`;
@@ -649,6 +654,9 @@ export async function runFreeformMeeting(
             failContent, result.tokenCount, result.cost);
           lastAssessmentEntries.push(entry);
           continue;
+        }
+        if (preservePartial) {
+          callbacks.onStatus(`${agent.name} was interrupted by force-close. Using partial output.`);
         }
 
         result.content = processScratchpadOutput(cwd, agent.slug, result.content);
@@ -1004,12 +1012,16 @@ export async function runStructuredMeeting(
         const agent = rosterAgents[i];
         tracker.addCost(result.cost);
 
-        if (result.exitCode !== 0 || !result.content) {
+        const preservePartial = isForceCloseRequested(callbacks.signal) && hasUsablePartialContent(result.content);
+        if ((result.exitCode !== 0 || !result.content) && !preservePartial) {
           callbacks.onStatus(`${agent.name} failed. Continuing without.`);
           addEntry(log, nextEntryId(state), agent.slug, ["ceo"],
             framingEntry.id, 2, roundNumber, "assessment",
             `[${agent.name} failed: ${result.error ?? "no output"}]`, result.tokenCount, result.cost);
           continue;
+        }
+        if (preservePartial) {
+          callbacks.onStatus(`${agent.name} was interrupted by force-close. Using partial output.`);
         }
 
         result.content = processScratchpadOutput(cwd, agent.slug, result.content);
@@ -1058,12 +1070,16 @@ export async function runStructuredMeeting(
         const stressResults = await pool.runParallel(cwd, stressTasks, callbacks.signal);
         for (let i = 0; i < stressResults.length; i++) {
           tracker.addCost(stressResults[i].cost);
-          if (stressResults[i].exitCode !== 0 || !stressResults[i].content) {
+          const preservePartial = isForceCloseRequested(callbacks.signal) && hasUsablePartialContent(stressResults[i].content);
+          if ((stressResults[i].exitCode !== 0 || !stressResults[i].content) && !preservePartial) {
             callbacks.onStatus(`${stressAgents[i].name} failed in stress test. Continuing.`);
             addEntry(log, nextEntryId(state), stressAgents[i].slug, ["ceo"],
               null, 3, roundNumber, "stress-test",
               `[${stressAgents[i].name} failed]`, stressResults[i].tokenCount, stressResults[i].cost);
             continue;
+          }
+          if (preservePartial) {
+            callbacks.onStatus(`${stressAgents[i].name} was interrupted by force-close. Using partial output.`);
           }
           stressResults[i].content = processScratchpadOutput(cwd, stressAgents[i].slug, stressResults[i].content);
           const challenged = extractAddressees(stressResults[i].content, rosterSlugs, allAgents);
