@@ -1,6 +1,7 @@
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
-import { DynamicBorder, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import * as fs from "node:fs";
+import { spawnSync } from "node:child_process";
+import { DynamicBorder, isToolCallEventType, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Container, Spacer, Text } from "@mariozechner/pi-tui";
@@ -15,12 +16,19 @@ import { listPastMeetings } from "./artifacts.js";
 import { formatDashboardStatus, buildDashboardWidgetLines, buildPlainDashboardLines } from "./ui.js";
 import {
   buildCloseoutSummary,
+  findNarrationActiveRange,
   buildNarrationWidgetLines,
   buildThemedCloseoutLines,
   generateHumanReadableSummary,
+  NarrationPlaybackController,
   runPostMeetingActions,
 } from "./closeout.js";
-import type { NarrationDisplayState } from "./closeout.js";
+import type {
+  NarrationAlignment,
+  NarrationDisplayState,
+  NarrationPlaybackRequest,
+  NarrationPlaybackResult,
+} from "./closeout.js";
 
 interface ActiveMeetingState {
   meetingId: string;
@@ -37,11 +45,20 @@ interface ActiveMeetingState {
   pausedTotalMs: number;
 }
 
+interface ActiveNarrationState {
+  request: NarrationPlaybackRequest;
+  state: NarrationDisplayState;
+  controller: NarrationPlaybackController | null;
+  ui: ExtensionAPI["commands"][number] extends never ? never : any;
+}
+
 type RosterEditorResult = string[] | undefined;
 
-type ReasoningEffort = "default" | "low" | "medium" | "high";
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+type ReasoningEffort = "default" | ThinkingLevel;
 type ModelPickerMode = "single" | "all";
 type ModelPickerStage = "model" | "effort";
+type EffortOption = { value: ReasoningEffort; label: string };
 
 interface PiModelCatalogEntry {
   provider: string;
@@ -53,6 +70,9 @@ interface PiModelCatalogEntry {
 }
 
 let piModelCatalogCache: PiModelCatalogEntry[] | null = null;
+let piScopedModelPatternsCache: string[] | undefined;
+const thinkingLevelsCache = new Map<string, Promise<ThinkingLevel[]>>();
+const THINKING_LEVEL_ORDER: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
 function prioritizeOption<T extends string>(options: T[], preferred: T): T[] {
   const unique = Array.from(new Set(options));
@@ -92,10 +112,45 @@ function resolveModelLabel(model: string | undefined): string {
   return model;
 }
 
+function getBoardroomExecutiveWritePolicy(): {
+  slug: string | undefined;
+  allowedWritePath: string | undefined;
+  briefsDir: string | undefined;
+} | null {
+  if (process.env.BOARDROOM_EXECUTIVE_SESSION !== "1") return null;
+  return {
+    slug: process.env.BOARDROOM_EXECUTIVE_SLUG?.trim() || undefined,
+    allowedWritePath: process.env.BOARDROOM_ALLOWED_WRITE_PATH?.trim() || undefined,
+    briefsDir: process.env.BOARDROOM_BRIEFS_DIR?.trim() || undefined,
+  };
+}
+
+function resolveToolPath(cwd: string, maybePath: string | undefined): string | undefined {
+  if (!maybePath?.trim()) return undefined;
+  return path.isAbsolute(maybePath) ? path.normalize(maybePath) : path.resolve(cwd, maybePath);
+}
+
+function isPathWithin(targetPath: string | undefined, parentPath: string | undefined): boolean {
+  if (!targetPath || !parentPath) return false;
+  const relative = path.relative(parentPath, targetPath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function isMutatingBashCommand(command: string): boolean {
+  const patterns = [
+    /(^|[;&|])\s*(rm|mv|cp|touch|install|truncate)\b/i,
+    /(^|[;&|])\s*sed\b[^\n]*\s-i\b/i,
+    /(^|[;&|])\s*perl\b[^\n]*-pi\b/i,
+    /\|\s*tee\b/i,
+    /(^|[^<])>>?/,
+  ];
+  return patterns.some((pattern) => pattern.test(command));
+}
+
 function parseModelSpec(model: string | undefined): { base: string | undefined; effort: ReasoningEffort } {
   const resolved = resolveModelLabel(model);
   if (!resolved || resolved === "default") return { base: undefined, effort: "default" };
-  const match = resolved.match(/^(.*?)(?::(low|medium|high))$/);
+  const match = resolved.match(/^(.*?)(?::(off|minimal|low|medium|high|xhigh))$/);
   if (!match) return { base: resolved, effort: "default" };
   return {
     base: match[1],
@@ -108,15 +163,27 @@ function formatModelSpec(base: string | undefined, effort: ReasoningEffort): str
   return effort === "default" ? base : `${base}:${effort}`;
 }
 
+function formatEffortLabel(effort: ReasoningEffort): string {
+  return effort === "default" ? "Pi default (clamped)" : effort;
+}
+
+function normalizeThinkingLevel(value: unknown): ThinkingLevel | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  return THINKING_LEVEL_ORDER.find((level) => level === normalized);
+}
+
 function parsePiModelCatalog(output: string): PiModelCatalogEntry[] {
   const lines = output
     .split("\n")
     .map((line) => line.trimEnd())
     .filter(Boolean);
-  if (lines.length <= 1) return [];
+  const headerIndex = lines.findIndex((line) => /^provider\s+model(\s+|$)/i.test(line.trim()));
+  if (headerIndex === -1 || lines.length <= headerIndex + 1) return [];
 
   const entries: PiModelCatalogEntry[] = [];
-  for (const line of lines.slice(1)) {
+  for (const line of lines.slice(headerIndex + 1)) {
+    if (/^(warning:|failed to load extension)/i.test(line.trim())) continue;
     const parts = line.split(/\s{2,}/).map((part) => part.trim()).filter(Boolean);
     if (parts.length < 2) continue;
     entries.push({
@@ -134,15 +201,154 @@ function parsePiModelCatalog(output: string): PiModelCatalogEntry[] {
 function getPiModelCatalog(): PiModelCatalogEntry[] {
   if (piModelCatalogCache) return piModelCatalogCache;
   try {
-    const output = execFileSync("pi", ["--list-models"], {
+    const result = spawnSync("pi", ["--list-models"], {
       encoding: "utf-8",
       timeout: 10_000,
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    piModelCatalogCache = parsePiModelCatalog(output);
+    const combinedOutput = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+    piModelCatalogCache = parsePiModelCatalog(combinedOutput);
   } catch {
     piModelCatalogCache = [];
   }
   return piModelCatalogCache;
+}
+
+function getPiScopedModelPatterns(): string[] {
+  if (piScopedModelPatternsCache !== undefined) return piScopedModelPatternsCache;
+
+  const agentDir = process.env.PI_CODING_AGENT_DIR
+    ?? path.join(process.env.HOME ?? "", ".pi", "agent");
+  const settingsPath = path.join(agentDir, "settings.json");
+  if (!settingsPath || !fs.existsSync(settingsPath)) {
+    piScopedModelPatternsCache = [];
+    return piScopedModelPatternsCache;
+  }
+
+  try {
+    const raw = fs.readFileSync(settingsPath, "utf-8");
+    const parsed = JSON.parse(raw) as {
+      enabledModels?: unknown;
+      scopedModels?: unknown;
+      ["scoped-models"]?: unknown;
+    };
+    const candidates = [
+      parsed.enabledModels,
+      parsed.scopedModels,
+      parsed["scoped-models"],
+    ];
+    for (const candidate of candidates) {
+      if (!Array.isArray(candidate)) continue;
+      piScopedModelPatternsCache = candidate
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      return piScopedModelPatternsCache;
+    }
+  } catch {
+    // Ignore malformed settings and fall back to the full catalog.
+  }
+
+  piScopedModelPatternsCache = [];
+  return piScopedModelPatternsCache;
+}
+
+function globPatternToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${escaped.replace(/\*/g, ".*").replace(/\?/g, ".")}$`, "i");
+}
+
+function modelMatchesScopedPattern(modelId: string, pattern: string): boolean {
+  const normalizedPattern = pattern.trim();
+  if (!normalizedPattern) return false;
+  if (!/[*?]/.test(normalizedPattern)) return modelId.toLowerCase() === normalizedPattern.toLowerCase();
+  return globPatternToRegExp(normalizedPattern).test(modelId);
+}
+
+function getVisiblePiModelCatalog(): PiModelCatalogEntry[] {
+  const catalog = getPiModelCatalog();
+  const scopedPatterns = getPiScopedModelPatterns();
+  if (scopedPatterns.length === 0) return catalog;
+  return catalog.filter((entry) =>
+    scopedPatterns.some((pattern) => modelMatchesScopedPattern(`${entry.provider}/${entry.model}`, pattern)),
+  );
+}
+
+function getModelCatalogSourceLabel(): string {
+  return getPiScopedModelPatterns().length > 0
+    ? "Pi scoped model catalog"
+    : "live Pi model catalog";
+}
+
+function getCatalogThinkingFallback(baseModel: string | undefined): ThinkingLevel[] {
+  if (!baseModel) return ["off"];
+  const catalogMatch = getVisiblePiModelCatalog().find((entry) => `${entry.provider}/${entry.model}` === baseModel);
+  if (!catalogMatch) return ["off"];
+  return catalogMatch.thinking === "yes" ? [...THINKING_LEVEL_ORDER] : ["off"];
+}
+
+async function getAvailableThinkingLevels(baseModel: string | undefined): Promise<ThinkingLevel[]> {
+  const normalizedBase = parseModelSpec(baseModel).base;
+  if (!normalizedBase) return ["off"];
+  const cached = thinkingLevelsCache.get(normalizedBase);
+  if (cached) return cached;
+
+  const probePromise = (async () => {
+    const fallback = getCatalogThinkingFallback(normalizedBase);
+    try {
+      const piSdk = await import("@mariozechner/pi-coding-agent");
+      const agentDir = piSdk.getAgentDir();
+      const diskSettings = piSdk.SettingsManager.create(process.cwd(), agentDir);
+      const probeSettings = piSdk.SettingsManager.inMemory(diskSettings.getGlobalSettings());
+      probeSettings.applyOverrides(diskSettings.getProjectSettings());
+
+      const { session } = await piSdk.createAgentSession({
+        cwd: process.cwd(),
+        agentDir,
+        settingsManager: probeSettings,
+        sessionManager: piSdk.SessionManager.inMemory(),
+      });
+
+      try {
+        const [provider, ...modelParts] = normalizedBase.split("/");
+        const modelId = modelParts.join("/");
+        const model = session.modelRegistry.find(provider, modelId);
+        if (!model) return fallback;
+        await session.setModel(model);
+        const levels = session.getAvailableThinkingLevels()
+          .map(normalizeThinkingLevel)
+          .filter((level): level is ThinkingLevel => !!level);
+        return levels.length > 0 ? levels : fallback;
+      } finally {
+        session.dispose();
+      }
+    } catch {
+      return fallback;
+    }
+  })();
+
+  thinkingLevelsCache.set(normalizedBase, probePromise);
+  return probePromise;
+}
+
+function orderEffortOptions(options: EffortOption[], preferred: ReasoningEffort): EffortOption[] {
+  const preferredLabel = formatEffortLabel(preferred);
+  const preferredOption = options.find((option) => option.label === preferredLabel);
+  if (!preferredOption) return options;
+  return [
+    preferredOption,
+    ...options.filter((option) => option.label !== preferredLabel),
+  ];
+}
+
+async function getEffortOptionsForModel(baseModel: string | undefined): Promise<EffortOption[]> {
+  const availableLevels = await getAvailableThinkingLevels(baseModel);
+  return [
+    { value: "default", label: formatEffortLabel("default") },
+    ...THINKING_LEVEL_ORDER
+      .filter((level) => availableLevels.includes(level))
+      .map((level) => ({ value: level, label: formatEffortLabel(level) })),
+  ];
 }
 
 function modelProvider(label: string): string {
@@ -168,7 +374,7 @@ function buildAvailableModelOptions(
     });
   };
 
-  for (const entry of getPiModelCatalog()) {
+  for (const entry of getVisiblePiModelCatalog()) {
     push(
       `${entry.provider}/${entry.model}`,
       [entry.context, entry.thinking === "yes" ? "thinking" : undefined].filter(Boolean).join(" · ") || undefined,
@@ -184,17 +390,10 @@ function buildAvailableModelOptions(
   return options;
 }
 
-function collectModelBaseOptions(agents: AgentConfig[], currentModel?: string): string[] {
-  const options = new Set<string>();
-  const current = parseModelSpec(currentModel).base;
-  if (current) options.add(current);
-  for (const agent of agents) {
-    const primary = parseModelSpec(agent.model).base;
-    const fallback = parseModelSpec(agent.modelAlt).base;
-    if (primary) options.add(primary);
-    if (fallback) options.add(fallback);
-  }
-  return Array.from(options);
+function formatSelectableModelOption(
+  option: { label: string; meta?: string },
+): string {
+  return option.meta ? `${option.label} (${option.meta})` : option.label;
 }
 
 function fuzzyMatches(text: string, query: string): boolean {
@@ -219,40 +418,53 @@ async function chooseAgentModel(
   title = `Choose primary model for ${agent.name}`,
 ): Promise<string | undefined | null> {
   const current = parseModelSpec(agent.model);
-  const baseChoices = collectModelBaseOptions(allAgents, agent.model);
+  const baseChoices = buildAvailableModelOptions(allAgents, agent.model);
   const defaultLabel = defaultModel
     ? `Use default (${resolveModelLabel(defaultModel)})`
     : "Use Pi default";
   const currentBase = current.base;
   const orderedBases = currentBase
-    ? [currentBase, ...baseChoices.filter((base) => base !== currentBase)]
+    ? [
+        ...baseChoices.filter((option) => option.value === currentBase),
+        ...baseChoices.filter((option) => option.value !== currentBase),
+      ]
     : baseChoices;
+  const modelChoiceLabels = orderedBases.map(formatSelectableModelOption);
+  const modelChoiceByLabel = new Map(
+    orderedBases.map((option) => [formatSelectableModelOption(option), option.value]),
+  );
   const baseChoice = await ctx.ui.select(
     [
       title,
       "",
       `Current: ${resolveModelLabel(agent.model)}`,
       agent.modelAlt ? `Fallback: ${resolveModelLabel(agent.modelAlt)}` : "Fallback: none",
-      "Tip: type to filter models.",
+      `Source: ${getModelCatalogSourceLabel()}. Type to filter provider, model, or context.`,
     ].join("\n"),
-    [defaultLabel, ...orderedBases],
+    [defaultLabel, ...modelChoiceLabels],
   );
   if (baseChoice === undefined) return null;
   if (baseChoice === defaultLabel) return defaultModel;
+  const selectedBase = modelChoiceByLabel.get(baseChoice);
+  if (!selectedBase) return null;
 
-  const currentEffortLabel = current.effort === "default" ? "default reasoning" : current.effort;
+  const effortOptions = orderEffortOptions(
+    await getEffortOptionsForModel(selectedBase),
+    current.effort,
+  );
   const effortChoice = await ctx.ui.select(
     [
       `Reasoning effort for ${agent.name}`,
       "",
-      `Model: ${baseChoice}`,
-      "Choose the effort suffix appended to this model.",
+      `Model: ${selectedBase}`,
+      "Choose the actual Pi-supported effort suffix for this model.",
     ].join("\n"),
-    prioritizeOption(["default reasoning", "medium", "high", "low"], currentEffortLabel),
+    effortOptions.map((option) => option.label),
   );
   if (effortChoice === undefined) return null;
-  const effort = effortChoice === "default reasoning" ? "default" : effortChoice as ReasoningEffort;
-  return formatModelSpec(baseChoice, effort) ?? null;
+  const effort = effortOptions.find((option) => option.label === effortChoice)?.value;
+  if (!effort) return null;
+  return formatModelSpec(selectedBase, effort) ?? null;
 }
 
 async function chooseSharedModel(
@@ -263,35 +475,44 @@ async function chooseSharedModel(
   const uniqueCurrent = Array.from(new Set(currentModels.map((model) => resolveModelLabel(model))));
   const currentLabel = uniqueCurrent.length === 1 ? uniqueCurrent[0] : "mixed";
   const currentEfforts = Array.from(new Set(currentModels.map((model) => parseModelSpec(model).effort)));
-  const currentEffortLabel = currentEfforts.length === 1
-    ? (currentEfforts[0] === "default" ? "default reasoning" : currentEfforts[0])
-    : "default reasoning";
-  const baseChoices = collectModelBaseOptions(allAgents);
+  const currentEffort = currentEfforts.length === 1 ? currentEfforts[0] : "default";
+  const baseChoices = buildAvailableModelOptions(allAgents);
   const resetLabel = "Reset all to defaults";
+  const modelChoiceLabels = baseChoices.map(formatSelectableModelOption);
+  const modelChoiceByLabel = new Map(
+    baseChoices.map((option) => [formatSelectableModelOption(option), option.value]),
+  );
   const baseChoice = await ctx.ui.select(
     [
       "Choose one model for all listed board members",
       "",
       `Current: ${currentLabel}`,
-      "Tip: type to filter models.",
+      `Source: ${getModelCatalogSourceLabel()}. Type to filter provider, model, or context.`,
     ].join("\n"),
-    [resetLabel, ...baseChoices],
+    [resetLabel, ...modelChoiceLabels],
   );
   if (baseChoice === undefined) return null;
   if (baseChoice === resetLabel) return "reset-defaults";
+  const selectedBase = modelChoiceByLabel.get(baseChoice);
+  if (!selectedBase) return null;
 
+  const effortOptions = orderEffortOptions(
+    await getEffortOptionsForModel(selectedBase),
+    currentEffort,
+  );
   const effortChoice = await ctx.ui.select(
     [
       "Reasoning effort for all listed board members",
       "",
-      `Model: ${baseChoice}`,
-      "Choose the shared effort suffix appended to this model.",
+      `Model: ${selectedBase}`,
+      "Choose the actual Pi-supported effort suffix for this model.",
     ].join("\n"),
-    prioritizeOption(["default reasoning", "medium", "high", "low"], currentEffortLabel),
+    effortOptions.map((option) => option.label),
   );
   if (effortChoice === undefined) return null;
-  const effort = effortChoice === "default reasoning" ? "default" : effortChoice as ReasoningEffort;
-  return formatModelSpec(baseChoice, effort) ?? null;
+  const effort = effortOptions.find((option) => option.label === effortChoice)?.value;
+  if (!effort) return null;
+  return formatModelSpec(selectedBase, effort) ?? null;
 }
 
 function createRosterEditorComponent(
@@ -326,6 +547,9 @@ function createRosterEditorComponent(
         query: string;
         optionIndex: number;
         draftBase?: string;
+        effortOptions?: EffortOption[];
+        effortLoading?: boolean;
+        effortError?: string;
       }
     | null = null;
 
@@ -381,12 +605,36 @@ function createRosterEditorComponent(
   };
 
   const buildEffortOptions = () => {
-    return [
-      { value: "default", label: "default reasoning" },
-      { value: "medium", label: "medium" },
-      { value: "high", label: "high" },
-      { value: "low", label: "low" },
-    ] satisfies Array<{ value: ReasoningEffort; label: string }>;
+    if (!pickerState?.effortOptions || pickerState.effortOptions.length === 0) {
+      return [{ value: "default", label: formatEffortLabel("default") }] satisfies EffortOption[];
+    }
+    return pickerState.effortOptions;
+  };
+
+  const loadEffortOptionsForPicker = (baseModel: string, preferred: ReasoningEffort) => {
+    void getEffortOptionsForModel(baseModel)
+      .then((options) => {
+        if (!pickerState || pickerState.stage !== "effort" || pickerState.draftBase !== baseModel) return;
+        pickerState = {
+          ...pickerState,
+          effortOptions: orderEffortOptions(options, preferred),
+          effortLoading: false,
+          effortError: undefined,
+          optionIndex: 0,
+        };
+        refresh();
+      })
+      .catch((error) => {
+        if (!pickerState || pickerState.stage !== "effort" || pickerState.draftBase !== baseModel) return;
+        pickerState = {
+          ...pickerState,
+          effortOptions: [{ value: "default", label: formatEffortLabel("default") }],
+          effortLoading: false,
+          effortError: error instanceof Error ? error.message : "Could not load thinking levels.",
+          optionIndex: 0,
+        };
+        refresh("Could not probe thinking levels. Falling back to Pi default.");
+      });
   };
 
   const openSinglePicker = () => {
@@ -453,11 +701,26 @@ function createRosterEditorComponent(
         stage: "effort",
         optionIndex: 0,
         draftBase: choice.value,
+        effortOptions: [{ value: "default", label: formatEffortLabel("default") }],
+        effortLoading: true,
+        effortError: undefined,
       };
+      const preferredEffort = state.mode === "all"
+        ? (() => {
+            const efforts = Array.from(new Set(
+              agents
+                .filter((agent) => selected.has(agent.slug))
+                .map((agent) => parseModelSpec(agent.model).effort),
+            ));
+            return efforts.length === 1 ? efforts[0] : "default";
+          })()
+        : parseModelSpec(agents.find((agent) => agent.slug === state.targetSlug)?.model).effort;
+      loadEffortOptionsForPicker(choice.value, preferredEffort);
       return;
     }
 
     const options = buildEffortOptions();
+    if (state.effortLoading) return;
     const choice = options[Math.max(0, Math.min(state.optionIndex, options.length - 1))];
     if (!choice || !state.draftBase) return;
     const modelSpec = formatModelSpec(state.draftBase, choice.value);
@@ -489,9 +752,18 @@ function createRosterEditorComponent(
     }
 
     const effortOptions = buildEffortOptions();
+    if (state.effortLoading) {
+      return [
+        title,
+        `Base: ${truncateInline(state.draftBase ?? "", 44)}`,
+        "Loading actual Pi reasoning levels...",
+        "Esc back",
+      ];
+    }
     return [
       title,
       `Base: ${truncateInline(state.draftBase ?? "", 44)}`,
+      ...(state.effortError ? [truncateInline(`Warning: ${state.effortError}`, 44)] : []),
       ...effortOptions.map((option, index) => {
         const prefix = index === state.optionIndex ? ">" : " ";
         return `${prefix} ${option.label}`;
@@ -639,12 +911,15 @@ function createRosterEditorComponent(
         return;
       }
       if (keybindings.matches(keyData, "tui.select.down") || keyData === "j") {
-        const optionsLength = pickerState.stage === "model" ? buildModelDisplayRows().optionCount : buildEffortOptions().length;
+        const optionsLength = pickerState.stage === "model"
+          ? buildModelDisplayRows().optionCount
+          : (pickerState.effortLoading ? 1 : buildEffortOptions().length);
         pickerState.optionIndex = Math.min(Math.max(0, optionsLength - 1), pickerState.optionIndex + 1);
         refresh();
         return;
       }
       if (keybindings.matches(keyData, "tui.select.confirm") || keyData === "\n") {
+        if (pickerState.stage === "effort" && pickerState.effortLoading) return;
         applyPickerChoice();
         refresh();
         return;
@@ -824,13 +1099,72 @@ async function runMeeting(
 }
 
 export default function (pi: ExtensionAPI) {
+  const executiveWritePolicy = getBoardroomExecutiveWritePolicy();
+  if (executiveWritePolicy) {
+    pi.on("tool_call", async (event, ctx) => {
+      if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
+        const targetPath = resolveToolPath(ctx.cwd, String(event.input.path ?? ""));
+        const allowedScratchpadPath = resolveToolPath(ctx.cwd, executiveWritePolicy.allowedWritePath);
+        const briefsDir = resolveToolPath(ctx.cwd, executiveWritePolicy.briefsDir);
+
+        if (isPathWithin(targetPath, briefsDir)) {
+          return {
+            block: true,
+            reason: "Boardroom source briefs are immutable during executive sessions. Return your deliverable in the message body instead.",
+          };
+        }
+
+        if (!allowedScratchpadPath || targetPath !== allowedScratchpadPath) {
+          return {
+            block: true,
+            reason: `Boardroom executive sessions may only write to ${allowedScratchpadPath ?? "their own scratchpad"}. Use the hidden scratchpad block plus your assistant message instead of file mutation tools.`,
+          };
+        }
+      }
+
+      if (isToolCallEventType("bash", event)) {
+        const command = String(event.input.command ?? "");
+        if (isMutatingBashCommand(command)) {
+          return {
+            block: true,
+            reason: "Boardroom executive sessions may not mutate files via bash. Use read-only investigation, keep private notes in the scratchpad block, and return the deliverable in your assistant message.",
+          };
+        }
+      }
+
+      return undefined;
+    });
+  }
+
   let activeMeeting: ActiveMeetingState | null = null;
   const getWorkingDirectory = (ctx: { cwd?: string }) => ctx.cwd ?? process.cwd();
   let activeMeetingTimer: ReturnType<typeof setInterval> | null = null;
+  let activeNarration: ActiveNarrationState | null = null;
+  let activeNarrationTimer: ReturnType<typeof setInterval> | null = null;
+  const NARRATION_CONTROLS_LABEL = "Controls: Alt+Space pause/resume · Left/Right seek · Home restart · End stop · Esc dismiss · /board-narration ...";
+
+  const getWidgetLineBudget = () => {
+    const rows = typeof process.stdout?.rows === "number" && Number.isFinite(process.stdout.rows)
+      ? process.stdout.rows
+      : Number(process.env.LINES ?? 0);
+    if (!Number.isFinite(rows) || rows <= 0) return undefined;
+    return Math.max(8, Math.floor(rows) - 8);
+  };
+
+  const limitWidgetLines = (
+    lines: string[],
+    maxLines: number | undefined,
+    overflowLine = "  ... more hidden",
+  ) => {
+    if (!maxLines || lines.length <= maxLines) return lines;
+    if (maxLines <= 1) return [overflowLine];
+    return [...lines.slice(0, maxLines - 1), overflowLine];
+  };
 
   const renderWidgetLines = (lines: string[]) => (_tui: unknown, _theme: unknown) => {
     const container = new Container();
-    for (const line of lines) {
+    const cappedLines = limitWidgetLines(lines, getWidgetLineBudget());
+    for (const line of cappedLines) {
       container.addChild(new Text(line, 1, 0));
     }
     return container;
@@ -841,7 +1175,11 @@ export default function (pi: ExtensionAPI) {
     snapshot: MeetingProgressSnapshot,
   ) => {
     ctx.ui.setWidget("boardroom", (_tui: unknown, theme: unknown) => ({
-      render: (width: number) => buildDashboardWidgetLines(snapshot, theme as any, width),
+      render: (width: number) => limitWidgetLines(
+        buildDashboardWidgetLines(snapshot, theme as any, width),
+        getWidgetLineBudget(),
+        (theme as any).fg?.("dim", "  ... more hidden") ?? "  ... more hidden",
+      ),
       invalidate: () => {},
     }));
   };
@@ -860,6 +1198,216 @@ export default function (pi: ExtensionAPI) {
   ) => {
     const theme = ctx.ui.theme;
     ctx.ui.setWidget("boardroom", renderWidgetLines(buildNarrationWidgetLines(state, theme)));
+  };
+
+  const clearNarrationTimer = () => {
+    if (activeNarrationTimer) {
+      clearInterval(activeNarrationTimer);
+      activeNarrationTimer = null;
+    }
+  };
+
+  const syncNarrationState = (forceFrameAdvance = true) => {
+    if (!activeNarration) return;
+    const controller = activeNarration.controller;
+    const elapsedSeconds = controller?.elapsedSeconds ?? activeNarration.state.elapsedSeconds ?? 0;
+    const durationSeconds = controller?.durationSeconds ?? activeNarration.state.durationSeconds;
+    const phase = controller
+      ? (controller.completed ? "completed" : controller.paused ? "paused" : "playing")
+      : activeNarration.state.phase;
+    activeNarration.state = {
+      ...activeNarration.state,
+      phase,
+      elapsedSeconds,
+      durationSeconds,
+      activeRange: phase === "playing"
+        ? findNarrationActiveRange(activeNarration.request.summaryText, activeNarration.request.alignment, elapsedSeconds)
+        : undefined,
+      indicatorFrame: forceFrameAdvance ? activeNarration.state.indicatorFrame + 1 : activeNarration.state.indicatorFrame,
+      controlsLabel: NARRATION_CONTROLS_LABEL,
+    };
+  };
+
+  const renderNarrationUi = () => {
+    if (!activeNarration) return;
+    syncNarrationState();
+    setNarrationWidget({ ui: activeNarration.ui } as any, activeNarration.state);
+    const status = activeNarration.state.phase === "playing"
+      ? "Narration playing..."
+      : activeNarration.state.phase === "paused"
+      ? "Narration paused."
+      : activeNarration.state.phase === "completed"
+      ? "Narration ready."
+      : "Narration generating...";
+    activeNarration.ui.setStatus("boardroom", status);
+  };
+
+  const ensureNarrationTimer = () => {
+    clearNarrationTimer();
+    if (!activeNarration?.controller || activeNarration.controller.completed) return;
+    activeNarrationTimer = setInterval(() => {
+      if (!activeNarration) {
+        clearNarrationTimer();
+        return;
+      }
+      renderNarrationUi();
+      if (activeNarration.controller?.completed) clearNarrationTimer();
+    }, 200);
+  };
+
+  const dismissNarration = async (ctx?: { ui: ExtensionAPI["commands"][number] extends never ? never : any }) => {
+    clearNarrationTimer();
+    const narration = activeNarration;
+    activeNarration = null;
+    if (narration?.controller) {
+      await narration.controller.dispose();
+    }
+    const ui = ctx?.ui ?? narration?.ui;
+    if (ui) {
+      ui.setStatus("boardroom", undefined);
+      ui.setWidget("boardroom", undefined);
+    }
+  };
+
+  const setPinnedNarrationState = (
+    ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+    state: NarrationDisplayState | null,
+  ) => {
+    if (!state) {
+      void dismissNarration(ctx);
+      return;
+    }
+    activeNarration = {
+      request: activeNarration?.request ?? {
+        audioPath: "",
+        summaryText: state.summaryText,
+        summaryPath: state.summaryPath,
+      },
+      state: {
+        ...state,
+        controlsLabel: state.controlsLabel ?? NARRATION_CONTROLS_LABEL,
+      },
+      controller: activeNarration?.controller ?? null,
+      ui: ctx.ui,
+    };
+    renderNarrationUi();
+  };
+
+  const startNarrationPlayback = async (
+    ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+    request: NarrationPlaybackRequest,
+  ): Promise<NarrationPlaybackResult> => {
+    const existingController = activeNarration?.controller;
+    if (existingController) {
+      await existingController.dispose();
+    }
+    const controller = new NarrationPlaybackController(request.audioPath, () => {
+      if (!activeNarration) return;
+      renderNarrationUi();
+      if (activeNarration.controller?.completed) clearNarrationTimer();
+    });
+    if (!controller.isControllable) {
+      activeNarration = {
+        request,
+        state: {
+          phase: "completed",
+          summaryText: request.summaryText,
+          summaryPath: request.summaryPath,
+          indicatorFrame: 0,
+          elapsedSeconds: 0,
+          durationSeconds: controller.durationSeconds,
+          controlsLabel: "Install mpv for pause/rewind/forward controls. Dismiss with Escape or a new prompt.",
+        },
+        controller: null,
+        ui: ctx.ui,
+      };
+      renderNarrationUi();
+      return request.autoplay === false
+        ? { ok: true }
+        : { ok: false, error: "Controllable playback requires mpv." };
+    }
+
+    activeNarration = {
+      request,
+      state: {
+        phase: request.autoplay === false ? "completed" : "playing",
+        summaryText: request.summaryText,
+        summaryPath: request.summaryPath,
+        indicatorFrame: 0,
+        elapsedSeconds: 0,
+        durationSeconds: controller.durationSeconds,
+        controlsLabel: NARRATION_CONTROLS_LABEL,
+      },
+      controller: request.autoplay === false ? null : controller,
+      ui: ctx.ui,
+    };
+
+    if (request.autoplay === false) {
+      renderNarrationUi();
+      return { ok: true };
+    }
+
+    try {
+      await controller.start(0, false);
+      renderNarrationUi();
+      ensureNarrationTimer();
+      return { ok: true };
+    } catch (err: any) {
+      activeNarration.state = {
+        ...activeNarration.state,
+        phase: "completed",
+        controlsLabel: "Playback failed. Dismiss with Escape or a new prompt.",
+      };
+      renderNarrationUi();
+      return { ok: false, error: err.message ?? "Failed to start narration playback" };
+    }
+  };
+
+  const applyNarrationAction = async (
+    action: "pause" | "rewind" | "forward" | "restart" | "stop" | "dismiss",
+    ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+  ) => {
+    if (!activeNarration) {
+      ctx.ui.notify("No active narration.", "info");
+      return;
+    }
+    if (action === "dismiss") {
+      await dismissNarration(ctx);
+      return;
+    }
+    if (action === "restart") {
+      const result = await startNarrationPlayback(ctx, activeNarration.request);
+      if (!result.ok && result.error) ctx.ui.notify(result.error, "warning");
+      return;
+    }
+    if (action === "stop") {
+      if (activeNarration.controller) {
+        await activeNarration.controller.dispose();
+      }
+      activeNarration.controller = null;
+      activeNarration.state = {
+        ...activeNarration.state,
+        phase: "completed",
+        activeRange: undefined,
+        elapsedSeconds: activeNarration.state.durationSeconds ?? activeNarration.state.elapsedSeconds ?? 0,
+      };
+      renderNarrationUi();
+      clearNarrationTimer();
+      return;
+    }
+    if (!activeNarration.controller) {
+      ctx.ui.notify("Narration controls require mpv playback.", "warning");
+      return;
+    }
+    if (action === "pause") {
+      await activeNarration.controller.togglePause();
+    } else if (action === "rewind") {
+      await activeNarration.controller.seekRelative(-5);
+    } else if (action === "forward") {
+      await activeNarration.controller.seekRelative(5);
+    }
+    renderNarrationUi();
+    ensureNarrationTimer();
   };
 
   const withLiveElapsed = (
@@ -933,6 +1481,72 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
+  pi.on("input", async (event, ctx) => {
+    if (activeNarration && event.source === "interactive" && event.text.trim()) {
+      await dismissNarration(ctx as any);
+    }
+    return { action: "continue" as const };
+  });
+
+  pi.registerShortcut("escape", {
+    description: "Dismiss narration panel",
+    handler: async (ctx) => {
+      if (!activeNarration) return;
+      await dismissNarration(ctx as any);
+    },
+  });
+  pi.registerShortcut("alt+space", {
+    description: "Pause or resume narration",
+    handler: async (ctx) => {
+      if (!activeNarration) return;
+      await applyNarrationAction("pause", ctx as any);
+    },
+  });
+  pi.registerShortcut("left", {
+    description: "Rewind narration five seconds",
+    handler: async (ctx) => {
+      if (!activeNarration) return;
+      await applyNarrationAction("rewind", ctx as any);
+    },
+  });
+  pi.registerShortcut("right", {
+    description: "Forward narration five seconds",
+    handler: async (ctx) => {
+      if (!activeNarration) return;
+      await applyNarrationAction("forward", ctx as any);
+    },
+  });
+  pi.registerShortcut("home", {
+    description: "Restart narration playback",
+    handler: async (ctx) => {
+      if (!activeNarration) return;
+      await applyNarrationAction("restart", ctx as any);
+    },
+  });
+  pi.registerShortcut("end", {
+    description: "Stop narration playback",
+    handler: async (ctx) => {
+      if (!activeNarration) return;
+      await applyNarrationAction("stop", ctx as any);
+    },
+  });
+
+  pi.registerCommand("board-narration", {
+    description: "Control pinned narration playback",
+    handler: async (args, ctx) => {
+      const action = (args ?? "").trim().toLowerCase();
+      if (!action) {
+        ctx.ui.notify("Usage: /board-narration pause|rewind|forward|restart|stop|dismiss", "info");
+        return;
+      }
+      if (!["pause", "rewind", "forward", "restart", "stop", "dismiss"].includes(action)) {
+        ctx.ui.notify(`Unknown narration action: ${action}`, "warning");
+        return;
+      }
+      await applyNarrationAction(action as "pause" | "rewind" | "forward" | "restart" | "stop" | "dismiss", ctx as any);
+    },
+  });
+
   const editRosterSelection = async (
     ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
     ceo: AgentConfig,
@@ -1000,6 +1614,9 @@ export default function (pi: ExtensionAPI) {
       return flags.filter(f => f.startsWith(prefix)).map(f => ({ value: f, label: f }));
     },
     handler: async (args, ctx) => {
+      if (activeNarration) {
+        await dismissNarration(ctx as any);
+      }
       if (activeMeeting) {
         ctx.ui.notify("A meeting is already in progress. Use /board-close to force-close it first.", "warning");
         return;
@@ -1202,17 +1819,14 @@ export default function (pi: ExtensionAPI) {
           notify: (msg, type) => ctx.ui.notify(msg, type),
           setNarrationState: (state) => {
             if (!ctx.hasUI) return;
-            if (state) {
-              setNarrationWidget(ctx, state);
-              ctx.ui.setStatus("boardroom", state.phase === "generating" ? "Narration generating..." : "Narration playing...");
-            } else {
-              setCloseoutWidget(ctx, result);
-              ctx.ui.setStatus("boardroom", undefined);
-            }
+            setPinnedNarrationState(ctx as any, state);
           },
+          startNarrationPlayback: (request) => startNarrationPlayback(ctx as any, request),
         });
 
-        ctx.ui.setWidget("boardroom", undefined);
+        if (!activeNarration) {
+          ctx.ui.setWidget("boardroom", undefined);
+        }
       } catch (err: any) {
         clearActiveMeetingTimer();
         activeMeeting = null;
@@ -1244,7 +1858,7 @@ export default function (pi: ExtensionAPI) {
       if (activeMeeting.agentSnapshots.length > 0) {
         lines.push("", "Board Members:");
         for (const agent of activeMeeting.agentSnapshots) {
-          const cost = `$${agent.totalCost.toFixed(4)}`;
+          const cost = `est. $${agent.totalCost.toFixed(4)}`;
           const tokens = agent.totalTokens > 0 ? `${agent.totalTokens} tok` : "";
           lines.push(
             `  ${agent.name} [${agent.modelLabel ?? "default"}]: ${agent.status} (${agent.turns} turns, ${cost}${tokens ? `, ${tokens}` : ""})`,
@@ -1342,7 +1956,7 @@ export default function (pi: ExtensionAPI) {
         const theme = ctx.ui.theme;
         const snapshot = withLiveElapsed(lastSnapshot, startedAtMs, agentSnapshots, null, 0);
         ctx.ui.setStatus("boardroom", formatDashboardStatus(snapshot, theme));
-        ctx.ui.setWidget("boardroom", buildDashboardWidgetLines(snapshot, theme));
+        setBoardroomWidget(ctx, snapshot);
       };
 
       if (agents.length === 0) throw new Error("No executive board agents found in agents/executive-board/");

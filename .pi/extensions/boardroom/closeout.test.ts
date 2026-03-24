@@ -175,8 +175,9 @@ describe("buildCloseoutSummary", () => {
     expect(summary).toContain("freeform");
   });
 
-  it("includes cost and duration", () => {
+  it("includes estimated cost and duration", () => {
     const summary = buildCloseoutSummary(makeInfo());
+    expect(summary).toContain("Estimated Cost");
     expect(summary).toContain("$2.34");
     expect(summary).toContain("4.2 minutes");
   });

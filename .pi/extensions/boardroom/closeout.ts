@@ -1,5 +1,8 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
+import * as net from "node:net";
+import * as os from "node:os";
 import * as path from "node:path";
 import dotenv from "dotenv";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
@@ -92,11 +95,27 @@ export interface HumanReadableSummaryResult {
 }
 
 export interface NarrationDisplayState {
-  phase: "generating" | "playing";
+  phase: "generating" | "playing" | "paused" | "completed";
   summaryText: string;
   summaryPath?: string;
   indicatorFrame: number;
   activeRange?: { start: number; end: number };
+  elapsedSeconds?: number;
+  durationSeconds?: number;
+  controlsLabel?: string;
+}
+
+export interface NarrationPlaybackRequest {
+  audioPath: string;
+  summaryText: string;
+  summaryPath?: string;
+  alignment?: NarrationAlignment;
+  autoplay?: boolean;
+}
+
+export interface NarrationPlaybackResult {
+  ok: boolean;
+  error?: string;
 }
 
 function findWorkspaceRoot(startPath: string): string | null {
@@ -156,7 +175,7 @@ export function buildCloseoutSummary(info: CloseoutInfo): string {
     `  Outcome: ${disp.icon} ${disp.label} - ${disp.description}`,
     "",
     `  Duration: ${info.elapsedMinutes.toFixed(1)} minutes`,
-    `  Total Cost: $${info.totalCost.toFixed(2)}`,
+    `  Estimated Cost: $${info.totalCost.toFixed(2)}`,
     `  Participants: ${info.roster.join(", ")}`,
     ...(info.abortReason ? [`  Abort Reason: ${info.abortReason}`] : []),
     "",
@@ -200,7 +219,7 @@ export function buildThemedCloseoutLines(
   lines.push("");
 
   lines.push(`  ${muted("Duration:")} ${info.elapsedMinutes.toFixed(1)} minutes`);
-  lines.push(`  ${muted("Total Cost:")} ${accent(`$${info.totalCost.toFixed(2)}`)}`);
+  lines.push(`  ${muted("Estimated Cost:")} ${accent(`$${info.totalCost.toFixed(2)}`)}`);
   lines.push(`  ${muted("Participants:")} ${info.roster.join(", ")}`);
   if (info.abortReason) {
     lines.push(`  ${muted("Abort Reason:")} ${theme.fg("warning", info.abortReason)}`);
@@ -232,11 +251,22 @@ export function buildNarrationWidgetLines(
 ): string[] {
   const frames = state.phase === "playing"
     ? ["[speaking   ]", "[ speaking  ]", "[  speaking ]", "[   speaking]"]
+    : state.phase === "paused"
+    ? ["[ paused    ]"]
+    : state.phase === "completed"
+    ? ["[ complete  ]"]
     : ["[generating ]", "[ generating]", "[  generating]", "[   generating]"];
   const frame = frames[state.indicatorFrame % frames.length] ?? frames[0];
   const muted = (text: string) => theme.fg("muted", text);
   const accent = (text: string) => theme.fg("accent", text);
   const success = (text: string) => theme.fg("success", text);
+  const phaseLabel = state.phase === "playing"
+    ? "Playing ElevenLabs summary"
+    : state.phase === "paused"
+    ? "Narration paused"
+    : state.phase === "completed"
+    ? "Narration ready"
+    : "Generating ElevenLabs audio";
 
   let summary = state.summaryText;
   if (
@@ -252,13 +282,25 @@ export function buildNarrationWidgetLines(
   }
 
   const wrapped = wrapNarrationText(summary, 72);
+  const progress = state.durationSeconds && Number.isFinite(state.durationSeconds)
+    ? `${formatPlaybackTime(state.elapsedSeconds ?? 0)} / ${formatPlaybackTime(state.durationSeconds)}`
+    : (state.elapsedSeconds !== undefined ? formatPlaybackTime(state.elapsedSeconds) : undefined);
   return [
     muted("Narration"),
-    `${accent(frame)} ${theme.bold(state.phase === "playing" ? "Playing ElevenLabs summary" : "Generating ElevenLabs audio")}`,
+    `${accent(frame)} ${theme.bold(phaseLabel)}`,
     ...(state.summaryPath ? [muted(state.summaryPath)] : []),
+    ...(progress ? [muted(`Progress: ${progress}`)] : []),
+    ...(state.controlsLabel ? [muted(state.controlsLabel)] : []),
     "",
     ...wrapped,
   ];
+}
+
+function formatPlaybackTime(totalSeconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function wrapNarrationText(text: string, width: number): string[] {
@@ -342,6 +384,60 @@ function extractSection(markdown: string, heading: string): string {
   }
 
   return sectionLines.join("\n").trim();
+}
+
+function extractSectionByPrefix(markdown: string, headingPrefix: string): string {
+  const lines = markdown.split("\n");
+  const target = headingPrefix.trim().toLowerCase();
+  const sectionLines: string[] = [];
+  let inSection = false;
+
+  for (const line of lines) {
+    const headingMatch = line.match(/^#{1,6}\s+(.+)$/);
+    if (headingMatch) {
+      const currentHeading = stripMarkdownSyntax(headingMatch[1]).toLowerCase();
+      if (inSection) break;
+      inSection = currentHeading.startsWith(target);
+      continue;
+    }
+    if (inSection) sectionLines.push(line);
+  }
+
+  return sectionLines.join("\n").trim();
+}
+
+function extractTopLevelSectionsByPrefix(markdown: string, headingPrefix: string): Array<{ heading: string; content: string }> {
+  const lines = markdown.split("\n");
+  const target = headingPrefix.trim().toLowerCase();
+  const sections: Array<{ heading: string; content: string }> = [];
+  let current: { heading: string; content: string[] } | null = null;
+
+  for (const line of lines) {
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const headingText = stripMarkdownSyntax(headingMatch[2]).trim();
+      const normalizedHeading = headingText.toLowerCase();
+
+      if (current && level <= 2) {
+        sections.push({ heading: current.heading, content: current.content.join("\n").trim() });
+        current = null;
+      }
+
+      if (level === 2 && normalizedHeading.startsWith(target)) {
+        current = { heading: headingText, content: [] };
+      }
+      continue;
+    }
+
+    if (current) current.content.push(line);
+  }
+
+  if (current) {
+    sections.push({ heading: current.heading, content: current.content.join("\n").trim() });
+  }
+
+  return sections;
 }
 
 function summarizeSection(markdown: string, limit: number): string[] {
@@ -613,25 +709,46 @@ function compactNarrationParagraph(label: string, markdown: string, sentenceCoun
 export function summarizeMemoForNarration(markdown: string, maxChars = DEFAULT_NARRATION_MAX_CHARS): string {
   const titleMatch = markdown.match(/^#{1,6}\s+(.+)$/m);
   const title = normalizeNarrationText(stripMarkdownSyntax(titleMatch?.[1] ?? "Boardroom meeting"));
+  const decisionSections = extractTopLevelSectionsByPrefix(markdown, "Decision");
+  const executiveSummaryPoints = summarizeSection(extractSection(markdown, "Executive Summary"), 4);
+  const finalRecommendationPoints = summarizeSection(extractSection(markdown, "Final Recommendations"), 3);
 
   const decision = stripTrailingSentencePunctuation(
     normalizeNarrationText(firstSentences(stripMarkdownSyntax(extractSection(markdown, "Decision")), 2)),
   );
-  const question = stripTrailingSentencePunctuation(
-    normalizeNarrationText(trimToSentence(stripMarkdownSyntax(extractSection(markdown, "Strategic Question")))),
-  );
+  const question = decisionSections.length <= 1
+    ? stripTrailingSentencePunctuation(
+        normalizeNarrationText(trimToSentence(stripMarkdownSyntax(extractSection(markdown, "Strategic Question")))),
+      )
+    : "";
+  const multiDecisionQuestions = decisionSections
+    .map(({ heading, content }) => {
+      const label = heading.replace(/^Decision\s*\d*\s*:?\s*/i, "").trim();
+      const sectionQuestion = stripTrailingSentencePunctuation(
+        normalizeNarrationText(trimToSentence(stripMarkdownSyntax(extractSection(content, "Strategic Question")))),
+      );
+      if (!label || !sectionQuestion) return "";
+      return `${label}: ${sectionQuestion}`;
+    })
+    .filter(Boolean);
   const evidencePoints = summarizeSection(
     extractSection(markdown, "Context & Evidence") || extractSection(markdown, "Context"),
     3,
   );
-  const riskPoints = summarizeSection(extractSection(markdown, "Risk Assessment"), 2);
+  const riskPoints = summarizeSection(
+    extractSection(markdown, "Risk Assessment") || extractSectionByPrefix(markdown, "Risk"),
+    2,
+  );
   const timingPoints = summarizeSection(extractSection(markdown, "Timing"), 2);
   const bottomLineParagraph = compactNarrationParagraph("Bottom line:", extractSection(markdown, "The bottom line"), 2);
 
   const segments = [
     `Boardroom summary for ${title}.`,
-    decision ? `Decision: ${decision}.` : "",
+    compactNarrationSection("Executive summary:", executiveSummaryPoints),
+    finalRecommendationPoints.length > 0 ? compactNarrationSection("Recommendations:", finalRecommendationPoints) : "",
+    decision && executiveSummaryPoints.length === 0 ? `Decision: ${decision}.` : "",
     question ? `Question: ${question}.` : "",
+    multiDecisionQuestions.length > 0 ? compactNarrationSection("Questions addressed:", multiDecisionQuestions) : "",
     compactNarrationSection("Reasons:", evidencePoints),
     compactNarrationSection("Risk:", riskPoints),
     compactNarrationSection("Timing:", timingPoints),
@@ -814,11 +931,218 @@ export async function playAudio(audioPath: string): Promise<{ ok: boolean; error
   });
 }
 
+function isMpvAvailable(): boolean {
+  try {
+    execFileSync("which", ["mpv"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getAudioDurationSeconds(audioPath: string): number | undefined {
+  try {
+    const output = execFileSync(
+      "ffprobe",
+      [
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        audioPath,
+      ],
+      { encoding: "utf-8" },
+    ).trim();
+    const duration = Number(output);
+    return Number.isFinite(duration) && duration > 0 ? duration : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export class NarrationPlaybackController {
+  private proc: ReturnType<typeof spawn> | null = null;
+  private socketPath = path.join(os.tmpdir(), `boardroom-mpv-${randomUUID()}.sock`);
+  private baseOffsetSeconds = 0;
+  private startedAtMs: number | null = null;
+  private stopping = false;
+
+  paused = false;
+  completed = false;
+  readonly durationSeconds: number | undefined;
+
+  constructor(
+    readonly audioPath: string,
+    private readonly onStateChange?: () => void,
+  ) {
+    this.durationSeconds = getAudioDurationSeconds(audioPath);
+  }
+
+  get isControllable(): boolean {
+    return isMpvAvailable();
+  }
+
+  get elapsedSeconds(): number {
+    if (this.completed) return this.durationSeconds ?? this.baseOffsetSeconds;
+    if (this.paused || this.startedAtMs === null) return this.baseOffsetSeconds;
+    const elapsed = this.baseOffsetSeconds + ((Date.now() - this.startedAtMs) / 1000);
+    if (this.durationSeconds === undefined) return elapsed;
+    return Math.min(this.durationSeconds, elapsed);
+  }
+
+  private notifyStateChange(): void {
+    this.onStateChange?.();
+  }
+
+  private async waitForSocketReady(timeoutMs = 3000): Promise<void> {
+    const startedAt = Date.now();
+    while (!fs.existsSync(this.socketPath)) {
+      if (Date.now() - startedAt > timeoutMs) {
+        throw new Error("Timed out waiting for mpv control socket.");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  private async sendCommand(command: unknown[]): Promise<void> {
+    await this.waitForSocketReady();
+    await new Promise<void>((resolve, reject) => {
+      const socket = net.createConnection(this.socketPath);
+      socket.on("connect", () => {
+        socket.write(`${JSON.stringify({ command })}\n`);
+      });
+      socket.on("data", () => {
+        socket.end();
+        resolve();
+      });
+      socket.on("error", (err) => {
+        socket.destroy();
+        reject(err);
+      });
+    });
+  }
+
+  private async stopProcess(): Promise<void> {
+    if (!this.proc) return;
+    const proc = this.proc;
+    this.proc = null;
+    this.stopping = true;
+    await new Promise<void>((resolve) => {
+      const finish = () => resolve();
+      proc.once("close", finish);
+      proc.kill("SIGTERM");
+      setTimeout(() => {
+        try {
+          proc.kill("SIGKILL");
+        } catch {
+          // Ignore if already closed.
+        }
+      }, 1000);
+    });
+    this.stopping = false;
+  }
+
+  async start(startSeconds = 0, paused = false): Promise<void> {
+    if (!this.isControllable) {
+      throw new Error("Controllable narration playback requires mpv.");
+    }
+
+    await this.stopProcess();
+    if (fs.existsSync(this.socketPath)) {
+      try { fs.unlinkSync(this.socketPath); } catch {}
+    }
+
+    const args = [
+      "--no-terminal",
+      "--really-quiet",
+      "--force-window=no",
+      `--input-ipc-server=${this.socketPath}`,
+      ...(startSeconds > 0 ? [`--start=${startSeconds}`] : []),
+      ...(paused ? ["--pause=yes"] : []),
+      this.audioPath,
+    ];
+
+    this.baseOffsetSeconds = Math.max(0, startSeconds);
+    this.startedAtMs = paused ? null : Date.now();
+    this.paused = paused;
+    this.completed = false;
+    this.proc = spawn("mpv", args, {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+
+    this.proc.once("close", () => {
+      this.proc = null;
+      try { fs.unlinkSync(this.socketPath); } catch {}
+      if (this.stopping) return;
+      this.baseOffsetSeconds = this.durationSeconds ?? this.elapsedSeconds;
+      this.startedAtMs = null;
+      this.paused = false;
+      this.completed = true;
+      this.notifyStateChange();
+    });
+
+    this.notifyStateChange();
+  }
+
+  async togglePause(): Promise<void> {
+    if (this.completed) {
+      await this.start(0, false);
+      return;
+    }
+    if (!this.proc) {
+      await this.start(this.baseOffsetSeconds, false);
+      return;
+    }
+
+    if (this.paused) {
+      await this.sendCommand(["set_property", "pause", false]);
+      this.paused = false;
+      this.startedAtMs = Date.now();
+    } else {
+      this.baseOffsetSeconds = this.elapsedSeconds;
+      await this.sendCommand(["set_property", "pause", true]);
+      this.paused = true;
+      this.startedAtMs = null;
+    }
+    this.notifyStateChange();
+  }
+
+  async seekRelative(deltaSeconds: number): Promise<void> {
+    const target = Math.max(
+      0,
+      Math.min(this.durationSeconds ?? Number.MAX_SAFE_INTEGER, this.elapsedSeconds + deltaSeconds),
+    );
+
+    if (this.completed || !this.proc) {
+      await this.start(target, false);
+      return;
+    }
+
+    await this.sendCommand(["seek", deltaSeconds, "relative"]);
+    this.baseOffsetSeconds = target;
+    this.startedAtMs = this.paused ? null : Date.now();
+    this.completed = false;
+    this.notifyStateChange();
+  }
+
+  async restart(): Promise<void> {
+    await this.start(0, false);
+  }
+
+  async dispose(): Promise<void> {
+    await this.stopProcess();
+    try { fs.unlinkSync(this.socketPath); } catch {}
+  }
+}
+
 export interface PostMeetingContext {
   hasUI: boolean;
   confirm: (title: string, body: string) => Promise<boolean>;
   notify: (msg: string, type: "info" | "warning" | "error") => void;
   setNarrationState?: (state: NarrationDisplayState | null) => void;
+  startNarrationPlayback?: (request: NarrationPlaybackRequest) => Promise<NarrationPlaybackResult>;
 }
 
 export interface PostMeetingActionsDeps {
@@ -903,7 +1227,6 @@ export async function runPostMeetingActions(
         result = await deps.generateNarration(info.memoPath, outputDir);
       } finally {
         clearInterval(generationTimer);
-        ctx.setNarrationState?.(null);
       }
 
       if (result.ok && result.audioPath && result.summaryText) {
@@ -922,33 +1245,76 @@ export async function runPostMeetingActions(
           ].filter(Boolean).join("\n"),
         );
         if (play) {
-          let indicatorFrame = 0;
-          const startedAt = Date.now();
-          const updateNarration = () => {
+          if (ctx.startNarrationPlayback) {
+            const startResult = await ctx.startNarrationPlayback({
+              audioPath: result.audioPath,
+              summaryText: result.summaryText,
+              summaryPath: result.summaryPath,
+              alignment: result.alignment,
+              autoplay: true,
+            });
+            if (!startResult.ok) {
+              ctx.notify(`Playback failed: ${startResult.error}`, "warning");
+            }
+          } else {
+            let indicatorFrame = 0;
+            const startedAt = Date.now();
+            const updateNarration = () => {
+              ctx.setNarrationState?.({
+                phase: "playing",
+                summaryText: result.summaryText!,
+                summaryPath: result.summaryPath,
+                indicatorFrame,
+                activeRange: findNarrationActiveRange(
+                  result.summaryText!,
+                  result.alignment,
+                  (Date.now() - startedAt) / 1000,
+                ),
+                controlsLabel: "Dismiss with Escape or by sending a new prompt.",
+              });
+              indicatorFrame += 1;
+            };
+
+            updateNarration();
+            const playbackTimer = setInterval(updateNarration, 200);
+            const playResult = await deps.playAudio(result.audioPath);
+            clearInterval(playbackTimer);
             ctx.setNarrationState?.({
-              phase: "playing",
+              phase: "completed",
               summaryText: result.summaryText!,
               summaryPath: result.summaryPath,
-              indicatorFrame,
-              activeRange: findNarrationActiveRange(
-                result.summaryText!,
-                result.alignment,
-                (Date.now() - startedAt) / 1000,
-              ),
+              indicatorFrame: 0,
+              elapsedSeconds: result.alignment?.characterEndTimesSeconds.at(-1),
+              durationSeconds: result.alignment?.characterEndTimesSeconds.at(-1),
+              controlsLabel: "Dismiss with Escape or by sending a new prompt.",
             });
-            indicatorFrame += 1;
-          };
-
-          updateNarration();
-          const playbackTimer = setInterval(updateNarration, 200);
-          const playResult = await deps.playAudio(result.audioPath);
-          clearInterval(playbackTimer);
-          ctx.setNarrationState?.(null);
-          if (!playResult.ok) {
-            ctx.notify(`Playback failed: ${playResult.error}`, "warning");
+            if (!playResult.ok) {
+              ctx.notify(`Playback failed: ${playResult.error}`, "warning");
+            }
+          }
+        } else {
+          if (ctx.startNarrationPlayback) {
+            await ctx.startNarrationPlayback({
+              audioPath: result.audioPath,
+              summaryText: result.summaryText,
+              summaryPath: result.summaryPath,
+              alignment: result.alignment,
+              autoplay: false,
+            });
+          } else {
+            ctx.setNarrationState?.({
+              phase: "completed",
+              summaryText: result.summaryText,
+              summaryPath: result.summaryPath,
+              indicatorFrame: 0,
+              elapsedSeconds: 0,
+              durationSeconds: result.alignment?.characterEndTimesSeconds.at(-1),
+              controlsLabel: "Use /board-narration restart to play, or dismiss with Escape/new prompt.",
+            });
           }
         }
       } else {
+        ctx.setNarrationState?.(null);
         ctx.notify(`Narration failed: ${result.error}`, "warning");
       }
     }

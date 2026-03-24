@@ -43,7 +43,7 @@ describe("formatDashboardStatus", () => {
   it("includes phase, budget, time, and rounds", () => {
     const status = formatDashboardStatus(makeSnapshot(), plainTheme);
     expect(status).toContain("Debate Round 1");
-    expect(status).toContain("$1.20/$5");
+    expect(status).toContain("est $1.20/$5");
     expect(status).toContain("3.2/10min");
     expect(status).toContain("1/3 rds");
   });
@@ -54,7 +54,7 @@ describe("formatDashboardStatus", () => {
       timeLimitMinutes: 0, roundsUsed: 0, maxRounds: 0,
     });
     const status = formatDashboardStatus(snap, plainTheme);
-    expect(status).toContain("$0.00/$0");
+    expect(status).toContain("est $0.00/$0");
     expect(status).toContain("0/0 rds");
   });
 });
@@ -77,7 +77,7 @@ describe("buildDashboardWidgetLines", () => {
   it("includes budget and time progress bars", () => {
     const lines = buildDashboardWidgetLines(makeSnapshot(), plainTheme);
     const joined = lines.join("\n");
-    expect(joined).toContain("Budget:");
+    expect(joined).toContain("Estimated Cost:");
     expect(joined).toContain("Time:");
     expect(joined).toContain("█");
     expect(joined).toContain("░");
@@ -166,8 +166,8 @@ describe("buildDashboardWidgetLines", () => {
   it("stretches progress bars on wider viewports", () => {
     const narrow = buildDashboardWidgetLines(makeSnapshot(), plainTheme, 60).join("\n");
     const wide = buildDashboardWidgetLines(makeSnapshot(), plainTheme, 120).join("\n");
-    const narrowBar = narrow.match(/Budget:\s+\[([█░]+)\]/)?.[1];
-    const wideBar = wide.match(/Budget:\s+\[([█░]+)\]/)?.[1];
+    const narrowBar = narrow.match(/Estimated Cost:\s+\[([█░]+)\]/)?.[1];
+    const wideBar = wide.match(/Estimated Cost:\s+\[([█░]+)\]/)?.[1];
     expect(narrowBar).toBeTruthy();
     expect(wideBar).toBeTruthy();
     expect((wideBar ?? "").length).toBeGreaterThan((narrowBar ?? "").length);
@@ -223,7 +223,7 @@ describe("buildPlainDashboardLines", () => {
     expect(joined).toContain("CFO");
     expect(joined).toContain("anthropic/claude");
     expect(joined).toContain("1.2k tok");
-    expect(joined).toContain("Budget:");
+    expect(joined).toContain("Estimated Cost:");
     expect(joined).toContain("Time:");
   });
 

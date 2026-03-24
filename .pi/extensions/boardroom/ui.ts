@@ -92,7 +92,7 @@ function formatAgentIdentity(
 ): { plain: string; styled: string } {
   const name = truncateText(agent.name, clamp(Math.floor(viewportWidth * 0.18), 10, 22));
   const model = agent.modelLabel ?? "default";
-  const maxIdentityWidth = clamp(Math.floor(viewportWidth * 0.42), 26, 56);
+  const maxIdentityWidth = clamp(Math.floor(viewportWidth * 0.32), 28, 46);
   const reserved = name.length + 3; // space + brackets
   const availableModelWidth = Math.max(8, maxIdentityWidth - reserved);
   const truncatedModel = truncateText(model, availableModelWidth);
@@ -121,11 +121,23 @@ function getStreamingPreviewLines(agent: AgentRuntimeUpdate, width: number): str
 }
 
 function getBarWidth(viewportWidth: number): number {
-  return clamp(Math.floor((viewportWidth - 36) * 0.55), 12, 48);
+  return Math.max(12, Math.floor((viewportWidth - 38) * 0.6));
 }
 
 function getRuleWidth(viewportWidth: number): number {
-  return clamp(viewportWidth - 4, 36, 120);
+  return Math.max(36, viewportWidth - 4);
+}
+
+function buildProgressLine(
+  theme: DashboardTheme,
+  label: string,
+  color: string,
+  pct: number,
+  barWidth: number,
+  value: string,
+): string {
+  const labelWidth = "Estimated Cost:".length;
+  return `  ${theme.fg("muted", label.padEnd(labelWidth))} ${theme.fg(color, `[${progressBar(pct, barWidth)}]`)} ${theme.fg(color, `${pct.toFixed(0)}%`)} ${value}`;
 }
 
 export function formatDashboardStatus(
@@ -133,7 +145,7 @@ export function formatDashboardStatus(
   theme: DashboardTheme,
 ): string {
   const phase = theme.fg("accent", snapshot.phaseLabel);
-  const budget = `$${snapshot.budgetUsed.toFixed(2)}/$${snapshot.budgetLimit}`;
+  const budget = `est $${snapshot.budgetUsed.toFixed(2)}/$${snapshot.budgetLimit}`;
   const time = `${snapshot.elapsedMinutes.toFixed(1)}/${snapshot.timeLimitMinutes}min`;
   const rounds = `${snapshot.roundsUsed}/${snapshot.maxRounds}`;
   return `${theme.fg("muted", "🏛")} ${phase} ${theme.fg("dim", "|")} ${budget} ${theme.fg("dim", "|")} ${time} ${theme.fg("dim", "|")} ${rounds} rds`;
@@ -151,8 +163,8 @@ export function buildDashboardWidgetLines(
 
   const ruleWidth = getRuleWidth(viewportWidth);
   const barWidth = getBarWidth(viewportWidth);
-  const transcriptWidth = clamp(viewportWidth - 10, 36, 120);
-  const ceoWidth = clamp(viewportWidth - 14, 28, 108);
+  const transcriptWidth = Math.max(36, viewportWidth - 10);
+  const ceoWidth = Math.max(28, viewportWidth - 14);
   const rule = dim("─".repeat(ruleWidth));
   lines.push(rule);
   lines.push(
@@ -173,12 +185,22 @@ export function buildDashboardWidgetLines(
   const budgetColor = budgetPct >= 100 ? "error" : budgetPct >= 80 ? "warning" : "accent";
   const timeColor = timePct >= 100 ? "error" : timePct >= 80 ? "warning" : "accent";
 
-  lines.push(
-    `  ${muted("Budget:")} ${theme.fg(budgetColor, `[${progressBar(budgetPct, barWidth)}]`)} ${theme.fg(budgetColor, `${budgetPct.toFixed(0)}%`)} $${snapshot.budgetUsed.toFixed(2)}/$${snapshot.budgetLimit}`,
-  );
-  lines.push(
-    `  ${muted("Time:")}   ${theme.fg(timeColor, `[${progressBar(timePct, barWidth)}]`)} ${theme.fg(timeColor, `${timePct.toFixed(0)}%`)} ${snapshot.elapsedMinutes.toFixed(1)}/${snapshot.timeLimitMinutes}min`,
-  );
+  lines.push(buildProgressLine(
+    theme,
+    "Estimated Cost:",
+    budgetColor,
+    budgetPct,
+    barWidth,
+    `$${snapshot.budgetUsed.toFixed(2)}/$${snapshot.budgetLimit}`,
+  ));
+  lines.push(buildProgressLine(
+    theme,
+    "Time:",
+    timeColor,
+    timePct,
+    barWidth,
+    `${snapshot.elapsedMinutes.toFixed(1)}/${snapshot.timeLimitMinutes}min`,
+  ));
   lines.push("");
 
   if (snapshot.agents.length > 0) {
@@ -207,9 +229,13 @@ function formatAgentLines(
 ): string[] {
   const icon = STATUS_ICONS[agent.status];
   const color = STATUS_COLORS[agent.status];
-  const identityWidth = clamp(Math.floor(viewportWidth * 0.42), 26, 56);
-  const detailWidth = clamp(viewportWidth - 12, 26, 108);
   const identity = formatAgentIdentity(agent, viewportWidth, theme);
+  const identityWidth = clamp(
+    Math.max(identity.plain.length + 2, Math.floor(viewportWidth * 0.32)),
+    28,
+    48,
+  );
+  const detailWidth = Math.max(26, viewportWidth - 8);
   const identityPadding = " ".repeat(Math.max(0, identityWidth - identity.plain.length));
   const status = agent.status.padEnd(10);
   const turns = `${agent.turns} turn${agent.turns !== 1 ? "s" : ""}`.padEnd(9);
@@ -248,8 +274,9 @@ export function buildPlainDashboardLines(snapshot: MeetingProgressSnapshot): str
   const budgetPct = snapshot.budgetLimit > 0 ? (snapshot.budgetUsed / snapshot.budgetLimit) * 100 : 0;
   const timePct = snapshot.timeLimitMinutes > 0 ? (snapshot.elapsedMinutes / snapshot.timeLimitMinutes) * 100 : 0;
 
-  lines.push(`Budget: [${progressBar(budgetPct, barWidth)}] ${budgetPct.toFixed(0)}% $${snapshot.budgetUsed.toFixed(2)}/$${snapshot.budgetLimit}`);
-  lines.push(`Time:   [${progressBar(timePct, barWidth)}] ${timePct.toFixed(0)}% ${snapshot.elapsedMinutes.toFixed(1)}/${snapshot.timeLimitMinutes}min`);
+  const labelWidth = "Estimated Cost:".length;
+  lines.push(`${"Estimated Cost:".padEnd(labelWidth)} [${progressBar(budgetPct, barWidth)}] ${budgetPct.toFixed(0)}% $${snapshot.budgetUsed.toFixed(2)}/$${snapshot.budgetLimit}`);
+  lines.push(`${"Time:".padEnd(labelWidth)} [${progressBar(timePct, barWidth)}] ${timePct.toFixed(0)}% ${snapshot.elapsedMinutes.toFixed(1)}/${snapshot.timeLimitMinutes}min`);
 
   if (snapshot.agents.length > 0) {
     lines.push("");
