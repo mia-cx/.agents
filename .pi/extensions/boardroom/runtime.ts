@@ -270,6 +270,7 @@ export class BoardMemberSession {
           env: {
             ...process.env,
             BOARDROOM_EXECUTIVE_SESSION: "1",
+            BOARDROOM_EXECUTIVE_PARENT_PID: String(process.pid),
             BOARDROOM_EXECUTIVE_SLUG: this.slug,
             BOARDROOM_ALLOWED_WRITE_PATH: path.join(cwd, "boardroom", "scratchpads", `${this.slug}.md`),
             BOARDROOM_BRIEFS_DIR: path.join(cwd, "boardroom", "briefs"),
