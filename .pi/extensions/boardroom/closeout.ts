@@ -57,6 +57,7 @@ const DISPOSITIONS: Record<MeetingDisposition, DispositionDisplay> = {
 const DEFAULT_ELEVENLABS_VOICE_ID = "56bWURjYFHyYyVf490Dp";
 const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 const DEFAULT_ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128";
+const DEFAULT_NARRATION_MAX_CHARS = 1800;
 
 export interface ElevenLabsSettings {
   apiKey: string | undefined;
@@ -211,11 +212,99 @@ export function isElevenLabsConfigured(startPath: string): boolean {
   return !!getElevenLabsSettings(startPath).apiKey;
 }
 
-function extractNarrationText(memoPath: string, maxChars = 3000): string {
+function stripMarkdownSyntax(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!\[[^\]]*]\([^)]+\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/_([^_]+)_/g, "$1")
+    .replace(/^>\s*/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\|/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractSection(markdown: string, heading: string): string {
+  const lines = markdown.split("\n");
+  const target = heading.trim().toLowerCase();
+  const sectionLines: string[] = [];
+  let inSection = false;
+
+  for (const line of lines) {
+    const headingMatch = line.match(/^#{1,6}\s+(.+)$/);
+    if (headingMatch) {
+      const currentHeading = stripMarkdownSyntax(headingMatch[1]).toLowerCase();
+      if (inSection) break;
+      inSection = currentHeading === target;
+      continue;
+    }
+    if (inSection) sectionLines.push(line);
+  }
+
+  return sectionLines.join("\n").trim();
+}
+
+function summarizeSection(markdown: string, limit: number): string[] {
+  if (!markdown) return [];
+
+  const bulletMatches = markdown.match(/^\s*(?:[-*+]|\d+\.)\s+.+$/gm) ?? [];
+  const source = bulletMatches.length > 0
+    ? bulletMatches.map(line => stripMarkdownSyntax(line))
+    : stripMarkdownSyntax(markdown).split(/(?<=[.!?])\s+/);
+
+  return source
+    .map(line => line.trim())
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+export function summarizeMemoForNarration(markdown: string, maxChars = DEFAULT_NARRATION_MAX_CHARS): string {
+  const titleMatch = markdown.match(/^#\s+(.+)$/m);
+  const title = stripMarkdownSyntax(titleMatch?.[1] ?? "Boardroom meeting");
+
+  const decision = stripMarkdownSyntax(extractSection(markdown, "Decision"));
+  const question = stripMarkdownSyntax(extractSection(markdown, "Strategic Question"));
+  const evidencePoints = summarizeSection(
+    extractSection(markdown, "Context & Evidence") || extractSection(markdown, "Context"),
+    3,
+  );
+  const riskPoints = summarizeSection(extractSection(markdown, "Risk Assessment"), 2);
+  const timingPoints = summarizeSection(extractSection(markdown, "Timing"), 2);
+
+  const parts: string[] = [`Boardroom summary for ${title}.`];
+
+  if (decision) {
+    parts.push(`The decision is: ${decision}`);
+  }
+  if (question) {
+    parts.push(`The core question was: ${question}`);
+  }
+  if (evidencePoints.length > 0) {
+    parts.push(`The main reasons were: ${evidencePoints.join(" ")}`);
+  }
+  if (riskPoints.length > 0) {
+    parts.push(`The key risks were: ${riskPoints.join(" ")}`);
+  }
+  if (timingPoints.length > 0) {
+    parts.push(`The next timing checkpoints were: ${timingPoints.join(" ")}`);
+  }
+
+  const summary = stripMarkdownSyntax(parts.join(" "));
+  if (summary.length <= maxChars) return summary;
+
+  return `${summary.slice(0, maxChars).trimEnd()}...`;
+}
+
+function extractNarrationText(memoPath: string, maxChars = DEFAULT_NARRATION_MAX_CHARS): string {
   try {
     const content = fs.readFileSync(memoPath, "utf-8");
-    if (content.length <= maxChars) return content;
-    return content.slice(0, maxChars) + "\n\n[Narration truncated for length.]";
+    return summarizeMemoForNarration(content, maxChars);
   } catch {
     return "";
   }

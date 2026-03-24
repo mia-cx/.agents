@@ -7,6 +7,7 @@ import {
   buildThemedCloseoutLines,
   getElevenLabsSettings,
   runPostMeetingActions,
+  summarizeMemoForNarration,
 } from "./closeout.js";
 import type { CloseoutInfo, PostMeetingActionsDeps, PostMeetingContext } from "./closeout.js";
 
@@ -30,6 +31,66 @@ function makeInfo(overrides: Partial<CloseoutInfo> = {}): CloseoutInfo {
     ...overrides,
   };
 }
+
+describe("summarizeMemoForNarration", () => {
+  it("converts a markdown memo into short plain narration text", () => {
+    const memo = [
+      "# Strategic Brief",
+      "",
+      "### Decision",
+      "**GREENLIGHT** Option 3 for Vesta.",
+      "",
+      "### Strategic Question",
+      "**Should we build a backup product?**",
+      "",
+      "### Context & Evidence",
+      "- **Splice exited strategically**, not because demand vanished.",
+      "- SessionDock is the closest indie competitor.",
+      "- LANDR already shipped into the sample-management lane.",
+      "",
+      "### Risk Assessment",
+      "- Willingness to pay is still unproven.",
+      "- Desktop engineering experience is thin.",
+      "",
+      "### Timing",
+      "1. Week 2 landing page check.",
+      "2. Week 3 technical gate.",
+      "",
+      "```mermaid",
+      "graph TD",
+      "  A --> B",
+      "```",
+    ].join("\n");
+
+    const summary = summarizeMemoForNarration(memo, 800);
+    expect(summary).toContain("Boardroom summary for Strategic Brief.");
+    expect(summary).toContain("The decision is: GREENLIGHT Option 3 for Vesta.");
+    expect(summary).toContain("The core question was: Should we build a backup product?");
+    expect(summary).toContain("The main reasons were:");
+    expect(summary).toContain("The key risks were:");
+    expect(summary).toContain("The next timing checkpoints were:");
+    expect(summary).not.toContain("###");
+    expect(summary).not.toContain("**");
+    expect(summary).not.toContain("```");
+    expect(summary).not.toContain("graph TD");
+  });
+
+  it("truncates long narration safely", () => {
+    const memo = [
+      "# Strategic Brief",
+      "",
+      "### Decision",
+      `${"Very long decision. ".repeat(40)}`,
+      "",
+      "### Context & Evidence",
+      `- ${"Evidence. ".repeat(40)}`,
+    ].join("\n");
+
+    const summary = summarizeMemoForNarration(memo, 160);
+    expect(summary.length).toBeLessThanOrEqual(163);
+    expect(summary.endsWith("...")).toBe(true);
+  });
+});
 
 describe("buildCloseoutSummary", () => {
   it("includes brief title and mode", () => {
