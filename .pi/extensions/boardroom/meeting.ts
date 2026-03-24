@@ -469,11 +469,11 @@ export async function runFreeformMeeting(
     };
 
   } catch (err: any) {
-    pool.destroyAll();
     if (err.message === "Subagent was aborted" || callbacks.signal?.aborted) {
       callbacks.onStatus("Meeting aborted. Saving partial log...");
       state.disposition = "aborted";
       emitSnapshot(state, tracker, pool, "Aborted", "Meeting aborted.", callbacks);
+      pool.destroyAll();
       const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
       return {
         ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode,
@@ -484,6 +484,7 @@ export async function runFreeformMeeting(
     callbacks.onStatus(`Meeting error: ${err.message}. Saving partial log...`);
     state.disposition = "aborted";
     emitSnapshot(state, tracker, pool, "Error", `Error: ${err.message}`, callbacks);
+    pool.destroyAll();
     const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
     return {
       ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode,
@@ -759,11 +760,11 @@ export async function runStructuredMeeting(
     };
 
   } catch (err: any) {
-    pool.destroyAll();
     if (err.message === "Subagent was aborted" || callbacks.signal?.aborted) {
       callbacks.onStatus("Meeting aborted. Saving partial log...");
       state.disposition = "aborted";
       emitSnapshot(state, tracker, pool, "Aborted", "Meeting aborted.", callbacks);
+      pool.destroyAll();
       const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
       return {
         ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode: "structured" as const,
@@ -774,6 +775,7 @@ export async function runStructuredMeeting(
     callbacks.onStatus(`Meeting error: ${err.message}. Saving partial log...`);
     state.disposition = "aborted";
     emitSnapshot(state, tracker, pool, "Error", `Error: ${err.message}`, callbacks);
+    pool.destroyAll();
     const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
     return {
       ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode: "structured" as const,

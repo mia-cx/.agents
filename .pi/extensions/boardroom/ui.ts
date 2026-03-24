@@ -67,8 +67,8 @@ export function buildDashboardWidgetLines(
   const budgetPct = snapshot.budgetLimit > 0 ? (snapshot.budgetUsed / snapshot.budgetLimit) * 100 : 0;
   const timePct = snapshot.timeLimitMinutes > 0 ? (snapshot.elapsedMinutes / snapshot.timeLimitMinutes) * 100 : 0;
 
-  const budgetColor = budgetPct >= 80 ? "warning" : budgetPct >= 100 ? "error" : "accent";
-  const timeColor = timePct >= 80 ? "warning" : timePct >= 100 ? "error" : "accent";
+  const budgetColor = budgetPct >= 100 ? "error" : budgetPct >= 80 ? "warning" : "accent";
+  const timeColor = timePct >= 100 ? "error" : timePct >= 80 ? "warning" : "accent";
 
   lines.push(
     `  ${muted("Budget:")} ${theme.fg(budgetColor, `[${progressBar(budgetPct)}]`)} ${theme.fg(budgetColor, `${budgetPct.toFixed(0)}%`)} $${snapshot.budgetUsed.toFixed(2)}/$${snapshot.budgetLimit}`,

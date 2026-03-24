@@ -83,6 +83,26 @@ describe("buildDashboardWidgetLines", () => {
     expect(joined).toContain("░");
   });
 
+  it("uses error styling when budget or time exceed 100%", () => {
+    const theme = {
+      fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+      bold: identity,
+    };
+    const lines = buildDashboardWidgetLines(
+      makeSnapshot({
+        budgetUsed: 5.5,
+        budgetLimit: 5,
+        elapsedMinutes: 12,
+        timeLimitMinutes: 10,
+      }),
+      theme,
+    );
+    const joined = lines.join("\n");
+    expect(joined).toContain("[error][████████████████████][/error]");
+    expect(joined).toContain("[error]110%[/error]");
+    expect(joined).toContain("[error]120%[/error]");
+  });
+
   it("includes board member rows", () => {
     const lines = buildDashboardWidgetLines(makeSnapshot(), plainTheme);
     const joined = lines.join("\n");
