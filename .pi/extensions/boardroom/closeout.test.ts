@@ -1,5 +1,13 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, it, expect, vi } from "vitest";
-import { buildCloseoutSummary, buildThemedCloseoutLines, runPostMeetingActions } from "./closeout.js";
+import {
+  buildCloseoutSummary,
+  buildThemedCloseoutLines,
+  getElevenLabsSettings,
+  runPostMeetingActions,
+} from "./closeout.js";
 import type { CloseoutInfo, PostMeetingActionsDeps, PostMeetingContext } from "./closeout.js";
 
 const plainTheme = {
@@ -113,6 +121,77 @@ describe("buildThemedCloseoutLines", () => {
       const lines = buildThemedCloseoutLines(makeInfo({ disposition: disp }), plainTheme);
       expect(lines.length).toBeGreaterThan(5);
     }
+  });
+});
+
+describe("getElevenLabsSettings", () => {
+  it("defaults to the preferred boardroom voice", () => {
+    const previousKey = process.env.ELEVENLABS_API_KEY;
+    const previousVoice = process.env.ELEVENLABS_VOICE_ID;
+    const previousModel = process.env.ELEVENLABS_MODEL_ID;
+    const previousFormat = process.env.ELEVENLABS_OUTPUT_FORMAT;
+
+    delete process.env.ELEVENLABS_API_KEY;
+    delete process.env.ELEVENLABS_VOICE_ID;
+    delete process.env.ELEVENLABS_MODEL_ID;
+    delete process.env.ELEVENLABS_OUTPUT_FORMAT;
+
+    const settings = getElevenLabsSettings("/tmp/boardroom/memo.md");
+    expect(settings.voiceId).toBe("56bWURjYFHyYyVf490Dp");
+    expect(settings.modelId).toBe("eleven_multilingual_v2");
+    expect(settings.outputFormat).toBe("mp3_44100_128");
+
+    if (previousKey === undefined) delete process.env.ELEVENLABS_API_KEY;
+    else process.env.ELEVENLABS_API_KEY = previousKey;
+    if (previousVoice === undefined) delete process.env.ELEVENLABS_VOICE_ID;
+    else process.env.ELEVENLABS_VOICE_ID = previousVoice;
+    if (previousModel === undefined) delete process.env.ELEVENLABS_MODEL_ID;
+    else process.env.ELEVENLABS_MODEL_ID = previousModel;
+    if (previousFormat === undefined) delete process.env.ELEVENLABS_OUTPUT_FORMAT;
+    else process.env.ELEVENLABS_OUTPUT_FORMAT = previousFormat;
+  });
+
+  it("loads ElevenLabs settings from boardroom/.env.local", () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "boardroom-env-"));
+    const boardroomDir = path.join(tmpRoot, "boardroom");
+    fs.mkdirSync(boardroomDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(boardroomDir, ".env.local"),
+      [
+        "ELEVENLABS_API_KEY=test-key",
+        "ELEVENLABS_VOICE_ID=custom-voice",
+        "ELEVENLABS_MODEL_ID=eleven_flash_v2_5",
+        "ELEVENLABS_OUTPUT_FORMAT=mp3_22050_32",
+      ].join("\n"),
+    );
+    const memoPath = path.join(boardroomDir, "memos", "memo.md");
+    fs.mkdirSync(path.dirname(memoPath), { recursive: true });
+    fs.writeFileSync(memoPath, "memo");
+
+    const previousKey = process.env.ELEVENLABS_API_KEY;
+    const previousVoice = process.env.ELEVENLABS_VOICE_ID;
+    const previousModel = process.env.ELEVENLABS_MODEL_ID;
+    const previousFormat = process.env.ELEVENLABS_OUTPUT_FORMAT;
+    delete process.env.ELEVENLABS_API_KEY;
+    delete process.env.ELEVENLABS_VOICE_ID;
+    delete process.env.ELEVENLABS_MODEL_ID;
+    delete process.env.ELEVENLABS_OUTPUT_FORMAT;
+
+    const settings = getElevenLabsSettings(memoPath);
+    expect(settings.apiKey).toBe("test-key");
+    expect(settings.voiceId).toBe("custom-voice");
+    expect(settings.modelId).toBe("eleven_flash_v2_5");
+    expect(settings.outputFormat).toBe("mp3_22050_32");
+    expect(settings.loadedEnvPath).toBe(path.join(boardroomDir, ".env.local"));
+
+    if (previousKey === undefined) delete process.env.ELEVENLABS_API_KEY;
+    else process.env.ELEVENLABS_API_KEY = previousKey;
+    if (previousVoice === undefined) delete process.env.ELEVENLABS_VOICE_ID;
+    else process.env.ELEVENLABS_VOICE_ID = previousVoice;
+    if (previousModel === undefined) delete process.env.ELEVENLABS_MODEL_ID;
+    else process.env.ELEVENLABS_MODEL_ID = previousModel;
+    if (previousFormat === undefined) delete process.env.ELEVENLABS_OUTPUT_FORMAT;
+    else process.env.ELEVENLABS_OUTPUT_FORMAT = previousFormat;
   });
 });
 

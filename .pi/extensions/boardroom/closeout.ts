@@ -1,6 +1,8 @@
 import { execFile, execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import dotenv from "dotenv";
+import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 import type { MeetingDisposition, MeetingMode } from "./types.js";
 import type { DashboardTheme } from "./ui.js";
 
@@ -50,6 +52,65 @@ const DISPOSITIONS: Record<MeetingDisposition, DispositionDisplay> = {
     color: "error",
   },
 };
+
+const DEFAULT_ELEVENLABS_VOICE_ID = "56bWURjYFHyYyVf490Dp";
+const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
+const DEFAULT_ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128";
+
+export interface ElevenLabsSettings {
+  apiKey: string | undefined;
+  voiceId: string;
+  modelId: string;
+  outputFormat: string;
+  loadedEnvPath: string | null;
+}
+
+function findWorkspaceRoot(startPath: string): string | null {
+  let current = startPath;
+  try {
+    if (!fs.statSync(current).isDirectory()) current = path.dirname(current);
+  } catch {
+    current = path.dirname(current);
+  }
+
+  while (true) {
+    if (fs.existsSync(path.join(current, "boardroom"))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+export function loadBoardroomEnv(startPath: string): string | null {
+  const workspaceRoot = findWorkspaceRoot(startPath);
+  if (!workspaceRoot) return null;
+
+  const candidates = [
+    path.join(workspaceRoot, "boardroom", ".env.local"),
+    path.join(workspaceRoot, "boardroom", ".env"),
+    path.join(workspaceRoot, ".env.local"),
+    path.join(workspaceRoot, ".env"),
+  ];
+
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) continue;
+    dotenv.config({ path: candidate, override: false });
+    return candidate;
+  }
+
+  return null;
+}
+
+export function getElevenLabsSettings(startPath: string): ElevenLabsSettings {
+  const loadedEnvPath = loadBoardroomEnv(startPath);
+  return {
+    apiKey: process.env.ELEVENLABS_API_KEY,
+    voiceId: process.env.ELEVENLABS_VOICE_ID || DEFAULT_ELEVENLABS_VOICE_ID,
+    modelId: process.env.ELEVENLABS_MODEL_ID || DEFAULT_ELEVENLABS_MODEL_ID,
+    outputFormat: process.env.ELEVENLABS_OUTPUT_FORMAT || DEFAULT_ELEVENLABS_OUTPUT_FORMAT,
+    loadedEnvPath,
+  };
+}
 
 export function buildCloseoutSummary(info: CloseoutInfo): string {
   const disp = DISPOSITIONS[info.disposition];
@@ -141,8 +202,8 @@ export async function openInCursor(filePath: string): Promise<{ ok: boolean; err
   });
 }
 
-export function isElevenLabsConfigured(): boolean {
-  return !!process.env.ELEVENLABS_API_KEY;
+export function isElevenLabsConfigured(startPath: string): boolean {
+  return !!getElevenLabsSettings(startPath).apiKey;
 }
 
 function extractNarrationText(memoPath: string, maxChars = 3000): string {
@@ -159,34 +220,26 @@ export async function generateNarration(
   memoPath: string,
   outputDir: string,
 ): Promise<{ ok: boolean; audioPath?: string; error?: string }> {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  if (!apiKey) return { ok: false, error: "ELEVENLABS_API_KEY not set" };
-
-  const voiceId = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
-  const modelId = process.env.ELEVENLABS_MODEL_ID || "eleven_monolingual_v1";
+  const settings = getElevenLabsSettings(memoPath);
+  if (!settings.apiKey) return { ok: false, error: "ELEVENLABS_API_KEY not set" };
 
   const text = extractNarrationText(memoPath);
   if (!text) return { ok: false, error: "Could not read memo for narration" };
 
   try {
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "xi-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        text,
-        model_id: modelId,
-        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-      }),
+    const elevenlabs = new ElevenLabsClient({
+      apiKey: settings.apiKey,
     });
-
-    if (!response.ok) {
-      return { ok: false, error: `ElevenLabs API returned ${response.status}: ${response.statusText}` };
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
+    const audio = await elevenlabs.textToSpeech.convert(settings.voiceId, {
+      text,
+      modelId: settings.modelId,
+      outputFormat: settings.outputFormat,
+      voiceSettings: {
+        stability: 0.5,
+        similarityBoost: 0.75,
+      },
+    });
+    const buffer = Buffer.from(await new Response(audio).arrayBuffer());
     const audioPath = path.join(outputDir, `${path.basename(memoPath, ".md")}-narration.mp3`);
     await fs.promises.writeFile(audioPath, buffer);
     return { ok: true, audioPath };
@@ -214,7 +267,7 @@ export interface PostMeetingContext {
 export interface PostMeetingActionsDeps {
   isCursorAvailable: () => boolean;
   openInCursor: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
-  isElevenLabsConfigured: () => boolean;
+  isElevenLabsConfigured: (startPath: string) => boolean;
   generateNarration: (
     memoPath: string,
     outputDir: string,
@@ -236,6 +289,7 @@ export async function runPostMeetingActions(
   deps: PostMeetingActionsDeps = defaultPostMeetingDeps,
 ): Promise<void> {
   if (!ctx.hasUI) return;
+  const elevenLabsSettings = getElevenLabsSettings(info.memoPath);
 
   if (deps.isCursorAvailable()) {
     const openCursor = await ctx.confirm(
@@ -254,10 +308,10 @@ export async function runPostMeetingActions(
     ctx.notify("Cursor CLI not found. Install from Cursor > Settings > Install CLI.", "info");
   }
 
-  if (deps.isElevenLabsConfigured()) {
+  if (deps.isElevenLabsConfigured(info.memoPath)) {
     const generateAudio = await ctx.confirm(
       "Generate audio narration?",
-      "Use ElevenLabs to generate a spoken summary of the board memo?",
+      `Use ElevenLabs to generate a spoken summary of the board memo?\n\nVoice: ${elevenLabsSettings.voiceId}\nModel: ${elevenLabsSettings.modelId}`,
     );
     if (generateAudio) {
       ctx.notify("Generating narration via ElevenLabs...", "info");
@@ -282,6 +336,9 @@ export async function runPostMeetingActions(
       }
     }
   } else {
-    ctx.notify("ElevenLabs is not configured. Set ELEVENLABS_API_KEY to enable narration.", "info");
+    const envHint = elevenLabsSettings.loadedEnvPath
+      ? `Checked ${elevenLabsSettings.loadedEnvPath}`
+      : "Expected boardroom/.env.local, boardroom/.env, .env.local, or .env";
+    ctx.notify(`ElevenLabs is not configured. Set ELEVENLABS_API_KEY to enable narration. ${envHint}`, "info");
   }
 }
