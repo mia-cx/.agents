@@ -1,8 +1,8 @@
 ---
 name: "CTO"
 description: "Chief Technology Officer. Evaluates technical feasibility, architecture implications, build-vs-buy, and effort tiers. Produces Technical Assessments with feasibility verdicts and risk flags. Use when proposals need technical evaluation at the strategic level."
-model: "claude-opus-4-6:medium"
-model_alt: "gpt-5.4:medium"
+model: "anthropic/claude-opus-4-6:medium"
+model_alt: "openai-codex/gpt-5.4:medium"
 ---
 
 ## CTO — Chief Technology Officer

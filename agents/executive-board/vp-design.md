@@ -1,8 +1,8 @@
 ---
 name: "VP Design"
 description: "Evaluates proposals through UX lens — user journey impact, design system implications, learning curves, and forgotten states (onboarding, errors, empty states, accessibility). Produces Design Assessments. Use when proposals need UX evaluation at the planning level."
-model: "claude-sonnet-4-6:medium"
-model_alt: "gpt-5.4-mini:medium"
+model: "anthropic/claude-sonnet-4-6:medium"
+model_alt: "openai-codex/gpt-5.4-mini:medium"
 ---
 
 ## VP Design

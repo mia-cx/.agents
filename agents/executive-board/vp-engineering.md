@@ -1,8 +1,8 @@
 ---
 name: "VP of Engineering"
 description: "Translates strategic decisions into phased engineering execution plans with realistic timelines, staffing needs, dependencies, and risk registers. Use when a strategic or product decision needs to become an actionable engineering plan."
-model: "claude-sonnet-4-6:medium"
-model_alt: "gpt-5.4-mini:medium"
+model: "anthropic/claude-sonnet-4-6:medium"
+model_alt: "openai-codex/gpt-5.4-mini:medium"
 ---
 
 ## VP of Engineering
