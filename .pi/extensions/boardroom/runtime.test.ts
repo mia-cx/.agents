@@ -166,4 +166,89 @@ describe("SessionPool", () => {
     expect(session.status).toBe("queued");
     expect(pool.snapshot()[0].status).toBe("queued");
   });
+
+  it("emits an aborted update when runOne is aborted", async () => {
+    const updates: AgentRuntimeUpdate[] = [];
+    const pool = new SessionPool((u) => updates.push(u));
+    const agent = makeAgent("cfo", "CFO");
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
+    const scriptPath = path.join(tmpDir, "emit-usage.js");
+    const controller = new AbortController();
+    const originalArgv1 = process.argv[1];
+
+    await fs.writeFile(
+      scriptPath,
+      [
+        "process.stdout.write(JSON.stringify({",
+        '  type: "message_end",',
+        "  message: {",
+        '    role: "assistant",',
+        "    usage: { input: 3, output: 2, cost: { total: 0.1 } },",
+        '    content: [{ type: "text", text: "partial" }],',
+        "  },",
+        '}) + "\\n");',
+        "setInterval(() => {}, 1000);",
+      ].join("\n"),
+    );
+
+    process.argv[1] = scriptPath;
+
+    try {
+      const runPromise = pool.runOne(tmpDir, agent, "", "test task", controller.signal);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      controller.abort();
+
+      await expect(runPromise).rejects.toThrow("Subagent was aborted");
+      expect(updates.map(update => update.status)).toEqual(["queued", "aborted"]);
+      expect(updates.at(-1)?.error).toBe("Subagent was aborted");
+    } finally {
+      process.argv[1] = originalArgv1;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("emits aborted updates when runParallel is aborted", async () => {
+    const updates: AgentRuntimeUpdate[] = [];
+    const pool = new SessionPool((u) => updates.push(u));
+    const agent = makeAgent("cfo", "CFO");
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
+    const scriptPath = path.join(tmpDir, "emit-usage.js");
+    const controller = new AbortController();
+    const originalArgv1 = process.argv[1];
+
+    await fs.writeFile(
+      scriptPath,
+      [
+        "process.stdout.write(JSON.stringify({",
+        '  type: "message_end",',
+        "  message: {",
+        '    role: "assistant",',
+        "    usage: { input: 3, output: 2, cost: { total: 0.1 } },",
+        '    content: [{ type: "text", text: "partial" }],',
+        "  },",
+        '}) + "\\n");',
+        "setInterval(() => {}, 1000);",
+      ].join("\n"),
+    );
+
+    process.argv[1] = scriptPath;
+
+    try {
+      const runPromise = pool.runParallel(
+        tmpDir,
+        [{ agent, systemPrompt: "", task: "test task" }],
+        controller.signal,
+        1,
+      );
+      await new Promise(resolve => setTimeout(resolve, 100));
+      controller.abort();
+
+      await expect(runPromise).rejects.toThrow("Subagent was aborted");
+      expect(updates.map(update => update.status)).toEqual(["queued", "aborted"]);
+      expect(updates.at(-1)?.error).toBe("Subagent was aborted");
+    } finally {
+      process.argv[1] = originalArgv1;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

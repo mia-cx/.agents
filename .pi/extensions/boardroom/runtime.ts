@@ -251,9 +251,12 @@ export class SessionPool {
     session.status = "queued";
     this.emitUpdate(session);
 
-    const result = await session.run(cwd, systemPrompt, task, signal);
-    this.emitUpdate(session);
-    return result;
+    try {
+      const result = await session.run(cwd, systemPrompt, task, signal);
+      return result;
+    } finally {
+      this.emitUpdate(session);
+    }
   }
 
   async runParallel(
@@ -280,8 +283,11 @@ export class SessionPool {
         if (current >= tasks.length) return;
         const t = tasks[current];
         const session = this.getOrCreate(t.agent);
-        results[current] = await session.run(cwd, t.systemPrompt, t.task, signal);
-        this.emitUpdate(session);
+        try {
+          results[current] = await session.run(cwd, t.systemPrompt, t.task, signal);
+        } finally {
+          this.emitUpdate(session);
+        }
       }
     });
 
