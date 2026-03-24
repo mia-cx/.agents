@@ -10,7 +10,14 @@
 
 import type { AgentConfig, AgentRuntimeUpdate, ConstraintSet, MeetingMode, ParsedBrief } from "./types.js";
 import type { MeetingCallbacks, MeetingResult } from "./meeting.js";
-import { getAbortDisposition } from "./meeting.js";
+import {
+  dedupeAgentsBySlug,
+  generateMeetingId,
+  getAbortDisposition,
+  getNonCeoAgents,
+  processScratchpadOutput,
+  resolveRosterSelection,
+} from "./meeting.js";
 import { ConstraintTracker } from "./constraints.js";
 import {
   createThreadState,
@@ -19,8 +26,6 @@ import {
   getAllThreads,
   getAllMessages,
   serializeToMessagingLog,
-  resolveThread,
-  getActiveThreads,
   resetCounters,
   resolveAllActiveThreads,
   markUndeliverableMessages,
@@ -36,7 +41,7 @@ import { buildRosterInfo } from "./messaging-ui.js";
 import { runAgent } from "./runner.js";
 import { runSemiLiveRound, DEFAULT_ROUND_CONFIG, type QueueCallbacks } from "./round-queue.js";
 import { writeMemo, writeExpertise, writeVisuals } from "./artifacts.js";
-import { loadScratchpad, saveScratchpad, extractScratchpadUpdate, stripScratchpadBlock } from "./scratchpad.js";
+import { loadScratchpad } from "./scratchpad.js";
 import type { ThreadState } from "./messaging-types.js";
 import { buildThreadGraph, renderThreadGraph } from "./thread-graph.js";
 import { extractMermaidBlocks } from "./visuals.js";
@@ -46,24 +51,6 @@ import { findAgentsByTag } from "./agents.js";
 export interface MessagingMeetingCallbacks extends Pick<MeetingCallbacks, "onStatus" | "onConfirmRoster" | "onSnapshot" | "signal"> {}
 
 export interface MessagingMeetingResult extends MeetingResult {}
-
-function generateMeetingId(brief: ParsedBrief): string {
-  const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  return `${ts}-${brief.slug}`;
-}
-
-function getNonCeoAgents(allAgents: AgentConfig[]): AgentConfig[] {
-  return allAgents.filter(a => a.slug !== "ceo" && a.slug !== "executive-board-orchestrator");
-}
-
-function dedupeAgentsBySlug(agents: AgentConfig[]): AgentConfig[] {
-  const seen = new Set<string>();
-  return agents.filter((agent) => {
-    if (seen.has(agent.slug)) return false;
-    seen.add(agent.slug);
-    return true;
-  });
-}
 
 function resolveRoster(allAgents: AgentConfig[], names: string[]): AgentConfig[] {
   const nonCeo = getNonCeoAgents(allAgents);
@@ -77,14 +64,6 @@ function resolveRoster(allAgents: AgentConfig[], names: string[]): AgentConfig[]
     .filter((a): a is AgentConfig => a !== undefined && a.slug !== "ceo");
 
   return resolved.length > 0 ? resolved : [...nonCeo];
-}
-
-function resolveRosterSelection(allAgents: AgentConfig[], slugs: string[]): AgentConfig[] {
-  return dedupeAgentsBySlug(
-    slugs
-      .map((slug) => allAgents.find((agent) => agent.slug === slug))
-      .filter((agent): agent is AgentConfig => !!agent && agent.slug !== "ceo" && agent.slug !== "executive-board-orchestrator"),
-  );
 }
 
 function buildMessagingAgentSnapshots(
@@ -184,14 +163,6 @@ function emitMessagingSnapshot(
   });
 }
 
-function processScratchpadOutput(cwd: string, agentSlug: string, output: string): string {
-  const update = extractScratchpadUpdate(output);
-  if (update) {
-    saveScratchpad(cwd, agentSlug, update);
-  }
-  return stripScratchpadBlock(output);
-}
-
 function describeMessagingAbortReason(err: unknown, signal?: AbortSignal): string {
   const errorMessage = err instanceof Error
     ? err.message
@@ -238,6 +209,23 @@ function finalizeMessagingResult(
     elapsedMinutes: tracker.elapsedMinutes,
     roster,
   };
+}
+
+function postFramingMessageAcrossThreads(
+  threadState: ThreadState,
+  threadIds: string[],
+  content: string,
+  tokenCount: number,
+  cost: number,
+): void {
+  for (const [index, threadId] of threadIds.entries()) {
+    postMessage(
+      threadState, "broadcast", "ceo", [],
+      threadId, content, 1, 0,
+      index === 0 ? tokenCount : 0,
+      index === 0 ? cost : 0,
+    );
+  }
 }
 
 async function runCeoWithRetry(
@@ -355,14 +343,14 @@ export async function runFreeformMessagingMeeting(
       createThread(threadState, ws.title, "ceo"),
     );
 
-    // Post CEO framing as broadcast in each thread
-    for (const thread of createdThreads) {
-      postMessage(
-        threadState, "broadcast", "ceo", [],
-        thread.id, framingRes.content, 1, 0,
-        framingRes.tokenCount, framingRes.cost,
-      );
-    }
+    // Post CEO framing in every thread, but only charge once overall.
+    postFramingMessageAcrossThreads(
+      threadState,
+      createdThreads.map((thread) => thread.id),
+      framingRes.content,
+      framingRes.tokenCount,
+      framingRes.cost,
+    );
 
     callbacks.onStatus(`Phase 1 complete. Created ${createdThreads.length} workstream(s). ${tracker.summary}`);
     emitMessagingSnapshot(meetingId, brief, mode, constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 1, "CEO Framing", "Framing complete. Roster confirmed.", callbacks);
@@ -679,14 +667,14 @@ export async function runStructuredMessagingMeeting(
       createThread(threadState, ws.title, "ceo"),
     );
 
-    // Post CEO framing in each thread
-    for (const thread of createdThreads) {
-      postMessage(
-        threadState, "broadcast", "ceo", [],
-        thread.id, framingRes.content, 1, 0,
-        framingRes.tokenCount, framingRes.cost,
-      );
-    }
+    // Post CEO framing in every thread, but only charge once overall.
+    postFramingMessageAcrossThreads(
+      threadState,
+      createdThreads.map((thread) => thread.id),
+      framingRes.content,
+      framingRes.tokenCount,
+      framingRes.cost,
+    );
 
     callbacks.onStatus(`Phase 1 complete. Created ${createdThreads.length} workstream(s). ${tracker.summary}`);
     emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 1, "CEO Framing", "Framing complete. Roster confirmed.", callbacks);

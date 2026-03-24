@@ -130,7 +130,7 @@ function describeAbortReason(
   return "Unknown abort reason.";
 }
 
-function generateMeetingId(brief: ParsedBrief): string {
+export function generateMeetingId(brief: ParsedBrief): string {
   const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   return `${ts}-${brief.slug}`;
 }
@@ -158,11 +158,11 @@ function getPlannedRoundCount(constraintValues: ConstraintSet): number {
   return Math.max(1, constraintValues.max_debate_rounds);
 }
 
-function getNonCeoAgents(allAgents: AgentConfig[]): AgentConfig[] {
+export function getNonCeoAgents(allAgents: AgentConfig[]): AgentConfig[] {
   return allAgents.filter(a => a.slug !== "ceo" && a.slug !== "executive-board-orchestrator");
 }
 
-function dedupeAgentsBySlug(agents: AgentConfig[]): AgentConfig[] {
+export function dedupeAgentsBySlug(agents: AgentConfig[]): AgentConfig[] {
   const seen = new Set<string>();
   return agents.filter((agent) => {
     if (seen.has(agent.slug)) return false;
@@ -171,7 +171,7 @@ function dedupeAgentsBySlug(agents: AgentConfig[]): AgentConfig[] {
   });
 }
 
-function resolveRosterSelection(allAgents: AgentConfig[], slugs: string[]): AgentConfig[] {
+export function resolveRosterSelection(allAgents: AgentConfig[], slugs: string[]): AgentConfig[] {
   const resolved = slugs
     .map((slug) => allAgents.find((agent) => agent.slug === slug))
     .filter((agent): agent is AgentConfig => !!agent && agent.slug !== "ceo" && agent.slug !== "executive-board-orchestrator");
@@ -207,7 +207,7 @@ function applyRosterLimit(roster: AgentConfig[], constraints: ConstraintSet): Ag
   return roster.slice(0, constraints.max_roster_size);
 }
 
-function processScratchpadOutput(cwd: string, agentSlug: string, output: string): string {
+export function processScratchpadOutput(cwd: string, agentSlug: string, output: string): string {
   const update = extractScratchpadUpdate(output);
   if (update) {
     saveScratchpad(cwd, agentSlug, update);
