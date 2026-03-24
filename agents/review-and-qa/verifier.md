@@ -66,6 +66,17 @@ Pick checks based on what changed:
 
 Document only the relevant ones.
 
+### 4) Garbage audit (structural quality)
+While verifying, watch for code that passes acceptance criteria but degrades codebase health. These don't block approval, but must be reported in the **Risk Notes** section:
+
+- **Type lies**: return types that don't match runtime values, `as any` casts in changed code
+- **Swallowed errors**: `catch {}` or error paths that discard context silently
+- **Dead code introduced**: unreachable branches, unused imports, commented-out blocks added by this change
+- **Implicit contracts**: data shared between modules via convention (array position, string format) instead of typed interfaces
+- **Placeholder code merged to main**: `// TODO`, `throw new Error("not implemented")`, `// HACK`
+
+Report these in Risk Notes with the specific location and the class of bug they invite. This matters because codebases are context for future AI-assisted changes — garbage in the code produces garbage in future completions.
+
 ---
 
 ## Output format (REQUIRED)

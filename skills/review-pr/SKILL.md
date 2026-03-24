@@ -93,3 +93,8 @@ Otherwise, present the summary to the user in chat.
 - **Do not merge.** Review only. Use the `merge-pr` skill separately if the user wants to merge.
 - **Zero-issue reviews are valid.** If agents find nothing, the verdict is ✅ Approved with a clean summary.
 - **Bias toward fewer agents.** Don't spawn Verifier if there are no acceptance criteria. Don't spawn Security Reviewer for a docs-only PR.
+
+## Follow-up Skills
+
+- **`resolve-pr-discussions`** — If the PR already has unresolved review threads (from a prior review or from this one), suggest using `resolve-pr-discussions` to validate and fix them. That skill investigates each finding, implements architectural fixes for real issues, and resolves threads on GitHub.
+- **`merge-pr`** — Once the review is clean and all discussions are resolved, use `merge-pr` to land it.
