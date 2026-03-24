@@ -8,7 +8,10 @@ import { parseBrief, listBriefs } from "./brief-parser.js";
 import { loadConfig, resolveConstraints } from "./config.js";
 import { runFreeformMeeting, runStructuredMeeting } from "./meeting.js";
 import type { MeetingCallbacks, MeetingResult } from "./meeting.js";
+import type { AgentRuntimeUpdate, MeetingProgressSnapshot } from "./types.js";
 import { listPastMeetings } from "./artifacts.js";
+import { formatDashboardStatus, buildDashboardWidgetLines, buildPlainDashboardLines } from "./ui.js";
+import { buildCloseoutSummary, buildThemedCloseoutLines, runPostMeetingActions } from "./closeout.js";
 
 interface ActiveMeetingState {
   meetingId: string;
@@ -19,6 +22,8 @@ interface ActiveMeetingState {
   startedAt: number;
   lastStatus: string;
   abortController: AbortController;
+  agentSnapshots: AgentRuntimeUpdate[];
+  lastSnapshot: MeetingProgressSnapshot | null;
 }
 
 async function runMeeting(
@@ -114,6 +119,8 @@ export default function (pi: ExtensionAPI) {
         startedAt: Date.now(),
         lastStatus: "Starting...",
         abortController,
+        agentSnapshots: [],
+        lastSnapshot: null,
       };
 
       ctx.ui.setStatus("boardroom", "Board meeting in progress...");
@@ -130,6 +137,29 @@ export default function (pi: ExtensionAPI) {
               }
               ctx.ui.setStatus("boardroom", msg);
             },
+            onAgentUpdate: (update) => {
+              if (!activeMeeting) return;
+              const idx = activeMeeting.agentSnapshots.findIndex(s => s.slug === update.slug);
+              if (idx >= 0) activeMeeting.agentSnapshots[idx] = update;
+              else activeMeeting.agentSnapshots.push(update);
+
+              if (ctx.hasUI && activeMeeting.lastSnapshot) {
+                const merged = { ...activeMeeting.lastSnapshot, agents: [...activeMeeting.agentSnapshots] };
+                const theme = ctx.ui.theme;
+                ctx.ui.setWidget("boardroom", buildDashboardWidgetLines(merged, theme));
+              }
+            },
+            onSnapshot: (snapshot) => {
+              if (activeMeeting) {
+                activeMeeting.lastSnapshot = snapshot;
+                activeMeeting.phase = snapshot.phaseLabel;
+              }
+              if (ctx.hasUI) {
+                const theme = ctx.ui.theme;
+                ctx.ui.setStatus("boardroom", formatDashboardStatus(snapshot, theme));
+                ctx.ui.setWidget("boardroom", buildDashboardWidgetLines(snapshot, theme));
+              }
+            },
             onConfirmRoster: async (names, rationale) => {
               if (!ctx.hasUI) return true;
               return ctx.ui.confirm(
@@ -142,12 +172,26 @@ export default function (pi: ExtensionAPI) {
         );
 
         activeMeeting = null;
-        ctx.ui.setStatus("boardroom", undefined);
-        const visualMsg = result.visualPaths.length > 0 ? `\nVisuals: ${result.visualPaths.join(", ")}` : "";
-        ctx.ui.notify(`Meeting complete!\nMemo: ${result.memoPath}\nDebate: ${result.debateJsonPath}${visualMsg}`, "info");
+
+        if (ctx.hasUI) {
+          const theme = ctx.ui.theme;
+          ctx.ui.setWidget("boardroom", buildThemedCloseoutLines(result, theme));
+          ctx.ui.setStatus("boardroom", undefined);
+        }
+
+        ctx.ui.notify(buildCloseoutSummary(result), "info");
+
+        await runPostMeetingActions(result, {
+          hasUI: ctx.hasUI,
+          confirm: (title, body) => ctx.ui.confirm(title, body),
+          notify: (msg, type) => ctx.ui.notify(msg, type),
+        });
+
+        ctx.ui.setWidget("boardroom", undefined);
       } catch (err: any) {
         activeMeeting = null;
         ctx.ui.setStatus("boardroom", undefined);
+        ctx.ui.setWidget("boardroom", undefined);
         ctx.ui.notify(`Meeting failed: ${err.message}`, "error");
       }
     },
@@ -170,6 +214,21 @@ export default function (pi: ExtensionAPI) {
         `Elapsed: ${elapsed} min`,
         `Status: ${activeMeeting.lastStatus}`,
       ];
+
+      if (activeMeeting.agentSnapshots.length > 0) {
+        lines.push("", "Board Members:");
+        for (const agent of activeMeeting.agentSnapshots) {
+          const cost = `$${agent.totalCost.toFixed(4)}`;
+          const tokens = agent.totalTokens > 0 ? `${agent.totalTokens} tok` : "";
+          lines.push(`  ${agent.name}: ${agent.status} (${agent.turns} turns, ${cost}${tokens ? `, ${tokens}` : ""})`);
+          if (agent.error) lines.push(`    Error: ${agent.error}`);
+        }
+      }
+
+      if (activeMeeting.lastSnapshot) {
+        lines.push("");
+        lines.push(...buildPlainDashboardLines(activeMeeting.lastSnapshot));
+      }
 
       ctx.ui.notify(`Active Meeting\n\n${lines.join("\n")}`, "info");
     },
@@ -263,24 +322,33 @@ export default function (pi: ExtensionAPI) {
           onUpdate?.({ content: [{ type: "text", text: msg }] });
           ctx.ui.setStatus("boardroom", msg);
         },
+        onAgentUpdate: (update) => {
+          const icon = update.status === "completed" ? "✓" : update.status === "failed" ? "✗" : "▶";
+          onUpdate?.({ content: [{ type: "text", text: `${icon} ${update.name}: ${update.status} (${update.turns} turns, $${update.totalCost.toFixed(4)})` }] });
+        },
         onConfirmRoster: async () => true,
         signal,
       });
 
       ctx.ui.setStatus("boardroom", undefined);
 
+      const summary = buildCloseoutSummary(result);
+
       return {
         content: [{
           type: "text",
           text: [
-            `Board meeting complete.`,
-            `Memo: ${result.memoPath}`,
-            `Debate log: ${result.debateJsonPath}`,
-            result.visualPaths.length > 0 ? `Visuals: ${result.visualPaths.join(", ")}` : "",
-            brief.warnings.length > 0 ? `Warnings: ${brief.warnings.join("; ")}` : "",
+            summary,
+            brief.warnings.length > 0 ? `\nWarnings: ${brief.warnings.join("; ")}` : "",
           ].filter(Boolean).join("\n"),
         }],
-        details: { memoPath: result.memoPath, debateJsonPath: result.debateJsonPath, visualPaths: result.visualPaths },
+        details: {
+          memoPath: result.memoPath,
+          debateJsonPath: result.debateJsonPath,
+          visualPaths: result.visualPaths,
+          disposition: result.disposition,
+          totalCost: result.totalCost,
+        },
       };
     },
 
