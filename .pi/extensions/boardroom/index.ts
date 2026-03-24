@@ -1798,10 +1798,16 @@ export default function (pi: ExtensionAPI) {
         clearActiveMeetingTimer();
         activeMeeting = null;
 
+        if (ctx.hasUI) {
+          ctx.ui.setStatus("boardroom", "Generating spoken narration summary...");
+        }
         const humanSummary = await generateHumanReadableSummary(result.memoPath, path.dirname(result.memoPath));
         if (humanSummary.ok) {
           result.summaryPath = humanSummary.summaryPath;
           result.summaryText = humanSummary.summaryText;
+          if (humanSummary.warning && ctx.hasUI) {
+            ctx.ui.notify(humanSummary.warning, "warning");
+          }
         } else if (ctx.hasUI) {
           ctx.ui.notify(`Human-readable summary failed: ${humanSummary.error}`, "warning");
         }
@@ -2012,15 +2018,31 @@ export default function (pi: ExtensionAPI) {
         if (toolUiTimer) clearInterval(toolUiTimer);
       }
 
-      ctx.ui.setStatus("boardroom", undefined);
+      ctx.ui.setStatus("boardroom", "Generating spoken narration summary...");
       const humanSummary = await generateHumanReadableSummary(result.memoPath, path.dirname(result.memoPath));
       if (humanSummary.ok) {
         result.summaryPath = humanSummary.summaryPath;
         result.summaryText = humanSummary.summaryText;
+        if (humanSummary.warning && ctx.hasUI) {
+          ctx.ui.notify(humanSummary.warning, "warning");
+        }
+      } else if (ctx.hasUI) {
+        ctx.ui.notify(`Human-readable summary failed: ${humanSummary.error}`, "warning");
       }
       if (ctx.hasUI) {
         setCloseoutWidget(ctx, result);
       }
+
+      await runPostMeetingActions(result, {
+        hasUI: ctx.hasUI,
+        confirm: (title, body) => ctx.ui.confirm(title, body),
+        notify: (msg, type) => ctx.ui.notify(msg, type),
+        setNarrationState: (state) => {
+          if (!ctx.hasUI) return;
+          setPinnedNarrationState(ctx as any, state);
+        },
+        startNarrationPlayback: (request) => startNarrationPlayback(ctx as any, request),
+      });
 
       const summary = buildCloseoutSummary(result);
 

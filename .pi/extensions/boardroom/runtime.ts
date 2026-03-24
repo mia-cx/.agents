@@ -745,9 +745,11 @@ export class SessionPool {
     return Array.from(this.sessions.values()).map((s) => s.snapshot());
   }
 
-  destroyAll(): void {
-    for (const session of this.sessions.values()) {
-      session.markAborted();
+  destroyAll(markAborted = false): void {
+    if (markAborted) {
+      for (const session of this.sessions.values()) {
+        session.markAborted();
+      }
     }
     this.sessions.clear();
   }

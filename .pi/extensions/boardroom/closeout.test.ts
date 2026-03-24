@@ -152,6 +152,52 @@ describe("summarizeMemoForNarration", () => {
     expect(summary.length).toBeGreaterThan(1800);
     expect(summary.length).toBeLessThanOrEqual(5003);
   });
+
+  it("summarizes multi-decision memos instead of fixating on one heading", () => {
+    const memo = [
+      "# Strategic Brief — Board Synthesis",
+      "",
+      "## Executive Summary",
+      "",
+      "1. Counter on structure for the acquisition.",
+      "2. Greenlight a trust-first Splice replacement.",
+      "",
+      "## Decision 1: Acquisition Offer",
+      "",
+      "### Strategic Question",
+      "Should we accept, counter, or decline the acquisition offer?",
+      "",
+      "### Board Consensus",
+      "Counter on structure, increase upfront cash, and keep earnout objective.",
+      "",
+      "## Decision 2: Splice Studio Replacement",
+      "",
+      "### Strategic Question",
+      "Should Vesta build a Splice replacement, and what should V1 include?",
+      "",
+      "### Board Decision: GREENLIGHT",
+      "Build a trust-first V1 with backup, dependency tracking, and restore history.",
+      "",
+      "## Cross-Cutting Themes",
+      "",
+      "1. Trust matters in both decisions.",
+      "2. Timing matters because the market window is open now.",
+      "",
+      "## Final Recommendations",
+      "",
+      "- Counter on structure for the acquisition.",
+      "- Greenlight the trust-first Splice replacement.",
+    ].join("\n");
+
+    const summary = summarizeMemoForNarration(memo, 2000);
+    expect(summary).toContain("Executive summary:");
+    expect(summary).toContain("Decisions covered:");
+    expect(summary).toContain("Acquisition Offer:");
+    expect(summary).toContain("Splice Studio Replacement:");
+    expect(summary).toContain("Questions addressed:");
+    expect(summary).toContain("Cross-cutting themes:");
+    expect(summary).toContain("Recommendations:");
+  });
 });
 
 describe("findNarrationActiveRange", () => {
@@ -389,11 +435,87 @@ describe("generateHumanReadableSummary", () => {
       "utf-8",
     );
 
-    const result = await generateHumanReadableSummary(memoPath, tmpRoot);
+    const result = await generateHumanReadableSummary(memoPath, tmpRoot, {
+      summarizeMemo: async () => "This is a spoken summary of the whole memo for ElevenLabs.",
+    });
     expect(result.ok).toBe(true);
     expect(result.summaryPath).toBe(path.join(tmpRoot, "memo-narration.txt"));
+    expect(result.summaryText).toBe("This is a spoken summary of the whole memo for ElevenLabs.");
+    expect(fs.readFileSync(result.summaryPath!, "utf-8")).toContain("spoken summary of the whole memo");
+  });
+
+  it("falls back to deterministic summarization when the llm summary fails", async () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "boardroom-summary-fallback-"));
+    const memoPath = path.join(tmpRoot, "memo.md");
+    fs.writeFileSync(
+      memoPath,
+      [
+        "# Strategic Brief",
+        "",
+        "### Decision",
+        "Ship the focused replacement.",
+        "",
+        "### Context & Evidence",
+        "- Demand still exists.",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await generateHumanReadableSummary(memoPath, tmpRoot, {
+      summarizeMemo: async () => null,
+    });
+    expect(result.ok).toBe(true);
     expect(result.summaryText).toContain("Boardroom summary for Strategic Brief.");
-    expect(fs.readFileSync(result.summaryPath!, "utf-8")).toContain("Boardroom summary");
+  });
+
+  it("strips meta commentary from llm narration summaries", async () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "boardroom-summary-meta-"));
+    const memoPath = path.join(tmpRoot, "memo.md");
+    fs.writeFileSync(
+      memoPath,
+      [
+        "# Strategic Brief",
+        "",
+        "### Decision",
+        "Ship the focused replacement.",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await generateHumanReadableSummary(memoPath, tmpRoot, {
+      summarizeMemo: async () => "Creating a concise TTS narration script that covers the whole memo and stays under 5000 characters. Vesta should build the focused replacement now.",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.summaryText).toBe("Vesta should build the focused replacement now.");
+  });
+
+  it("strips narration labels, separators, and character-count boilerplate", async () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "boardroom-summary-labels-"));
+    const memoPath = path.join(tmpRoot, "memo.md");
+    fs.writeFileSync(memoPath, "# Strategic Brief", "utf-8");
+
+    const result = await generateHumanReadableSummary(memoPath, tmpRoot, {
+      summarizeMemo: async () => "Spoken Narration Script: Splice Studio Replacement for Vesta Here is a concise TTS-ready script under 5000 characters: --- Decision: Vesta should build the replacement now. --- Character count: approximately 2,345 characters, under the 5,000 limit.",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.summaryText).toBe("Decision: Vesta should build the replacement now.");
+  });
+
+  it("strips a bare narration script prefix before the actual summary", async () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "boardroom-summary-prefix-"));
+    const memoPath = path.join(tmpRoot, "memo.md");
+    fs.writeFileSync(memoPath, "# Strategic Brief", "utf-8");
+
+    const result = await generateHumanReadableSummary(memoPath, tmpRoot, {
+      summarizeMemo: async () =>
+        "Narration Script The board discussed whether to accept the acquisition offer and decided to decline it because the price undervalued the company.",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.summaryText).toBe(
+      "The board discussed whether to accept the acquisition offer and decided to decline it because the price undervalued the company.",
+    );
   });
 });
 
@@ -586,5 +708,41 @@ describe("runPostMeetingActions", () => {
     expect(narrationStates.some((state) => state && state.phase === "generating")).toBe(true);
     expect(narrationStates.at(-1)).toBeNull();
     vi.useRealTimers();
+  });
+
+  it("reuses the precomputed summary when generating narration", async () => {
+    const { ctx } = makeContext();
+    const generateNarration = vi.fn(async () => ({
+      ok: true,
+      audioPath: "/tmp/narration.mp3",
+      summaryPath: "/tmp/narration.txt",
+      summaryText: "Precomputed spoken summary.",
+    }));
+    const generateHumanReadableSummary = vi.fn(async () => ({
+      ok: true,
+      summaryPath: "/tmp/narration.txt",
+      summaryText: "Precomputed spoken summary.",
+    }));
+
+    await runPostMeetingActions(
+      makeInfo({
+        summaryPath: "/tmp/narration.txt",
+        summaryText: "Precomputed spoken summary.",
+      }),
+      {
+        ...ctx,
+        confirm: async (title) => title === "Generate audio narration?",
+      },
+      makeDeps({
+        generateHumanReadableSummary,
+        generateNarration,
+      }),
+    );
+
+    expect(generateHumanReadableSummary).not.toHaveBeenCalled();
+    expect(generateNarration).toHaveBeenCalledWith("/meetings/memo.md", "/meetings", {
+      summaryText: "Precomputed spoken summary.",
+      summaryPath: "/tmp/narration.txt",
+    });
   });
 });

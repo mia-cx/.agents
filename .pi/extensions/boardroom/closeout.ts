@@ -87,11 +87,25 @@ export interface NarrationResult {
   error?: string;
 }
 
+interface NarrationSummaryInput {
+  summaryText?: string;
+  summaryPath?: string;
+}
+
 export interface HumanReadableSummaryResult {
   ok: boolean;
   summaryPath?: string;
   summaryText?: string;
   error?: string;
+  warning?: string;
+}
+
+interface HumanReadableSummaryDeps {
+  summarizeMemo?: (
+    memoPath: string,
+    markdown: string,
+    maxChars: number,
+  ) => Promise<string | { text?: string | null; error?: string } | null | undefined>;
 }
 
 export interface NarrationDisplayState {
@@ -117,6 +131,360 @@ export interface NarrationPlaybackResult {
   ok: boolean;
   error?: string;
 }
+
+function getPiInvocation(args: string[]): { command: string; args: string[] } {
+  const currentScript = process.argv[1];
+  if (currentScript && fs.existsSync(currentScript)) {
+    return { command: process.execPath, args: [currentScript, ...args] };
+  }
+  const execName = path.basename(process.execPath).toLowerCase();
+  if (!/^(node|bun)(\.exe)?$/.test(execName)) {
+    return { command: process.execPath, args };
+  }
+  return { command: "pi", args };
+}
+
+function sanitizeJsonEventLine(line: string): string | null {
+  const withoutOsc = line.replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "");
+  const withoutAnsi = withoutOsc.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "");
+  const trimmed = withoutAnsi.trim();
+  if (!trimmed) return null;
+  const jsonStart = trimmed.indexOf("{");
+  if (jsonStart === -1) return null;
+  return trimmed.slice(jsonStart);
+}
+
+async function writeSummarySystemPromptFile(prompt: string): Promise<{ dir: string; filePath: string }> {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "boardroom-summary-"));
+  const filePath = path.join(tmpDir, "summary-system-prompt.md");
+  await fs.promises.writeFile(filePath, prompt, { encoding: "utf-8", mode: 0o600 });
+  return { dir: tmpDir, filePath };
+}
+
+function getNarrationSummaryModel(): string | undefined {
+  const model = process.env.BOARDROOM_SUMMARY_MODEL?.trim();
+  return model ? model : undefined;
+}
+
+function getNarrationSummaryTimeoutMs(): number {
+  const raw = Number(process.env.BOARDROOM_SUMMARY_TIMEOUT_MS ?? "90000");
+  return Number.isFinite(raw) ? Math.max(5000, raw) : 90000;
+}
+
+const DEFAULT_NARRATION_SUMMARY_SYSTEM_PROMPT = [
+  "You write spoken narration scripts for ElevenLabs.",
+  "",
+  "Summarize the ENTIRE memo, not just one section or heading.",
+  "",
+  "Your job is to explain the meeting outcome to a human listener in plain spoken English.",
+  "",
+  "Focus on four things, in this order:",
+  "1. What the board discussed.",
+  "2. The key roadblocks, constraints, disagreements, or considerations.",
+  "3. The final decision.",
+  "4. Why the board landed there.",
+  "",
+  "Prefer synthesis over enumeration. Do not turn the memo into a laundry list of findings, tables, sections, or metrics.",
+  "",
+  "Only mention numbers, timelines, risks, or specific details when they materially explain the decision.",
+  "",
+  "If the memo includes multiple options or disagreements, explain the tradeoff that mattered and how it got resolved.",
+  "",
+  "End with a clear bottom line.",
+  "",
+  "Return plain English prose only. No markdown, no bullets, no headings, no tables, no XML, and no code fences.",
+  "",
+  "Write in natural, speakable English that sounds good when read aloud.",
+  "",
+  "Use one compact spoken narrative, not a section-by-section recap.",
+  "",
+  "Expand symbols and abbreviations into spoken English where helpful.",
+  "",
+  "Do not mention that you are summarizing or that a memo was provided.",
+  "",
+  "Do not narrate your process.",
+  "",
+  "Do not begin with status text like \"Creating...\", \"Drafting...\", \"Generating...\", or \"Here is...\".",
+  "",
+  "The first sentence must already be part of the final spoken narration.",
+  "",
+  "Do not use tools.",
+  "",
+  "Keep the response under {{MAX_CHARS}} characters.",
+  "",
+  "Start directly with the substance.",
+].join("\n");
+
+function getNarrationSummaryPromptPath(memoPath: string): string | null {
+  const workspaceRoot = findWorkspaceRoot(memoPath);
+  if (!workspaceRoot) return null;
+  return path.join(workspaceRoot, "agents", "meta", "narration-summarizer.md");
+}
+
+function loadNarrationSummarySystemPrompt(memoPath: string, maxChars: number): string {
+  const promptPath = getNarrationSummaryPromptPath(memoPath);
+  let template = DEFAULT_NARRATION_SUMMARY_SYSTEM_PROMPT;
+
+  if (promptPath) {
+    try {
+      const fileTemplate = fs.readFileSync(promptPath, "utf-8").trim();
+      if (fileTemplate) template = fileTemplate;
+    } catch {}
+  }
+
+  return template.replaceAll("{{MAX_CHARS}}", String(maxChars));
+}
+
+function stripNarrationMetaCommentary(text: string): string {
+  let cleaned = text.trim();
+  const metaLinePatterns = [
+    /^(?:(?:spoken\s+)?narration\s+script\b(?:\s*:\s*|\s+))/i,
+    /^(creating|drafting|writing|generating|preparing)\b[^.!?\n]*[.!?]\s*/i,
+    /^(here is|here's)\b[^:\n]*(?::\s*|[.!?]\s*)/i,
+    /^(?:a\s+)?concise\s+tts(?:-ready)?\s+script\b[^:\n]*(?::\s*|[.!?]\s*)/i,
+    /^(i am|i'm|i will|i'll)\b[^.!?\n]*[.!?]\s*/i,
+    /^(this is)\b[^.!?\n]*summary[^.!?\n]*[.!?]\s*/i,
+    /^character count\s*:\s*[^.!?\n]*(?:[.!?]\s*|$)/i,
+  ];
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const pattern of metaLinePatterns) {
+      const next = cleaned.replace(pattern, "").trimStart();
+      if (next !== cleaned) {
+        cleaned = next;
+        changed = true;
+      }
+    }
+  }
+
+  cleaned = cleaned
+    .replace(/\s*---+\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const trailingMetaPatterns = [
+    /\bcharacter count\s*:\s*[^.!?\n]*(?:[.!?]\s*|$)/i,
+    /\bunder\s+\d[\d,]*\s+characters\b[^.!?\n]*(?:[.!?]\s*|$)/i,
+  ];
+  for (const pattern of trailingMetaPatterns) {
+    cleaned = cleaned.replace(pattern, "").trim();
+  }
+
+  return cleaned;
+}
+
+async function summarizeMemoWithLlm(
+  memoPath: string,
+  markdown: string,
+  maxChars: number,
+): Promise<{ text?: string | null; error?: string }> {
+  const systemPrompt = loadNarrationSummarySystemPrompt(memoPath, maxChars);
+
+  let tmpDir: string | null = null;
+  let finalOutput = "";
+  let streamedOutput = "";
+  let finalError = "";
+
+  try {
+    const tmp = await writeSummarySystemPromptFile(systemPrompt);
+    tmpDir = tmp.dir;
+
+    const args = ["--mode", "json", "-p", "--no-session"];
+    const model = getNarrationSummaryModel();
+    if (model) args.push("--model", model);
+    args.push("--system-prompt", tmp.filePath);
+    args.push(
+      [
+        "Task: Turn the following strategic memo into a concise spoken narration script for text-to-speech.",
+        `It must cover the whole memo and stay under ${maxChars} characters.`,
+        "",
+        "Required content order:",
+        "1. What the board discussed.",
+        "2. The main constraints, disagreements, or roadblocks.",
+        "3. The final decision.",
+        "4. Why that decision won.",
+        "",
+        "Quality bar:",
+        "Write like an executive recap someone could listen to once and understand the meeting.",
+        "Do not mirror the memo's section structure.",
+        "Do not list every supporting fact.",
+        "Do not include tables, separators, labels, character counts, or meta commentary.",
+        "Return only the spoken narration itself.",
+        "Do not prepend or append anything.",
+        "Do not write labels like 'Narration Script', 'Spoken Narration Script', or 'Summary'.",
+        "Do not write helper text like 'Here is...', 'Below is...', or 'This script...'.",
+        "Do not mention the character limit or whether you satisfied it.",
+        "If your first words are a label or framing phrase instead of the narration itself, the answer is wrong.",
+        "",
+        "--- MEMO START ---",
+        markdown,
+        "--- MEMO END ---",
+      ].join("\n"),
+    );
+
+    const invocation = getPiInvocation(args);
+    const output = await new Promise<{
+      stdout: string;
+      stderr: string;
+      exitCode: number;
+      finalError: string;
+      finalOutput: string;
+      streamedOutput: string;
+    }>((resolve) => {
+      const proc = spawn(invocation.command, invocation.args, {
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      let buffer = "";
+      let completionRequested = false;
+      let completionTimer: ReturnType<typeof setTimeout> | null = null;
+      let completionForcedKillTimer: ReturnType<typeof setTimeout> | null = null;
+      let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+      let timedOut = false;
+      const requestCompletionShutdown = () => {
+        if (completionRequested || timedOut) return;
+        completionRequested = true;
+        completionTimer = setTimeout(() => {
+          if (!proc.killed) proc.kill("SIGTERM");
+          completionForcedKillTimer = setTimeout(() => {
+            if (!proc.killed) proc.kill("SIGKILL");
+          }, 2000);
+        }, 100);
+      };
+      const processLine = (line: string) => {
+        const sanitized = sanitizeJsonEventLine(line);
+        if (!sanitized) return;
+        let event: any;
+        try {
+          event = JSON.parse(sanitized);
+        } catch {
+          return;
+        }
+
+        if (
+          event.type === "message_update"
+          && event.assistantMessageEvent?.type === "text_delta"
+        ) {
+          streamedOutput += String(event.assistantMessageEvent.delta ?? "");
+        }
+
+        if (event.type === "message_end" && event.message?.role === "assistant") {
+          const textParts: string[] = [];
+          for (const part of event.message.content ?? []) {
+            if (part.type === "text") textParts.push(part.text);
+          }
+          if (textParts.length > 0) finalOutput = textParts.join("");
+          if (typeof event.message.errorMessage === "string" && event.message.errorMessage.trim()) {
+            finalError = event.message.errorMessage.trim();
+          }
+          requestCompletionShutdown();
+        }
+
+        if (
+          event.type === "message_update"
+          && event.assistantMessageEvent?.type === "message_end"
+          && event.assistantMessageEvent.message?.role === "assistant"
+        ) {
+          const textParts: string[] = [];
+          for (const part of event.assistantMessageEvent.message.content ?? []) {
+            if (part.type === "text") textParts.push(part.text);
+          }
+          if (textParts.length > 0) finalOutput = textParts.join("");
+          requestCompletionShutdown();
+        }
+
+        if (event.type === "agent_end") {
+          requestCompletionShutdown();
+        }
+
+        if (event.type === "error" && event.error) {
+          finalError = typeof event.error === "string"
+            ? event.error
+            : (event.error.message ?? finalError);
+        }
+      };
+      proc.stdout.on("data", (chunk: Uint8Array | string) => {
+        const text = chunk.toString();
+        stdout += text;
+        buffer += text;
+        let newlineIndex = buffer.indexOf("\n");
+        while (newlineIndex !== -1) {
+          processLine(buffer.slice(0, newlineIndex));
+          buffer = buffer.slice(newlineIndex + 1);
+          newlineIndex = buffer.indexOf("\n");
+        }
+      });
+      proc.stderr.on("data", (chunk: Uint8Array | string) => {
+        stderr += chunk.toString();
+      });
+      timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        finalError = finalError || `LLM narration summary timed out after ${Math.round(getNarrationSummaryTimeoutMs() / 1000)}s`;
+        if (!proc.killed) proc.kill("SIGTERM");
+        completionForcedKillTimer = setTimeout(() => {
+          if (!proc.killed) proc.kill("SIGKILL");
+        }, 2000);
+      }, getNarrationSummaryTimeoutMs());
+      proc.on("close", (code) => {
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        if (completionTimer) clearTimeout(completionTimer);
+        if (completionForcedKillTimer) clearTimeout(completionForcedKillTimer);
+        if (buffer.trim()) processLine(buffer);
+        resolve({
+          stdout,
+          stderr,
+          exitCode: completionRequested && !timedOut ? 0 : (code ?? 0),
+          finalError,
+          finalOutput,
+          streamedOutput,
+        });
+      });
+      proc.on("error", (err) => {
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        if (completionTimer) clearTimeout(completionTimer);
+        if (completionForcedKillTimer) clearTimeout(completionForcedKillTimer);
+        finalError = finalError || err.message;
+        resolve({
+          stdout,
+          stderr: `${stderr}\n${err.message}`.trim(),
+          exitCode: 1,
+          finalError,
+          finalOutput,
+          streamedOutput,
+        });
+      });
+    });
+
+    const rawSummary = (output.finalOutput || output.streamedOutput).replace(/\s+/g, " ").trim();
+    if (!rawSummary || output.exitCode !== 0 || output.finalError) {
+      return {
+        text: null,
+        error: output.finalError || output.stderr.trim() || "LLM narration summary produced no output",
+      };
+    }
+
+    const normalized = normalizeNarrationText(stripMarkdownSyntax(stripNarrationMetaCommentary(rawSummary)));
+    return normalized
+      ? { text: fitSegmentToBudget(normalized, maxChars) }
+      : { text: null, error: "LLM narration summary produced empty normalized output" };
+  } catch (err: any) {
+    return { text: null, error: err?.message ?? "LLM narration summary failed" };
+  } finally {
+    if (tmpDir) {
+      try {
+        await fs.promises.rm(tmpDir, { recursive: true, force: true });
+      } catch {}
+    }
+  }
+}
+
+const defaultHumanReadableSummaryDeps: HumanReadableSummaryDeps = {
+  summarizeMemo: summarizeMemoWithLlm,
+};
 
 function findWorkspaceRoot(startPath: string): string | null {
   let current = startPath;
@@ -440,6 +808,20 @@ function extractTopLevelSectionsByPrefix(markdown: string, headingPrefix: string
   return sections;
 }
 
+function summarizeDecisionBlock(heading: string, content: string): string {
+  const label = heading.replace(/^Decision\s*\d*\s*:?\s*/i, "").trim();
+  const preferredSource = extractSectionByPrefix(content, "Board Decision")
+    || extractSectionByPrefix(content, "Board Consensus")
+    || extractSection(content, "Decision");
+  const fallbackSource = stripMarkdownSyntax(content);
+  const source = preferredSource || fallbackSource;
+  const summary = stripTrailingSentencePunctuation(
+    normalizeNarrationText(firstSentences(stripMarkdownSyntax(source), preferredSource ? 2 : 1)),
+  );
+  if (!label || !summary) return "";
+  return `${label}: ${summary}`;
+}
+
 function summarizeSection(markdown: string, limit: number): string[] {
   if (!markdown) return [];
 
@@ -710,7 +1092,11 @@ export function summarizeMemoForNarration(markdown: string, maxChars = DEFAULT_N
   const titleMatch = markdown.match(/^#{1,6}\s+(.+)$/m);
   const title = normalizeNarrationText(stripMarkdownSyntax(titleMatch?.[1] ?? "Boardroom meeting"));
   const decisionSections = extractTopLevelSectionsByPrefix(markdown, "Decision");
+  const decisionSummaries = decisionSections
+    .map(({ heading, content }) => summarizeDecisionBlock(heading, content))
+    .filter(Boolean);
   const executiveSummaryPoints = summarizeSection(extractSection(markdown, "Executive Summary"), 4);
+  const crossCuttingPoints = summarizeSection(extractSection(markdown, "Cross-Cutting Themes"), 3);
   const finalRecommendationPoints = summarizeSection(extractSection(markdown, "Final Recommendations"), 3);
 
   const decision = stripTrailingSentencePunctuation(
@@ -745,10 +1131,12 @@ export function summarizeMemoForNarration(markdown: string, maxChars = DEFAULT_N
   const segments = [
     `Boardroom summary for ${title}.`,
     compactNarrationSection("Executive summary:", executiveSummaryPoints),
+    decisionSummaries.length > 0 ? compactNarrationSection("Decisions covered:", decisionSummaries) : "",
     finalRecommendationPoints.length > 0 ? compactNarrationSection("Recommendations:", finalRecommendationPoints) : "",
     decision && executiveSummaryPoints.length === 0 ? `Decision: ${decision}.` : "",
     question ? `Question: ${question}.` : "",
     multiDecisionQuestions.length > 0 ? compactNarrationSection("Questions addressed:", multiDecisionQuestions) : "",
+    crossCuttingPoints.length > 0 ? compactNarrationSection("Cross-cutting themes:", crossCuttingPoints) : "",
     compactNarrationSection("Reasons:", evidencePoints),
     compactNarrationSection("Risk:", riskPoints),
     compactNarrationSection("Timing:", timingPoints),
@@ -773,15 +1161,6 @@ export function summarizeMemoForNarration(markdown: string, maxChars = DEFAULT_N
   return fitSegmentToBudget(summary, maxChars);
 }
 
-function extractNarrationText(memoPath: string, maxChars = DEFAULT_NARRATION_MAX_CHARS): string {
-  try {
-    const content = fs.readFileSync(memoPath, "utf-8");
-    return summarizeMemoForNarration(content, maxChars);
-  } catch {
-    return "";
-  }
-}
-
 function getNarrationArtifactPaths(memoPath: string, outputDir: string): {
   audioPath: string;
   summaryPath: string;
@@ -796,8 +1175,19 @@ function getNarrationArtifactPaths(memoPath: string, outputDir: string): {
 export async function generateHumanReadableSummary(
   memoPath: string,
   outputDir: string,
+  deps: HumanReadableSummaryDeps = defaultHumanReadableSummaryDeps,
 ): Promise<HumanReadableSummaryResult> {
-  const text = extractNarrationText(memoPath);
+  let markdown = "";
+  try {
+    markdown = await fs.promises.readFile(memoPath, "utf-8");
+  } catch {
+    return { ok: false, error: "Could not read memo for human-readable summary" };
+  }
+
+  const llmResult = await deps.summarizeMemo?.(memoPath, markdown, DEFAULT_NARRATION_MAX_CHARS);
+  const llmText = typeof llmResult === "string" ? llmResult : llmResult?.text;
+  const llmError = typeof llmResult === "string" ? undefined : llmResult?.error;
+  const text = llmText?.trim() || summarizeMemoForNarration(markdown);
   if (!text) return { ok: false, error: "Could not read memo for human-readable summary" };
 
   const { summaryPath } = getNarrationArtifactPaths(memoPath, outputDir);
@@ -807,6 +1197,9 @@ export async function generateHumanReadableSummary(
       ok: true,
       summaryPath,
       summaryText: text,
+      warning: llmText?.trim()
+        ? undefined
+        : `LLM summary failed (${llmError ?? "no output"}). Fell back to deterministic narration summary.`,
     };
   } catch (err: any) {
     return { ok: false, error: err.message ?? "Failed to write human-readable summary" };
@@ -876,18 +1269,23 @@ export function findNarrationActiveRange(
 export async function generateNarration(
   memoPath: string,
   outputDir: string,
+  summaryInput?: NarrationSummaryInput,
 ): Promise<NarrationResult> {
   const settings = getElevenLabsSettings(memoPath);
   if (!settings.apiKey) return { ok: false, error: "ELEVENLABS_API_KEY not set" };
 
-  const summary = await generateHumanReadableSummary(memoPath, outputDir);
-  if (!summary.ok || !summary.summaryText || !summary.summaryPath) {
-    return { ok: false, error: summary.error ?? "Could not read memo for narration" };
-  }
-  const text = summary.summaryText;
-
   const { audioPath } = getNarrationArtifactPaths(memoPath, outputDir);
-  const summaryPath = summary.summaryPath;
+  let text = summaryInput?.summaryText;
+  let summaryPath = summaryInput?.summaryPath;
+
+  if (!text || !summaryPath) {
+    const summary = await generateHumanReadableSummary(memoPath, outputDir);
+    if (!summary.ok || !summary.summaryText || !summary.summaryPath) {
+      return { ok: false, error: summary.error ?? "Could not read memo for narration" };
+    }
+    text = summary.summaryText;
+    summaryPath = summary.summaryPath;
+  }
 
   try {
     const elevenlabs = new ElevenLabsClient({
@@ -1156,6 +1554,7 @@ export interface PostMeetingActionsDeps {
   generateNarration: (
     memoPath: string,
     outputDir: string,
+    summaryInput?: NarrationSummaryInput,
   ) => Promise<NarrationResult>;
   playAudio: (audioPath: string) => Promise<{ ok: boolean; error?: string }>;
 }
@@ -1224,7 +1623,10 @@ export async function runPostMeetingActions(
       const generationTimer = setInterval(updateGenerating, 200);
       let result: NarrationResult;
       try {
-        result = await deps.generateNarration(info.memoPath, outputDir);
+        result = await deps.generateNarration(info.memoPath, outputDir, {
+          summaryText: info.summaryText,
+          summaryPath: info.summaryPath,
+        });
       } finally {
         clearInterval(generationTimer);
       }
