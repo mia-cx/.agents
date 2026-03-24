@@ -86,6 +86,17 @@ From "A Philosophy of Software Design":
 
 **Depth**: Small interface hiding significant complexity = deep module (good). Large interface with thin implementation = shallow module (avoid).
 
+## Moving to Implementation
+
+If the user decides to implement the chosen design, recommend creating a worktree first:
+
+```bash
+git worktree add .worktrees/<module-name> -b refactor/<module-name>
+cd .worktrees/<module-name>
+```
+
+Interface redesigns often touch many call sites. A worktree keeps `main` stable while the new interface is wired up.
+
 ## Anti-Patterns
 
 - Don't let sub-agents produce similar designs - enforce radical difference

@@ -67,6 +67,17 @@ A list of testing decisions that were made. Include:
 
 A description of the things that are out of scope for this PRD.
 
+## Worktree Setup
+
+All implementation work for this PRD should happen in a dedicated worktree to keep `main` clean:
+
+```bash
+git worktree add .worktrees/<feature-name> -b feat/<feature-name>
+cd .worktrees/<feature-name>
+```
+
+Merge back to `main` only after the feature is complete and reviewed.
+
 ## Further Notes
 
 Any further notes about the feature.

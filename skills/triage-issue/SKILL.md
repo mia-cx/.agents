@@ -90,6 +90,15 @@ A numbered list of RED-GREEN cycles:
 
 **REFACTOR**: [Any cleanup needed after all tests pass]
 
+## Worktree Setup
+
+If the fix spans multiple modules, work in a dedicated worktree:
+
+```bash
+git worktree add .worktrees/<fix-name> -b fix/<fix-name>
+cd .worktrees/<fix-name>
+```
+
 ## Acceptance Criteria
 
 - [ ] Criterion 1

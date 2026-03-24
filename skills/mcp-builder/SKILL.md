@@ -75,6 +75,17 @@ Prioritize comprehensive API coverage. List endpoints to implement, starting wit
 
 ---
 
+### Worktree Setup
+
+If building the MCP server inside an existing repository, create a dedicated worktree first:
+
+```bash
+git worktree add .worktrees/<server-name> -b feat/<server-name>
+cd .worktrees/<server-name>
+```
+
+This keeps `main` clean during the multi-phase build. Merge back after the server passes evaluation.
+
 ### Phase 2: Implementation
 
 #### 2.1 Set Up Project Structure

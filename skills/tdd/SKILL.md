@@ -42,6 +42,17 @@ RIGHT (vertical):
 
 ## Workflow
 
+### 0. Worktree Setup
+
+If the feature or fix will touch more than a handful of files, create a dedicated worktree before writing any code:
+
+```bash
+git worktree add .worktrees/<feature-name> -b feat/<feature-name>
+cd .worktrees/<feature-name>
+```
+
+This keeps `main` clean while you cycle through RED-GREEN-REFACTOR. Merge back only after all tests are green.
+
 ### 1. Planning
 
 Before writing any code:

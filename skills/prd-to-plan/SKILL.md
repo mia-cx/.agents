@@ -64,6 +64,17 @@ Create `./plans/` if it doesn't exist. Write the plan as a Markdown file named a
 
 > Source PRD: <brief identifier or link>
 
+## Worktree setup
+
+Before starting implementation, create a dedicated worktree:
+
+```bash
+git worktree add .worktrees/<feature-name> -b feat/<feature-name>
+cd .worktrees/<feature-name>
+```
+
+All phases below should be implemented in this worktree. Merge back to `main` only after the feature is complete and reviewed.
+
 ## Architectural decisions
 
 Durable decisions that apply across all phases:

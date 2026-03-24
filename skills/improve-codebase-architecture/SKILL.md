@@ -74,3 +74,18 @@ After comparing, give your own recommendation: which design you think is stronge
 ### 7. Create GitHub issue
 
 Create a refactor RFC as a GitHub issue using `gh issue create`. Use the template in [REFERENCE.md](REFERENCE.md). Do NOT ask the user to review before creating — just create it and share the URL.
+
+Include a **Worktree Setup** section in the issue body:
+
+```markdown
+## Worktree Setup
+
+Before starting this refactor, create a dedicated worktree:
+
+\```bash
+git worktree add .worktrees/<module-name> -b refactor/<module-name>
+cd .worktrees/<module-name>
+\```
+
+Merge back to `main` only after the refactor is complete and tests pass.
+```

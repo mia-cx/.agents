@@ -84,6 +84,10 @@ Stage all changed/created files and commit with message: `Add pre-commit hooks (
 
 This will run through the new pre-commit hooks — a good smoke test that everything works.
 
+## Worktree Note
+
+If you're setting up pre-commit hooks as part of a larger change, consider working in a worktree (`git worktree add .worktrees/pre-commit -b chore/pre-commit`). A broken hook config can disrupt everyone's commit workflow, so it's safer to verify in isolation first.
+
 ## Notes
 
 - Husky v9+ doesn't need shebangs in hook files

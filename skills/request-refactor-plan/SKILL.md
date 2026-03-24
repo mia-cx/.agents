@@ -31,6 +31,17 @@ The problem that the developer is facing, from the developer's perspective.
 
 The solution to the problem, from the developer's perspective.
 
+## Worktree Setup
+
+Before starting the refactor, create a dedicated worktree:
+
+```bash
+git worktree add .worktrees/<refactor-name> -b refactor/<refactor-name>
+cd .worktrees/<refactor-name>
+```
+
+All commits below should be made in this worktree. Merge back to `main` only after the refactor is complete and tests pass.
+
 ## Commits
 
 A LONG, detailed implementation plan. Write the plan in plain English, breaking down the implementation into the tiniest commits possible. Each commit should leave the codebase in a working state.

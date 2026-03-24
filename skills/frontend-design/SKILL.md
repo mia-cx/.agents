@@ -8,6 +8,17 @@ This skill guides creation of distinctive, production-grade frontend interfaces 
 
 The user provides frontend requirements: a component, page, application, or interface to build. They may include context about the purpose, audience, or technical constraints.
 
+## Worktree Setup
+
+If building into an existing project (not a standalone artifact), create a worktree to iterate freely without blocking `main`:
+
+```bash
+git worktree add .worktrees/<feature-name> -b feat/<feature-name>
+cd .worktrees/<feature-name>
+```
+
+Frontend work is iterative — you'll tune aesthetics, swap approaches, and experiment. A worktree gives you room to do that cleanly.
+
 ## Design Thinking
 
 Before coding, understand the context and commit to a BOLD aesthetic direction:

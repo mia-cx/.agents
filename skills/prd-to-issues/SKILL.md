@@ -64,6 +64,15 @@ Create issues in dependency order (blockers first) so you can reference real iss
 
 A concise description of this vertical slice. Describe the end-to-end behavior, not layer-by-layer implementation. Reference specific sections of the parent PRD rather than duplicating content.
 
+## Worktree setup
+
+Work on this issue in a dedicated worktree branched from `main`:
+
+```bash
+git worktree add .worktrees/<short-name> -b feat/<short-name>
+cd .worktrees/<short-name>
+```
+
 ## Acceptance criteria
 
 - [ ] Criterion 1
