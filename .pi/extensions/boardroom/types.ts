@@ -11,6 +11,7 @@ export interface AgentConfig {
 }
 
 export type MeetingMode = "freeform" | "structured";
+export type MessagingMode = "fanout" | "threading";
 
 export type MeetingDisposition =
   | "completed"
@@ -30,6 +31,7 @@ export interface ConstraintSet {
 export interface BoardroomConfig {
   default_constraints: string;
   default_mode: MeetingMode;
+  default_messaging_mode: MessagingMode;
   budget_hard_stop: boolean;
   time_hard_stop: boolean;
   constraints: Record<string, ConstraintSet>;
@@ -42,6 +44,7 @@ export interface ParsedBrief {
   filePath: string;
   constraints?: string;
   mode?: MeetingMode;
+  messagingMode?: MessagingMode;
   budgetOverride?: number;
   timeLimitOverride?: number;
   maxRoundsOverride?: number;
