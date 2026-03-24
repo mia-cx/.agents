@@ -1,0 +1,22 @@
+default_constraints: thorough
+default_mode: freeform
+budget_hard_stop: true
+time_hard_stop: false
+
+constraints:
+  quick:
+    budget: 5
+    time_limit_minutes: 5
+    max_debate_rounds: 1
+  standard:
+    budget: 15
+    time_limit_minutes: 15
+    max_debate_rounds: 3
+  thorough:
+    budget: 50
+    time_limit_minutes: 30
+    max_debate_rounds: 5
+  deep-dive:
+    budget: 150
+    time_limit_minutes: 60
+    max_debate_rounds: 10
