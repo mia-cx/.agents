@@ -1,5 +1,5 @@
 ---
-name: skill-creator
+name: skill-create
 description: Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.
 ---
 
@@ -137,6 +137,23 @@ Output: feat(auth): implement JWT-based authentication
 ### Writing Style
 
 Try to explain to the model why things are important in lieu of heavy-handed musty MUSTs. Use theory of mind and try to make the skill general and not super-narrow to specific examples. Start by writing a draft and then look at it with fresh eyes and improve it.
+
+### Description Quality
+
+The description is **the only thing the agent sees** when deciding which skill to load. It's surfaced in the system prompt alongside all other installed skills.
+
+- Max 1024 chars, third person
+- First sentence: what it does
+- Second sentence: "Use when [specific triggers]"
+- Include keywords, file types, and contexts the agent should match on
+
+### When to Add Scripts
+
+Add utility scripts when the operation is deterministic (validation, formatting), the same code would be generated repeatedly, or errors need explicit handling. Scripts save tokens and improve reliability vs generated code.
+
+### When to Split Files
+
+Split into separate files when SKILL.md exceeds ~100 lines of instructions, content has distinct domains, or advanced features are rarely needed. Keep the main SKILL.md as a routing layer that points to the right reference file.
 
 ### Test Cases
 
