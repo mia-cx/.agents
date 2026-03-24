@@ -1,6 +1,6 @@
 # Boardroom — run board meetings from the CLI via Pi
 
-pi_boardroom := "pi --no-extensions -e ~/.pi/agent/extensions/boardroom/index.ts"
+pi_boardroom := "pi -e ~/.pi/agent/extensions/boardroom/index.ts"
 
 default:
     @just --list

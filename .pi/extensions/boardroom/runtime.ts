@@ -77,6 +77,16 @@ function stringifyToolName(value: unknown): string | undefined {
   return undefined;
 }
 
+function sanitizeJsonEventLine(line: string): string | null {
+  const withoutOsc = line.replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "");
+  const withoutAnsi = withoutOsc.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "");
+  const trimmed = withoutAnsi.trim();
+  if (!trimmed) return null;
+  const jsonStart = trimmed.indexOf("{");
+  if (jsonStart === -1) return null;
+  return trimmed.slice(jsonStart);
+}
+
 function isDelegationTool(name: string | undefined): boolean {
   if (!name) return false;
   return /\b(task|subagent|agent)\b/i.test(name);
@@ -178,7 +188,7 @@ export class BoardMemberSession {
     this.currentModelLabel = model ?? "default";
     this.publishUpdate();
 
-    const args: string[] = ["--no-extensions", "--mode", "json", "-p", "--no-session"];
+    const args: string[] = ["--mode", "json", "-p", "--no-session"];
     if (model) args.push("--model", model);
 
     let tmpDir: string | null = null;
@@ -200,7 +210,7 @@ export class BoardMemberSession {
         const tmp = await writeSystemPromptFile(this.slug, systemPrompt);
         tmpDir = tmp.dir;
         tmpPath = tmp.filePath;
-        args.push("--append-system-prompt", tmpPath);
+        args.push("--system-prompt", tmpPath);
       }
 
       args.push(`Task: ${task}`);
@@ -208,6 +218,9 @@ export class BoardMemberSession {
 
       const exitCode = await new Promise<number>((resolve) => {
         let abortListener: (() => void) | null = null;
+        let completionTimer: ReturnType<typeof setTimeout> | null = null;
+        let completionForcedKillTimer: ReturnType<typeof setTimeout> | null = null;
+        let completionRequested = false;
         const stopProc = (proc: ReturnType<typeof spawn>, reason: "signal" | "stuck-tool-loop") => {
           if (reason === "signal") wasAborted = true;
           else forcedStopReason = reason;
@@ -227,17 +240,35 @@ export class BoardMemberSession {
         const invocation = getPiInvocation(args);
         const proc = spawn(invocation.command, invocation.args, {
           cwd,
+          env: {
+            ...process.env,
+            BOARDROOM_EXECUTIVE_SESSION: "1",
+            BOARDROOM_EXECUTIVE_SLUG: this.slug,
+            BOARDROOM_ALLOWED_WRITE_PATH: path.join(cwd, "boardroom", "scratchpads", `${this.slug}.md`),
+            BOARDROOM_BRIEFS_DIR: path.join(cwd, "boardroom", "briefs"),
+          },
           shell: false,
           stdio: ["ignore", "pipe", "pipe"],
         });
         let buffer = "";
         let stderr = "";
+        const requestCompletionShutdown = () => {
+          if (completionRequested || wasAborted || forcedStopReason) return;
+          completionRequested = true;
+          completionTimer = setTimeout(() => {
+            if (!proc.killed) proc.kill("SIGTERM");
+            completionForcedKillTimer = setTimeout(() => {
+              if (!proc.killed) proc.kill("SIGKILL");
+            }, 2000);
+          }, 100);
+        };
 
         const processLine = (line: string) => {
-          if (!line.trim()) return;
+          const sanitized = sanitizeJsonEventLine(line);
+          if (!sanitized) return;
           let event: any;
           try {
-            event = JSON.parse(line);
+            event = JSON.parse(sanitized);
           } catch {
             return;
           }
@@ -403,6 +434,10 @@ export class BoardMemberSession {
               sawAssistantText = sawAssistantText || finalOutput.trim().length > 0;
             }
           }
+
+          if (event.type === "agent_end") {
+            requestCompletionShutdown();
+          }
         };
 
         proc.stdout.on("data", (data: Buffer) => {
@@ -417,14 +452,18 @@ export class BoardMemberSession {
         });
 
         proc.on("close", (code) => {
+          if (completionTimer) clearTimeout(completionTimer);
+          if (completionForcedKillTimer) clearTimeout(completionForcedKillTimer);
           if (buffer.trim()) processLine(buffer);
           const trimmedStderr = stderr.trim();
           if (trimmedStderr) finalError = trimmedStderr;
           abortListener?.();
-          resolve(code ?? 0);
+          resolve(completionRequested && !wasAborted && forcedStopReason === null ? 0 : (code ?? 0));
         });
 
         proc.on("error", () => {
+          if (completionTimer) clearTimeout(completionTimer);
+          if (completionForcedKillTimer) clearTimeout(completionForcedKillTimer);
           abortListener?.();
           resolve(1);
         });
@@ -660,7 +699,7 @@ export class SessionPool {
     cwd: string,
     tasks: Array<{ agent: AgentConfig; systemPrompt: string; task: string; activity: string }>,
     signal?: AbortSignal,
-    concurrency = 4,
+    concurrency = Math.max(2, Math.floor(os.cpus().length * 0.75)),
   ): Promise<AgentRunResult[]> {
     if (tasks.length === 0) return [];
 

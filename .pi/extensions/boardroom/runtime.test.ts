@@ -97,6 +97,54 @@ describe("BoardMemberSession", () => {
     }
   });
 
+  it("waits for agent_end before force-closing a lingering child process", async () => {
+    const session = new BoardMemberSession("ceo", "CEO", "cursor-agent/gpt-5.4-mini", undefined);
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
+    const scriptPath = path.join(tmpDir, "linger-after-turn-end.js");
+    const originalArgv1 = process.argv[1];
+
+    await fs.writeFile(
+      scriptPath,
+      [
+        "const emit = (obj) => process.stdout.write(JSON.stringify(obj) + '\\n');",
+        "emit({",
+        "  type: 'message_end',",
+        "  message: {",
+        "    role: 'assistant',",
+        "    usage: { input: 4, output: 2, cost: { total: 0.01 } },",
+        "    content: [{ type: 'text', text: 'done' }],",
+        "  },",
+        "});",
+        "emit({",
+        "  type: 'turn_end',",
+        "  message: {",
+        "    role: 'assistant',",
+        "    content: [{ type: 'text', text: 'done' }],",
+        "  },",
+        "});",
+        "setTimeout(() => {",
+        "  emit({ type: 'agent_end' });",
+        "}, 500);",
+        "setInterval(() => {}, 1000);",
+      ].join("\n"),
+    );
+
+    process.argv[1] = scriptPath;
+
+    try {
+      const startedAt = Date.now();
+      const result = await session.run(tmpDir, "", "test task");
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(450);
+      expect(Date.now() - startedAt).toBeLessThan(2500);
+      expect(result.exitCode).toBe(0);
+      expect(result.content).toBe("done");
+      expect(session.status).toBe("completed");
+    } finally {
+      process.argv[1] = originalArgv1;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("pins bare Claude aliases to the anthropic provider", async () => {
     const session = new BoardMemberSession("ceo", "CEO", "claude-opus-4-6:high", undefined);
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
@@ -122,6 +170,38 @@ describe("BoardMemberSession", () => {
       expect(result.exitCode).toBe(0);
       expect(result.content).toContain("anthropic/claude-opus-4-6:high");
       expect(result.content).not.toContain("amazon-bedrock");
+      expect(result.content).not.toContain("--no-extensions");
+    } finally {
+      process.argv[1] = originalArgv1;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses a full system prompt instead of appending to Pi's default prompt", async () => {
+    const session = new BoardMemberSession("cfo", "CFO", "gpt-5.4-mini", undefined);
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
+    const scriptPath = path.join(tmpDir, "capture-system-prompt-args.js");
+    const originalArgv1 = process.argv[1];
+
+    await writeExecutableScript(scriptPath, [
+      "const args = process.argv.slice(2);",
+      "process.stdout.write(JSON.stringify({",
+      '  type: "message_end",',
+      "  message: {",
+      '    role: "assistant",',
+      "    usage: { input: 1, output: 1, cost: { total: 0 } },",
+      "    content: [{ type: 'text', text: JSON.stringify(args) }],",
+      "  },",
+      '}) + "\\n");',
+    ]);
+
+    process.argv[1] = scriptPath;
+
+    try {
+      const result = await session.run(tmpDir, "You are the CFO.", "test task");
+      expect(result.exitCode).toBe(0);
+      expect(result.content).toContain("--system-prompt");
+      expect(result.content).not.toContain("--append-system-prompt");
     } finally {
       process.argv[1] = originalArgv1;
       await fs.rm(tmpDir, { recursive: true, force: true });
