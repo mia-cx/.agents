@@ -78,6 +78,13 @@ function truncateText(text: string, width: number): string {
   return `${normalized.slice(0, width - 3).trimEnd()}...`;
 }
 
+function truncateVisualLine(text: string, width: number): string {
+  if (width <= 0) return "";
+  if (text.length <= width) return text;
+  if (width <= 1) return "…";
+  return `${text.slice(0, width - 1)}…`;
+}
+
 function formatTokenCount(totalTokens: number): string {
   if (totalTokens >= 1_000_000) return `${(totalTokens / 1_000_000).toFixed(1)}M tok`;
   if (totalTokens >= 10_000) return `${Math.round(totalTokens / 1_000)}k tok`;
@@ -165,6 +172,7 @@ export function buildDashboardWidgetLines(
   const barWidth = getBarWidth(viewportWidth);
   const transcriptWidth = Math.max(36, viewportWidth - 10);
   const ceoWidth = Math.max(28, viewportWidth - 14);
+  const graphWidth = Math.max(28, viewportWidth - 8);
   const rule = dim("─".repeat(ruleWidth));
   lines.push(rule);
   lines.push(
@@ -207,6 +215,18 @@ export function buildDashboardWidgetLines(
     lines.push(`  ${theme.bold(muted("Board Members:"))}`);
     for (const agent of snapshot.agents) {
       lines.push(...formatAgentLines(agent, theme, viewportWidth));
+    }
+    lines.push("");
+  }
+
+  if (snapshot.threadGraphLines && snapshot.threadGraphLines.length > 0) {
+    lines.push(`  ${theme.bold(muted("Thread Graph:"))}`);
+    const graphLines = snapshot.threadGraphLines.slice(0, 14);
+    for (const line of graphLines) {
+      lines.push(`    ${dim(truncateVisualLine(line, graphWidth))}`);
+    }
+    if (snapshot.threadGraphLines.length > graphLines.length) {
+      lines.push(`    ${dim(`... ${snapshot.threadGraphLines.length - graphLines.length} more lines`)}`);
     }
     lines.push("");
   }
@@ -297,6 +317,18 @@ export function buildPlainDashboardLines(snapshot: MeetingProgressSnapshot): str
       } else if (shouldShowAgentDetail(agent, agent.activity ?? "")) {
         lines.push(`    ↳ ${truncateText(agent.activity ?? "", 72)}`);
       }
+    }
+  }
+
+  if (snapshot.threadGraphLines && snapshot.threadGraphLines.length > 0) {
+    lines.push("");
+    lines.push("Thread Graph:");
+    const graphLines = snapshot.threadGraphLines.slice(0, 14);
+    for (const line of graphLines) {
+      lines.push(`  ${truncateVisualLine(line, 72)}`);
+    }
+    if (snapshot.threadGraphLines.length > graphLines.length) {
+      lines.push(`  ... ${snapshot.threadGraphLines.length - graphLines.length} more lines`);
     }
   }
 
