@@ -119,6 +119,12 @@ function getBoardroomExecutiveWritePolicy(): {
   briefsDir: string | undefined;
 } | null {
   if (process.env.BOARDROOM_EXECUTIVE_SESSION !== "1") return null;
+  const expectedParentPid = Number(process.env.BOARDROOM_EXECUTIVE_PARENT_PID ?? "");
+  // Only enforce the boardroom write fence inside the direct Pi subprocesses
+  // launched by the meeting runtime, not in any nested Pi children they spawn.
+  if (!Number.isInteger(expectedParentPid) || expectedParentPid <= 0 || process.ppid !== expectedParentPid) {
+    return null;
+  }
   return {
     slug: process.env.BOARDROOM_EXECUTIVE_SLUG?.trim() || undefined,
     allowedWritePath: process.env.BOARDROOM_ALLOWED_WRITE_PATH?.trim() || undefined,
