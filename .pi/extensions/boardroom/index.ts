@@ -2,7 +2,7 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
-import { Text } from "@mariozechner/pi-tui";
+import { Container, Text } from "@mariozechner/pi-tui";
 import { discoverAgents } from "./agents.js";
 import { parseBrief, listBriefs } from "./brief-parser.js";
 import { loadConfig, resolveConstraints } from "./config.js";
@@ -26,6 +26,12 @@ interface ActiveMeetingState {
   lastSnapshot: MeetingProgressSnapshot | null;
 }
 
+function prioritizeOption<T extends string>(options: T[], preferred: T): T[] {
+  const unique = Array.from(new Set(options));
+  const remaining = unique.filter((option) => option !== preferred);
+  return [preferred, ...remaining];
+}
+
 async function runMeeting(
   cwd: string,
   brief: ReturnType<typeof parseBrief>,
@@ -44,6 +50,65 @@ async function runMeeting(
 
 export default function (pi: ExtensionAPI) {
   let activeMeeting: ActiveMeetingState | null = null;
+  const getWorkingDirectory = (ctx: { cwd?: string }) => ctx.cwd ?? process.cwd();
+  let activeMeetingTimer: ReturnType<typeof setInterval> | null = null;
+
+  const renderWidgetLines = (lines: string[]) => (_tui: unknown, _theme: unknown) => {
+    const container = new Container();
+    for (const line of lines) {
+      container.addChild(new Text(line, 1, 0));
+    }
+    return container;
+  };
+
+  const setBoardroomWidget = (
+    ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+    snapshot: MeetingProgressSnapshot,
+  ) => {
+    const theme = ctx.ui.theme;
+    ctx.ui.setWidget("boardroom", renderWidgetLines(buildDashboardWidgetLines(snapshot, theme)));
+  };
+
+  const setCloseoutWidget = (
+    ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+    result: MeetingResult,
+  ) => {
+    const theme = ctx.ui.theme;
+    ctx.ui.setWidget("boardroom", renderWidgetLines(buildThemedCloseoutLines(result, theme)));
+  };
+
+  const withLiveElapsed = (
+    snapshot: MeetingProgressSnapshot,
+    startedAtMs: number,
+    agentSnapshots: AgentRuntimeUpdate[],
+  ): MeetingProgressSnapshot => ({
+    ...snapshot,
+    elapsedMinutes: Math.max(snapshot.elapsedMinutes, (Date.now() - startedAtMs) / 60_000),
+    agents: agentSnapshots.length > 0 ? [...agentSnapshots] : snapshot.agents,
+  });
+
+  const clearActiveMeetingTimer = () => {
+    if (activeMeetingTimer) {
+      clearInterval(activeMeetingTimer);
+      activeMeetingTimer = null;
+    }
+  };
+
+  const renderMeetingUi = (
+    ctx: { hasUI: boolean; ui: ExtensionAPI["commands"][number] extends never ? never : any },
+    meeting: ActiveMeetingState | null,
+  ) => {
+    if (!ctx.hasUI || !meeting) return;
+    if (!meeting.lastSnapshot) {
+      ctx.ui.setStatus("boardroom", meeting.lastStatus);
+      return;
+    }
+
+    const theme = ctx.ui.theme;
+    const snapshot = withLiveElapsed(meeting.lastSnapshot, meeting.startedAt, meeting.agentSnapshots);
+    ctx.ui.setStatus("boardroom", formatDashboardStatus(snapshot, theme));
+    setBoardroomWidget(ctx, snapshot);
+  };
 
   pi.registerCommand("board-meeting", {
     description: "Start a boardroom meeting with the executive board",
@@ -57,7 +122,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const cwd = ctx.cwd;
+      const cwd = getWorkingDirectory(ctx);
       const config = loadConfig(cwd);
       const agents = discoverAgents(cwd);
 
@@ -82,22 +147,47 @@ export default function (pi: ExtensionAPI) {
       }
 
       const briefLabels = briefPaths.map(p => path.basename(p, ".md"));
-      const selectedIdx = await ctx.ui.select("Select a brief:", briefLabels);
-      if (selectedIdx === undefined) return;
+      const selectedBriefLabel = await ctx.ui.select("Select a brief:", briefLabels);
+      if (selectedBriefLabel === undefined) return;
 
-      const brief = parseBrief(briefPaths[selectedIdx]);
+      const selectedBriefPath = briefPaths.find((briefPath) => path.basename(briefPath, ".md") === selectedBriefLabel);
+      if (!selectedBriefPath) {
+        ctx.ui.notify(`Selected brief not found: ${selectedBriefLabel}`, "error");
+        return;
+      }
+
+      const brief = parseBrief(selectedBriefPath);
 
       for (const warning of brief.warnings) {
         ctx.ui.notify(warning, "warning");
       }
 
-      const { name: constraintsName, values: constraintValues } = resolveConstraints(config, cliConstraints ?? brief.constraints, {
+      const defaultMode = (brief.mode ?? config.default_mode) as "freeform" | "structured";
+      const selectedMode = cliMode === "structured" || cliMode === "freeform"
+        ? cliMode
+        : await ctx.ui.select(
+            "Select meeting mode:",
+            prioritizeOption(["structured", "freeform"], defaultMode),
+          );
+      if (selectedMode === undefined) return;
+
+      const defaultConstraints = brief.constraints && config.constraints[brief.constraints]
+        ? brief.constraints
+        : config.default_constraints;
+      const selectedConstraints = cliConstraints
+        ?? await ctx.ui.select(
+          "Select constraints:",
+          prioritizeOption(Object.keys(config.constraints), defaultConstraints),
+        );
+      if (selectedConstraints === undefined) return;
+
+      const { name: constraintsName, values: constraintValues } = resolveConstraints(config, selectedConstraints, {
         budget: brief.budgetOverride,
         time_limit_minutes: brief.timeLimitOverride,
         max_debate_rounds: brief.maxRoundsOverride,
       });
 
-      const mode = (cliMode === "structured" ? "structured" : cliMode === "freeform" ? "freeform" : brief.mode) ?? config.default_mode;
+      const mode = selectedMode;
 
       const confirmMsg = [
         `Brief: ${brief.title}`,
@@ -124,6 +214,10 @@ export default function (pi: ExtensionAPI) {
       };
 
       ctx.ui.setStatus("boardroom", "Board meeting in progress...");
+      clearActiveMeetingTimer();
+      if (ctx.hasUI) {
+        activeMeetingTimer = setInterval(() => renderMeetingUi(ctx, activeMeeting), 1000);
+      }
 
       try {
         const result = await runMeeting(
@@ -135,7 +229,7 @@ export default function (pi: ExtensionAPI) {
                 const phaseMatch = msg.match(/Phase (\d+)/i) || msg.match(/Round (\d+)/i);
                 if (phaseMatch) activeMeeting.phase = `Phase ${phaseMatch[1]}`;
               }
-              ctx.ui.setStatus("boardroom", msg);
+              renderMeetingUi(ctx, activeMeeting);
             },
             onAgentUpdate: (update) => {
               if (!activeMeeting) return;
@@ -143,22 +237,14 @@ export default function (pi: ExtensionAPI) {
               if (idx >= 0) activeMeeting.agentSnapshots[idx] = update;
               else activeMeeting.agentSnapshots.push(update);
 
-              if (ctx.hasUI && activeMeeting.lastSnapshot) {
-                const merged = { ...activeMeeting.lastSnapshot, agents: [...activeMeeting.agentSnapshots] };
-                const theme = ctx.ui.theme;
-                ctx.ui.setWidget("boardroom", buildDashboardWidgetLines(merged, theme));
-              }
+              renderMeetingUi(ctx, activeMeeting);
             },
             onSnapshot: (snapshot) => {
               if (activeMeeting) {
                 activeMeeting.lastSnapshot = snapshot;
                 activeMeeting.phase = snapshot.phaseLabel;
               }
-              if (ctx.hasUI) {
-                const theme = ctx.ui.theme;
-                ctx.ui.setStatus("boardroom", formatDashboardStatus(snapshot, theme));
-                ctx.ui.setWidget("boardroom", buildDashboardWidgetLines(snapshot, theme));
-              }
+              renderMeetingUi(ctx, activeMeeting);
             },
             onConfirmRoster: async (names, rationale) => {
               if (!ctx.hasUI) return true;
@@ -171,11 +257,11 @@ export default function (pi: ExtensionAPI) {
           },
         );
 
+        clearActiveMeetingTimer();
         activeMeeting = null;
 
         if (ctx.hasUI) {
-          const theme = ctx.ui.theme;
-          ctx.ui.setWidget("boardroom", buildThemedCloseoutLines(result, theme));
+          setCloseoutWidget(ctx, result);
           ctx.ui.setStatus("boardroom", undefined);
         }
 
@@ -189,6 +275,7 @@ export default function (pi: ExtensionAPI) {
 
         ctx.ui.setWidget("boardroom", undefined);
       } catch (err: any) {
+        clearActiveMeetingTimer();
         activeMeeting = null;
         ctx.ui.setStatus("boardroom", undefined);
         ctx.ui.setWidget("boardroom", undefined);
@@ -257,7 +344,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("board-list", {
     description: "List past board meetings",
     handler: async (_args, ctx) => {
-      const logs = listPastMeetings(ctx.cwd);
+      const logs = listPastMeetings(getWorkingDirectory(ctx));
       if (logs.length === 0) {
         ctx.ui.notify("No past meetings found.", "info");
         return;
@@ -294,9 +381,21 @@ export default function (pi: ExtensionAPI) {
     }),
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const cwd = ctx.cwd;
+      const cwd = getWorkingDirectory(ctx);
       const config = loadConfig(cwd);
       const agents = discoverAgents(cwd);
+      let agentSnapshots: AgentRuntimeUpdate[] = [];
+      let lastSnapshot: MeetingProgressSnapshot | null = null;
+      const startedAtMs = Date.now();
+      let toolUiTimer: ReturnType<typeof setInterval> | null = null;
+
+      const renderToolUi = () => {
+        if (!ctx.hasUI || !lastSnapshot) return;
+        const theme = ctx.ui.theme;
+        const snapshot = withLiveElapsed(lastSnapshot, startedAtMs, agentSnapshots);
+        ctx.ui.setStatus("boardroom", formatDashboardStatus(snapshot, theme));
+        ctx.ui.setWidget("boardroom", buildDashboardWidgetLines(snapshot, theme));
+      };
 
       if (agents.length === 0) throw new Error("No executive board agents found in agents/executive-board/");
 
@@ -316,25 +415,49 @@ export default function (pi: ExtensionAPI) {
       const mode = params.mode ?? brief.mode ?? config.default_mode;
 
       onUpdate?.({ content: [{ type: "text", text: `Starting board meeting: ${brief.title} (${mode}, ${constraintsName})...` }] });
+      if (ctx.hasUI) {
+        toolUiTimer = setInterval(renderToolUi, 1000);
+      }
 
-      const result = await runMeeting(cwd, brief, agents, mode, constraintsName, constraintValues, config, {
-        onStatus: (msg) => {
-          onUpdate?.({ content: [{ type: "text", text: msg }] });
-          ctx.ui.setStatus("boardroom", msg);
-        },
-        onAgentUpdate: (update) => {
-          const icon = update.status === "completed" ? "✓" : update.status === "failed" ? "✗" : "▶";
-          onUpdate?.({ content: [{ type: "text", text: `${icon} ${update.name}: ${update.status} (${update.turns} turns, $${update.totalCost.toFixed(4)})` }] });
-        },
-        onConfirmRoster: async () => true,
-        signal,
-      });
+      let result: MeetingResult;
+      try {
+        result = await runMeeting(cwd, brief, agents, mode, constraintsName, constraintValues, config, {
+          onStatus: (msg) => {
+            onUpdate?.({ content: [{ type: "text", text: msg }] });
+            if (!lastSnapshot) ctx.ui.setStatus("boardroom", msg);
+            else renderToolUi();
+          },
+          onAgentUpdate: (update) => {
+            const idx = agentSnapshots.findIndex((snapshot) => snapshot.slug === update.slug);
+            if (idx >= 0) agentSnapshots[idx] = update;
+            else agentSnapshots.push(update);
+
+            renderToolUi();
+
+            const icon = update.status === "completed" ? "✓" : update.status === "failed" ? "✗" : update.status === "streaming" ? "◉" : "▶";
+            const activity = update.activity ? ` - ${update.activity}` : "";
+            onUpdate?.({ content: [{ type: "text", text: `${icon} ${update.name}: ${update.status}${activity} (${update.turns} turns, $${update.totalCost.toFixed(4)})` }] });
+          },
+          onSnapshot: (snapshot) => {
+            lastSnapshot = snapshot;
+            agentSnapshots = [...snapshot.agents];
+            renderToolUi();
+          },
+          onConfirmRoster: async () => true,
+          signal,
+        });
+      } finally {
+        if (toolUiTimer) clearInterval(toolUiTimer);
+      }
 
       ctx.ui.setStatus("boardroom", undefined);
+      if (ctx.hasUI) {
+        setCloseoutWidget(ctx, result);
+      }
 
       const summary = buildCloseoutSummary(result);
 
-      return {
+      const response = {
         content: [{
           type: "text",
           text: [
@@ -350,6 +473,8 @@ export default function (pi: ExtensionAPI) {
           totalCost: result.totalCost,
         },
       };
+
+      return response;
     },
 
     renderCall(args, theme, _context) {

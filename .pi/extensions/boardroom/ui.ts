@@ -104,8 +104,13 @@ function formatAgentLine(agent: AgentRuntimeUpdate, theme: DashboardTheme): stri
   const status = agent.status.padEnd(10);
   const turns = `${agent.turns} turn${agent.turns !== 1 ? "s" : ""}`.padEnd(9);
   const cost = `$${agent.totalCost.toFixed(4)}`;
+  const streamPreview = agent.status === "streaming" && agent.partialText
+    ? agent.partialText.replace(/\s+/g, " ").trim().slice(-48)
+    : "";
+  const detailText = streamPreview || agent.activity || "";
+  const activity = detailText ? ` ${theme.fg("muted", `- ${detailText}`)}` : "";
 
-  let line = `    ${theme.fg(color, icon)} ${name} ${theme.fg(color, status)} ${turns} ${cost}`;
+  let line = `    ${theme.fg(color, icon)} ${name} ${theme.fg(color, status)} ${turns} ${cost}${activity}`;
   if (agent.error) line += ` ${theme.fg("error", "[err]")}`;
   return line;
 }
@@ -131,6 +136,7 @@ export function buildPlainDashboardLines(snapshot: MeetingProgressSnapshot): str
       const cost = `$${agent.totalCost.toFixed(4)}`;
       const turns = `${agent.turns} turn${agent.turns !== 1 ? "s" : ""}`;
       let line = `  ${icon} ${agent.name.padEnd(22)} ${agent.status.padEnd(10)} ${turns.padEnd(9)} ${cost}`;
+      if (agent.activity) line += ` - ${agent.activity}`;
       if (agent.error) line += ` [${agent.error}]`;
       lines.push(line);
     }

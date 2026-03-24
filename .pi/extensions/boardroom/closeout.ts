@@ -12,6 +12,7 @@ export interface CloseoutInfo {
   debateMarkdownPath: string;
   visualPaths: string[];
   disposition: MeetingDisposition;
+  abortReason?: string;
   briefTitle: string;
   mode: MeetingMode;
   totalCost: number;
@@ -124,6 +125,7 @@ export function buildCloseoutSummary(info: CloseoutInfo): string {
     `  Duration: ${info.elapsedMinutes.toFixed(1)} minutes`,
     `  Total Cost: $${info.totalCost.toFixed(2)}`,
     `  Participants: ${info.roster.join(", ")}`,
+    ...(info.abortReason ? [`  Abort Reason: ${info.abortReason}`] : []),
     "",
     `  Artifacts:`,
     `    Memo: ${info.memoPath}`,
@@ -166,6 +168,9 @@ export function buildThemedCloseoutLines(
   lines.push(`  ${muted("Duration:")} ${info.elapsedMinutes.toFixed(1)} minutes`);
   lines.push(`  ${muted("Total Cost:")} ${accent(`$${info.totalCost.toFixed(2)}`)}`);
   lines.push(`  ${muted("Participants:")} ${info.roster.join(", ")}`);
+  if (info.abortReason) {
+    lines.push(`  ${muted("Abort Reason:")} ${theme.fg("warning", info.abortReason)}`);
+  }
   lines.push("");
 
   lines.push(`  ${theme.bold(muted("Artifacts:"))}`);

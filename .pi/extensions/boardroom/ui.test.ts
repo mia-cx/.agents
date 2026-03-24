@@ -26,8 +26,8 @@ function makeSnapshot(overrides: Partial<MeetingProgressSnapshot> = {}): Meeting
     maxRounds: 3,
     roster: ["cto", "cfo"],
     agents: [
-      { slug: "cto", name: "CTO", status: "completed", turns: 2, totalTokens: 1200, totalCost: 0.45 },
-      { slug: "cfo", name: "CFO", status: "streaming", turns: 1, totalTokens: 600, totalCost: 0.22 },
+      { slug: "cto", name: "CTO", status: "completed", activity: "Completed", turns: 2, totalTokens: 1200, totalCost: 0.45 },
+      { slug: "cfo", name: "CFO", status: "streaming", activity: "Evaluating the brief", turns: 1, totalTokens: 600, totalCost: 0.22 },
     ],
     presidentNote: "Reviewing board input.",
     transcript: [
@@ -110,12 +110,13 @@ describe("buildDashboardWidgetLines", () => {
     expect(joined).toContain("completed");
     expect(joined).toContain("CFO");
     expect(joined).toContain("streaming");
+    expect(joined).toContain("Evaluating the brief");
   });
 
   it("shows error marker for failed agents", () => {
     const snap = makeSnapshot({
       agents: [
-        { slug: "cto", name: "CTO", status: "failed", turns: 1, totalTokens: 0, totalCost: 0, error: "timeout" },
+        { slug: "cto", name: "CTO", status: "failed", activity: "Failed", turns: 1, totalTokens: 0, totalCost: 0, error: "timeout" },
       ],
     });
     const lines = buildDashboardWidgetLines(snap, plainTheme);

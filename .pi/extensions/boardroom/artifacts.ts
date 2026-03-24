@@ -44,6 +44,7 @@ function renderLogAsMarkdown(log: ConversationLog): string {
     `- **Started**: ${log.started_at}`,
     `- **Ended**: ${log.ended_at}`,
     `- **Disposition**: ${log.disposition}`,
+    ...(log.abort_reason ? [`- **Abort Reason**: ${log.abort_reason}`] : []),
     `- **Total Cost**: $${log.total_cost.toFixed(2)}`,
     "",
     "---",

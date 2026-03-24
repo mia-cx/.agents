@@ -17,6 +17,10 @@ function makeAgent(slug: string, name: string, model?: string): AgentConfig {
   };
 }
 
+async function writeExecutableScript(filePath: string, lines: string[]): Promise<void> {
+  await fs.writeFile(filePath, lines.join("\n"));
+}
+
 describe("BoardMemberSession", () => {
   it("initialises with idle status and zero counters", () => {
     const session = new BoardMemberSession("cfo", "CFO", undefined);
@@ -36,6 +40,7 @@ describe("BoardMemberSession", () => {
       slug: "cto",
       name: "CTO",
       status: "idle",
+      activity: "Standing by",
       turns: 0,
       totalTokens: 0,
       totalCost: 0,
@@ -75,7 +80,7 @@ describe("BoardMemberSession", () => {
     process.argv[1] = scriptPath;
 
     try {
-      const runPromise = session.run(tmpDir, "", "test task", controller.signal);
+      const runPromise = session.run(tmpDir, "", "test task", undefined, controller.signal);
       await new Promise(resolve => setTimeout(resolve, 100));
       controller.abort();
 
@@ -84,6 +89,89 @@ describe("BoardMemberSession", () => {
       expect(session.totalTokens).toBe(18);
       expect(session.totalCost).toBeCloseTo(0.42);
       expect(session.lastError).toBe("Subagent was aborted");
+    } finally {
+      process.argv[1] = originalArgv1;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("pins bare Claude aliases to the anthropic provider", async () => {
+    const session = new BoardMemberSession("ceo", "CEO", "claude-opus-4-6:high");
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
+    const scriptPath = path.join(tmpDir, "capture-args.js");
+    const originalArgv1 = process.argv[1];
+
+    await writeExecutableScript(scriptPath, [
+      "const args = process.argv.slice(2);",
+      "process.stdout.write(JSON.stringify({",
+      '  type: "message_end",',
+      "  message: {",
+      '    role: "assistant",',
+      "    usage: { input: 1, output: 1, cost: { total: 0 } },",
+      "    content: [{ type: 'text', text: JSON.stringify(args) }],",
+      "  },",
+      '}) + "\\n");',
+    ]);
+
+    process.argv[1] = scriptPath;
+
+    try {
+      const result = await session.run(tmpDir, "", "test task");
+      expect(result.exitCode).toBe(0);
+      expect(result.content).toContain("anthropic/claude-opus-4-6:high");
+      expect(result.content).not.toContain("amazon-bedrock");
+    } finally {
+      process.argv[1] = originalArgv1;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the alternate provider-pinned model after an auth failure", async () => {
+    const session = new BoardMemberSession(
+      "cfo",
+      "CFO",
+      "claude-opus-4-6:high",
+      "gpt-5.4:medium",
+    );
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
+    const scriptPath = path.join(tmpDir, "fallback.js");
+    const attemptsPath = path.join(tmpDir, "attempts.json");
+    const originalArgv1 = process.argv[1];
+
+    await writeExecutableScript(scriptPath, [
+      "const fs = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      `const attemptsPath = ${JSON.stringify(attemptsPath)};`,
+      "const attempts = fs.existsSync(attemptsPath) ? JSON.parse(fs.readFileSync(attemptsPath, 'utf8')) : [];",
+      "attempts.push(args);",
+      "fs.writeFileSync(attemptsPath, JSON.stringify(attempts), 'utf8');",
+      "const modelIndex = args.indexOf('--model');",
+      "const model = modelIndex === -1 ? undefined : args[modelIndex + 1];",
+      "if (model === 'anthropic/claude-opus-4-6:high') {",
+      "  process.stderr.write('Error: No API key found for anthropic.');",
+      "  process.exit(1);",
+      "}",
+      "process.stdout.write(JSON.stringify({",
+      '  type: "message_end",',
+      "  message: {",
+      '    role: "assistant",',
+      "    usage: { input: 2, output: 3, cost: { total: 0.01 } },",
+      "    content: [{ type: 'text', text: model || 'default' }],",
+      "  },",
+      '}) + "\\n");',
+    ]);
+
+    process.argv[1] = scriptPath;
+
+    try {
+      const result = await session.run(tmpDir, "", "test task");
+      expect(result.exitCode).toBe(0);
+      expect(result.content).toBe("openai-codex/gpt-5.4:medium");
+
+      const attempts = JSON.parse(await fs.readFile(attemptsPath, "utf8")) as string[][];
+      expect(attempts).toHaveLength(2);
+      expect(attempts[0]).toContain("anthropic/claude-opus-4-6:high");
+      expect(attempts[1]).toContain("openai-codex/gpt-5.4:medium");
     } finally {
       process.argv[1] = originalArgv1;
       await fs.rm(tmpDir, { recursive: true, force: true });
@@ -194,12 +282,12 @@ describe("SessionPool", () => {
     process.argv[1] = scriptPath;
 
     try {
-      const runPromise = pool.runOne(tmpDir, agent, "", "test task", controller.signal);
+      const runPromise = pool.runOne(tmpDir, agent, "", "test task", "Testing abort handling", controller.signal);
       await new Promise(resolve => setTimeout(resolve, 100));
       controller.abort();
 
       await expect(runPromise).rejects.toThrow("Subagent was aborted");
-      expect(updates.map(update => update.status)).toEqual(["queued", "aborted"]);
+      expect(updates.map(update => update.status)).toEqual(["queued", "running", "aborted"]);
       expect(updates.at(-1)?.error).toBe("Subagent was aborted");
     } finally {
       process.argv[1] = originalArgv1;
@@ -236,7 +324,7 @@ describe("SessionPool", () => {
     try {
       const runPromise = pool.runParallel(
         tmpDir,
-        [{ agent, systemPrompt: "", task: "test task" }],
+        [{ agent, systemPrompt: "", task: "test task", activity: "Testing abort handling" }],
         controller.signal,
         1,
       );
@@ -244,7 +332,7 @@ describe("SessionPool", () => {
       controller.abort();
 
       await expect(runPromise).rejects.toThrow("Subagent was aborted");
-      expect(updates.map(update => update.status)).toEqual(["queued", "aborted"]);
+      expect(updates.map(update => update.status)).toEqual(["queued", "running", "aborted"]);
       expect(updates.at(-1)?.error).toBe("Subagent was aborted");
     } finally {
       process.argv[1] = originalArgv1;

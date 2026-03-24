@@ -32,6 +32,7 @@ export interface MeetingResult {
   debateMarkdownPath: string;
   visualPaths: string[];
   disposition: MeetingDisposition;
+  abortReason?: string;
   briefTitle: string;
   mode: MeetingMode;
   totalCost: number;
@@ -41,6 +42,61 @@ export interface MeetingResult {
 
 export function getAbortDisposition(signal?: AbortSignal): "force-closed" | "aborted" {
   return signal?.aborted && signal.reason === "force-close" ? "force-closed" : "aborted";
+}
+
+function stringifyAbortReason(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (value instanceof Error) {
+    return value.message.trim() || value.name;
+  }
+  if (typeof value === "object" && value && "message" in value) {
+    const message = (value as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) {
+      return message.trim();
+    }
+  }
+  if (value === undefined || value === null) return undefined;
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized && serialized !== "{}" ? serialized : String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function describeAbortReason(
+  disposition: "force-closed" | "aborted",
+  err: unknown,
+  signal?: AbortSignal,
+): string {
+  const signalReason = stringifyAbortReason(signal?.reason);
+  const errorReason = stringifyAbortReason(err);
+
+  if (disposition === "force-closed") {
+    return signalReason && signalReason !== "force-close"
+      ? `Meeting was force-closed by operator: ${signalReason}`
+      : "Meeting was force-closed by operator.";
+  }
+
+  if (signal?.aborted) {
+    if (signalReason && signalReason !== "force-close") {
+      return errorReason && errorReason !== "Subagent was aborted"
+        ? `Abort signal received: ${signalReason}. Error: ${errorReason}`
+        : `Abort signal received: ${signalReason}`;
+    }
+    return errorReason && errorReason !== "Subagent was aborted"
+      ? `Abort signal received. Error: ${errorReason}`
+      : "Abort signal received.";
+  }
+
+  if (errorReason) {
+    return errorReason;
+  }
+
+  return "Unknown abort reason.";
 }
 
 function generateMeetingId(brief: ParsedBrief): string {
@@ -77,6 +133,15 @@ function parseCeoDisposition(content: string): "iterate" | "close" {
 
 function getNonCeoAgents(allAgents: AgentConfig[]): AgentConfig[] {
   return allAgents.filter(a => a.slug !== "ceo" && a.slug !== "executive-board-orchestrator");
+}
+
+function dedupeAgentsBySlug(agents: AgentConfig[]): AgentConfig[] {
+  const seen = new Set<string>();
+  return agents.filter((agent) => {
+    if (seen.has(agent.slug)) return false;
+    seen.add(agent.slug);
+    return true;
+  });
 }
 
 function resolveRoster(allAgents: AgentConfig[], ceoOutput: string): AgentConfig[] {
@@ -123,6 +188,35 @@ function emitConstraintWarnings(tracker: ConstraintTracker, callbacks: MeetingCa
   }
 }
 
+function buildVisibleAgentSnapshots(state: MeetingState, pool: SessionPool): AgentRuntimeUpdate[] {
+  const sessionSnapshots = new Map(pool.snapshot().map((snapshot) => [snapshot.slug, snapshot]));
+  const ordered: AgentRuntimeUpdate[] = [];
+  const visibleAgents = [
+    ...state.allAgents.filter((agent) => agent.slug === "ceo"),
+    ...state.roster,
+  ];
+
+  for (const agent of visibleAgents) {
+    const existing = sessionSnapshots.get(agent.slug);
+    ordered.push(existing ?? {
+      slug: agent.slug,
+      name: agent.name,
+      status: "idle",
+      activity: "Awaiting turn",
+      turns: 0,
+      totalTokens: 0,
+      totalCost: 0,
+    });
+    sessionSnapshots.delete(agent.slug);
+  }
+
+  for (const snapshot of sessionSnapshots.values()) {
+    ordered.push(snapshot);
+  }
+
+  return ordered;
+}
+
 function emitSnapshot(
   state: MeetingState,
   tracker: ConstraintTracker,
@@ -150,7 +244,7 @@ function emitSnapshot(
     roundsUsed: tracker.currentRound,
     maxRounds: state.resolvedConstraints.max_debate_rounds,
     roster: state.roster.map(a => a.slug),
-    agents: pool.snapshot(),
+    agents: buildVisibleAgentSnapshots(state, pool),
     presidentNote,
     transcript: lastEntries.map(e => `[${e.from}] ${e.content.slice(0, 200)}`),
     disposition: state.disposition ?? "in-progress",
@@ -163,10 +257,11 @@ async function runCeoWithRetry(
   ceo: AgentConfig,
   systemPrompt: string,
   task: string,
+  activity: string,
   callbacks: MeetingCallbacks,
   signal?: AbortSignal,
 ): Promise<{ content: string; tokenCount: number; cost: number }> {
-  const result = await pool.runOne(cwd, ceo, systemPrompt, task, signal);
+  const result = await pool.runOne(cwd, ceo, systemPrompt, task, activity, signal);
 
   if (result.exitCode === 0 && result.content) {
     return { content: result.content, tokenCount: result.tokenCount, cost: result.cost };
@@ -181,7 +276,7 @@ async function runCeoWithRetry(
     "The previous attempt failed. Provide your best assessment with the information available.",
   ].join("\n");
 
-  const retry = await pool.runOne(cwd, ceo, simplifiedPrompt, task, signal);
+  const retry = await pool.runOne(cwd, ceo, simplifiedPrompt, task, `${activity} (retry)`, signal);
   const totalCost = result.cost + retry.cost;
   const totalTokens = result.tokenCount + retry.tokenCount;
 
@@ -203,16 +298,21 @@ function savePartialArtifacts(
   log: ReturnType<typeof createConversationLog>,
   startedAt: Date,
   disposition: "force-closed" | "aborted",
+  abortReason?: string,
 ): MeetingResult {
-  closeLog(log, disposition);
+  closeLog(log, disposition, abortReason);
 
   const lastEntry = log.entries.findLast(e => e.from === "ceo");
+  const traceLine = abortReason
+    ? `[Boardroom ${disposition}. Reason: ${abortReason}]`
+    : (
+        disposition === "force-closed"
+          ? "[Meeting was force-closed before CEO synthesis. See debate log for available data.]"
+          : "[Meeting aborted. No CEO synthesis available. See debate log for partial data.]"
+      );
   const memoContent = lastEntry?.content
-    ?? (
-      disposition === "force-closed"
-        ? "[Meeting was force-closed before CEO synthesis. See debate log for available data.]"
-        : "[Meeting aborted. No CEO synthesis available. See debate log for partial data.]"
-    );
+    ? `${lastEntry.content}\n\n---\n\n${traceLine}`
+    : traceLine;
 
   const memoPath = writeMemo(cwd, brief.slug, memoContent, startedAt);
   const { jsonPath, mdPath } = writeConversationLog(cwd, log, startedAt);
@@ -220,7 +320,19 @@ function savePartialArtifacts(
   const allMermaid = collectMermaidFromLog(log);
   const visualPaths = allMermaid.length > 0 ? writeVisuals(cwd, meetingId, allMermaid) : [];
 
-  return { memoPath, debateJsonPath: jsonPath, debateMarkdownPath: mdPath, visualPaths };
+  return {
+    memoPath,
+    debateJsonPath: jsonPath,
+    debateMarkdownPath: mdPath,
+    visualPaths,
+    disposition,
+    abortReason,
+    briefTitle: brief.title,
+    mode: brief.mode ?? "structured",
+    totalCost: log.total_cost,
+    elapsedMinutes: Math.max(0, (Date.now() - startedAt.getTime()) / 60000),
+    roster: log.roster,
+  };
 }
 
 // --- Freeform Meeting ---
@@ -244,6 +356,8 @@ export async function runFreeformMeeting(
   const startedAt = new Date();
 
   const pool = new SessionPool(callbacks.onAgentUpdate);
+  pool.ensureAgents([ceo], "Preparing framing");
+  pool.ensureAgents([ceo], "Preparing framing");
 
   const state: MeetingState = {
     id: meetingId,
@@ -282,7 +396,7 @@ export async function runFreeformMeeting(
       "3. Provide your initial framing and key questions for the board to address.",
     ].join("\n");
 
-    const framingRes = await runCeoWithRetry(cwd, pool, ceo, framingPrompt, framingTask, callbacks, callbacks.signal);
+    const framingRes = await runCeoWithRetry(cwd, pool, ceo, framingPrompt, framingTask, "Framing the decision", callbacks, callbacks.signal);
     framingRes.content = processScratchpadOutput(cwd, ceo.slug, framingRes.content);
     tracker.addCost(framingRes.cost);
 
@@ -301,6 +415,7 @@ export async function runFreeformMeeting(
     const rosterAgents = resolveRoster(allAgents, framingRes.content);
     log.roster = ["ceo", ...rosterAgents.map(a => a.slug)];
     state.roster = rosterAgents;
+    pool.ensureAgents(rosterAgents, "Awaiting first evaluation");
 
     const rosterParsed = parseRosterJson(framingRes.content);
     const rosterRationale = rosterParsed?.rationale ?? "Full board (CEO roster selection could not be parsed)";
@@ -339,6 +454,7 @@ export async function runFreeformMeeting(
           agent,
           systemPrompt: prompt,
           task: `Provide your assessment as the ${agent.name}. ${roundContext} Follow your output format.`,
+          activity: debateRound > 1 ? "Responding to disagreements" : "Evaluating the brief",
         };
       });
 
@@ -400,7 +516,7 @@ export async function runFreeformMeeting(
           "Otherwise, proceed with your Strategic Brief.",
         ].join("\n");
 
-        const reviewRes = await runCeoWithRetry(cwd, pool, ceo, reviewPrompt, reviewTask, callbacks, callbacks.signal);
+        const reviewRes = await runCeoWithRetry(cwd, pool, ceo, reviewPrompt, reviewTask, "Reviewing disagreements", callbacks, callbacks.signal);
         reviewRes.content = processScratchpadOutput(cwd, ceo.slug, reviewRes.content);
         tracker.addCost(reviewRes.cost);
 
@@ -436,7 +552,7 @@ export async function runFreeformMeeting(
           "include one or more Mermaid diagram blocks in your output using ```mermaid fences.",
         ].join("\n");
 
-    const synthRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, synthTask, callbacks, callbacks.signal);
+    const synthRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, synthTask, "Synthesizing final brief", callbacks, callbacks.signal);
     synthRes.content = processScratchpadOutput(cwd, ceo.slug, synthRes.content);
     tracker.addCost(synthRes.cost);
 
@@ -481,12 +597,20 @@ export async function runFreeformMeeting(
   } catch (err: any) {
     if (err.message === "Subagent was aborted" || callbacks.signal?.aborted) {
       const disposition = getAbortDisposition(callbacks.signal);
+      const abortReason = describeAbortReason(disposition, err, callbacks.signal);
       const note = disposition === "force-closed" ? "Meeting force-closed." : "Meeting aborted.";
       callbacks.onStatus(`${note} Saving partial log...`);
       state.disposition = disposition;
-      emitSnapshot(state, tracker, pool, disposition === "force-closed" ? "Force-closed" : "Aborted", note, callbacks);
+      emitSnapshot(
+        state,
+        tracker,
+        pool,
+        disposition === "force-closed" ? "Force-closed" : "Aborted",
+        `${note} ${abortReason}`,
+        callbacks,
+      );
       pool.destroyAll();
-      const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt, disposition);
+      const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt, disposition, abortReason);
       return {
         ...partial, disposition, briefTitle: brief.title, mode,
         totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,
@@ -495,9 +619,10 @@ export async function runFreeformMeeting(
     }
     callbacks.onStatus(`Meeting error: ${err.message}. Saving partial log...`);
     state.disposition = "aborted";
-    emitSnapshot(state, tracker, pool, "Error", `Error: ${err.message}`, callbacks);
+    const abortReason = describeAbortReason("aborted", err, callbacks.signal);
+    emitSnapshot(state, tracker, pool, "Error", `Error: ${abortReason}`, callbacks);
     pool.destroyAll();
-    const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt, "aborted");
+    const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt, "aborted", abortReason);
     return {
       ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode,
       totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,
@@ -564,7 +689,7 @@ export async function runStructuredMeeting(
       "3. Frame the key questions for parallel evaluation.",
     ].join("\n");
 
-    const framingRes = await runCeoWithRetry(cwd, pool, ceo, framingPrompt, framingTask, callbacks, callbacks.signal);
+    const framingRes = await runCeoWithRetry(cwd, pool, ceo, framingPrompt, framingTask, "Framing the decision", callbacks, callbacks.signal);
     framingRes.content = processScratchpadOutput(cwd, ceo.slug, framingRes.content);
     tracker.addCost(framingRes.cost);
 
@@ -576,6 +701,7 @@ export async function runStructuredMeeting(
     const rosterAgents = resolveRoster(allAgents, framingRes.content);
     log.roster = ["ceo", ...rosterAgents.map(a => a.slug)];
     state.roster = rosterAgents;
+    pool.ensureAgents(rosterAgents, "Awaiting evaluation");
 
     const rosterParsed = parseRosterJson(framingRes.content);
     await callbacks.onConfirmRoster(rosterAgents.map(a => a.name), rosterParsed?.rationale ?? "Full board");
@@ -608,6 +734,7 @@ export async function runStructuredMeeting(
           agent,
           systemPrompt: prompt,
           task: `Evaluate this decision as ${agent.name}. Follow your output format.`,
+          activity: "Evaluating the brief",
         };
       });
 
@@ -644,7 +771,13 @@ export async function runStructuredMeeting(
       callbacks.onStatus("Phase 3: Stress test...");
       emitSnapshot(state, tracker, pool, "Stress Test", "Running adversarial review.", callbacks);
 
-      const stressAgents = findAgentsByTag(rosterAgents, "stress-test");
+      const stressAgents = dedupeAgentsBySlug(
+        findAgentsByTag(getNonCeoAgents(allAgents), "stress-test"),
+      );
+
+      if (stressAgents.length > 0) {
+        pool.ensureAgents(stressAgents, "Awaiting stress test");
+      }
 
       if (stressAgents.length > 0) {
         const allAssessments = log.entries.filter(e => e.role === "assessment");
@@ -656,6 +789,7 @@ export async function runStructuredMeeting(
             agent,
             systemPrompt: prompt,
             task: `Stress-test the board's assessments as ${agent.name}. Challenge weak assumptions.`,
+            activity: "Stress-testing the plan",
           };
         });
 
@@ -696,7 +830,7 @@ export async function runStructuredMeeting(
         ? `Review all board input. If critical disagreements remain, say 'NEED MORE DATA'. Re-engagements left: ${MAX_RE_ENGAGEMENTS - reEngagementCount}. Budget: ${tracker.summary}. Otherwise, produce your Strategic Brief.`
         : "Final round. Produce your Strategic Brief now.";
 
-      const reviewRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, reviewTask, callbacks, callbacks.signal);
+      const reviewRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, reviewTask, "Resolving board conflicts", callbacks, callbacks.signal);
       reviewRes.content = processScratchpadOutput(cwd, ceo.slug, reviewRes.content);
       tracker.addCost(reviewRes.cost);
       addEntry(log, nextEntryId(state), "ceo", rosterAgents.map(a => a.slug),
@@ -731,7 +865,7 @@ export async function runStructuredMeeting(
         "If the decision involves data worth visualizing (costs, timelines, risk matrices, architectures),",
         "include one or more Mermaid diagram blocks in your output using ```mermaid fences.",
       ].join("\n");
-      const finalRes = await runCeoWithRetry(cwd, pool, ceo, finalPrompt, finalTask, callbacks, callbacks.signal);
+      const finalRes = await runCeoWithRetry(cwd, pool, ceo, finalPrompt, finalTask, "Producing final decision", callbacks, callbacks.signal);
       finalRes.content = processScratchpadOutput(cwd, ceo.slug, finalRes.content);
       tracker.addCost(finalRes.cost);
       addEntry(log, nextEntryId(state), "ceo", rosterAgents.map(a => a.slug),
@@ -774,12 +908,20 @@ export async function runStructuredMeeting(
   } catch (err: any) {
     if (err.message === "Subagent was aborted" || callbacks.signal?.aborted) {
       const disposition = getAbortDisposition(callbacks.signal);
+      const abortReason = describeAbortReason(disposition, err, callbacks.signal);
       const note = disposition === "force-closed" ? "Meeting force-closed." : "Meeting aborted.";
       callbacks.onStatus(`${note} Saving partial log...`);
       state.disposition = disposition;
-      emitSnapshot(state, tracker, pool, disposition === "force-closed" ? "Force-closed" : "Aborted", note, callbacks);
+      emitSnapshot(
+        state,
+        tracker,
+        pool,
+        disposition === "force-closed" ? "Force-closed" : "Aborted",
+        `${note} ${abortReason}`,
+        callbacks,
+      );
       pool.destroyAll();
-      const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt, disposition);
+      const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt, disposition, abortReason);
       return {
         ...partial, disposition, briefTitle: brief.title, mode: "structured" as const,
         totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,
@@ -788,9 +930,10 @@ export async function runStructuredMeeting(
     }
     callbacks.onStatus(`Meeting error: ${err.message}. Saving partial log...`);
     state.disposition = "aborted";
-    emitSnapshot(state, tracker, pool, "Error", `Error: ${err.message}`, callbacks);
+    const abortReason = describeAbortReason("aborted", err, callbacks.signal);
+    emitSnapshot(state, tracker, pool, "Error", `Error: ${abortReason}`, callbacks);
     pool.destroyAll();
-    const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt, "aborted");
+    const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt, "aborted", abortReason);
     return {
       ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode: "structured" as const,
       totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,

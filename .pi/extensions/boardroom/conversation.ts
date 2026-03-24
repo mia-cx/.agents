@@ -52,9 +52,14 @@ export function addEntry(
   return entry;
 }
 
-export function closeLog(log: ConversationLog, disposition: MeetingDisposition): void {
+export function closeLog(log: ConversationLog, disposition: MeetingDisposition, abortReason?: string): void {
   log.ended_at = new Date().toISOString();
   log.disposition = disposition;
+  if (abortReason?.trim()) {
+    log.abort_reason = abortReason.trim();
+    return;
+  }
+  delete log.abort_reason;
 }
 
 export function compressEntries(entries: ConversationEntry[]): string {

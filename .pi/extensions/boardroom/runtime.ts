@@ -28,6 +28,40 @@ async function writeSystemPromptFile(
 
 export type RuntimeEventHandler = (update: AgentRuntimeUpdate) => void;
 
+function preferLocalProviderModel(model: string | undefined): string | undefined {
+  if (!model) return undefined;
+  if (model.includes("/")) return model;
+
+  // Keep boardroom agents on the user's direct local providers instead of
+  // letting Pi resolve generic aliases to providers like Bedrock/OpenRouter.
+  if (/^(claude|sonnet|opus|haiku)\b/i.test(model)) return `anthropic/${model}`;
+  if (/^(gpt|o[1-9]|codex)\b/i.test(model)) return `openai-codex/${model}`;
+  return model;
+}
+
+function stringifyRuntimeError(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (value instanceof Error) {
+    return value.message.trim() || value.name;
+  }
+  if (typeof value === "object" && value) {
+    if ("message" in value && typeof (value as { message?: unknown }).message === "string") {
+      const message = (value as { message: string }).message.trim();
+      if (message) return message;
+    }
+    try {
+      const serialized = JSON.stringify(value);
+      return serialized && serialized !== "{}" ? serialized : undefined;
+    } catch {
+      return String(value);
+    }
+  }
+  return undefined;
+}
+
 /**
  * Wraps repeated Pi invocations for a single board member, tracking
  * cumulative usage across turns and emitting structured lifecycle state.
@@ -38,31 +72,63 @@ export class BoardMemberSession {
   totalTokens = 0;
   totalCost = 0;
   lastError: string | null = null;
+  activity = "Standing by";
+  partialText = "";
 
   constructor(
     readonly slug: string,
     readonly name: string,
     readonly model: string | undefined,
+    readonly modelAlt?: string,
+    private readonly onUpdate?: RuntimeEventHandler,
   ) {}
 
-  async run(
+  private publishUpdate(): void {
+    this.onUpdate?.(this.snapshot());
+  }
+
+  private shouldRetryWithFallback(error: string | undefined): boolean {
+    if (!error) return false;
+    return /No API key found for/i.test(error);
+  }
+
+  private getAttemptModels(): Array<string | undefined> {
+    const attempts: Array<string | undefined> = [];
+    const pushUnique = (model: string | undefined) => {
+      if (attempts.some((candidate) => candidate === model)) return;
+      attempts.push(model);
+    };
+
+    pushUnique(preferLocalProviderModel(this.model));
+    if (this.modelAlt) pushUnique(preferLocalProviderModel(this.modelAlt));
+    pushUnique(undefined);
+    return attempts;
+  }
+
+  private async runOnce(
     cwd: string,
+    model: string | undefined,
     systemPrompt: string,
     task: string,
+    activity: string | undefined,
     signal?: AbortSignal,
     onStream?: (partialText: string) => void,
   ): Promise<AgentRunResult> {
     this.status = "running";
     this.lastError = null;
+    this.activity = activity ?? "Working";
+    this.partialText = "";
+    this.publishUpdate();
 
     const args: string[] = ["--no-extensions", "--mode", "json", "-p", "--no-session"];
-    if (this.model) args.push("--model", this.model);
+    if (model) args.push("--model", model);
 
     let tmpDir: string | null = null;
     let tmpPath: string | null = null;
 
     const usage = { input: 0, output: 0, cost: 0, turns: 0 };
     let finalOutput = "";
+    let streamedOutput = "";
     let finalError = "";
 
     try {
@@ -99,8 +165,18 @@ export class BoardMemberSession {
             event.type === "message_update" &&
             event.assistantMessageEvent?.type === "text_delta"
           ) {
+            const delta = String(event.assistantMessageEvent.delta ?? "");
             this.status = "streaming";
-            onStream?.(event.assistantMessageEvent.delta);
+            this.activity = activity ?? "Streaming response";
+            streamedOutput += delta;
+            this.partialText = streamedOutput;
+            this.lastError = null;
+            this.publishUpdate();
+            onStream?.(delta);
+          }
+
+          if (event.type === "error") {
+            finalError = stringifyRuntimeError(event.error) ?? finalError;
           }
 
           if (event.type === "message_end" && event.message) {
@@ -112,9 +188,28 @@ export class BoardMemberSession {
                 usage.output += msg.usage.output || 0;
                 usage.cost += msg.usage.cost?.total || 0;
               }
+              const textParts: string[] = [];
               for (const part of msg.content || []) {
-                if (part.type === "text") finalOutput = part.text;
+                if (part.type === "text") textParts.push(part.text);
               }
+              if (textParts.length > 0) finalOutput = textParts.join("");
+              if (typeof msg.errorMessage === "string" && msg.errorMessage.trim()) {
+                finalError = msg.errorMessage.trim();
+              }
+            }
+          }
+
+          if (
+            event.type === "message_update" &&
+            event.assistantMessageEvent?.type === "message_end" &&
+            event.assistantMessageEvent.message?.role === "assistant"
+          ) {
+            const textParts: string[] = [];
+            for (const part of event.assistantMessageEvent.message.content || []) {
+              if (part.type === "text") textParts.push(part.text);
+            }
+            if (textParts.length > 0) {
+              finalOutput = textParts.join("");
             }
           }
         };
@@ -153,21 +248,31 @@ export class BoardMemberSession {
       });
 
       const tokenCount = usage.input + usage.output;
+      if (!finalOutput && streamedOutput.trim()) {
+        finalOutput = streamedOutput;
+      }
       this.turns++;
       this.totalTokens += tokenCount;
       this.totalCost += usage.cost;
 
       if (wasAborted) {
         this.status = "aborted";
+        this.activity = "Aborted";
+        this.lastError = "Subagent was aborted";
+        this.publishUpdate();
         throw new Error("Subagent was aborted");
       }
 
       if (exitCode !== 0) {
         this.status = "failed";
         this.lastError = finalError || `Process exited with code ${exitCode}`;
+        this.activity = "Failed";
       } else {
         this.status = "completed";
+        this.activity = "Completed";
+        this.partialText = "";
       }
+      this.publishUpdate();
 
       return {
         agent: this.slug,
@@ -181,6 +286,8 @@ export class BoardMemberSession {
       this.lastError = err.message ?? "Unknown error";
       if (this.status === "aborted") throw err;
       this.status = "failed";
+      this.activity = "Failed";
+      this.publishUpdate();
       return {
         agent: this.slug,
         content: "",
@@ -195,11 +302,44 @@ export class BoardMemberSession {
     }
   }
 
+  async run(
+    cwd: string,
+    systemPrompt: string,
+    task: string,
+    activity?: string,
+    signal?: AbortSignal,
+    onStream?: (partialText: string) => void,
+  ): Promise<AgentRunResult> {
+    const attemptModels = this.getAttemptModels();
+    let lastResult: AgentRunResult | null = null;
+
+    for (let i = 0; i < attemptModels.length; i++) {
+      const attemptModel = attemptModels[i];
+      const result = await this.runOnce(cwd, attemptModel, systemPrompt, task, activity, signal, onStream);
+      lastResult = result;
+
+      if (result.exitCode === 0) return result;
+      if (!this.shouldRetryWithFallback(result.error)) return result;
+      if (i === attemptModels.length - 1) return result;
+    }
+
+    return lastResult ?? {
+      agent: this.slug,
+      content: "",
+      exitCode: 1,
+      tokenCount: 0,
+      cost: 0,
+      error: "Unknown runtime failure",
+    };
+  }
+
   snapshot(): AgentRuntimeUpdate {
     return {
       slug: this.slug,
       name: this.name,
       status: this.status,
+      activity: this.activity,
+      partialText: this.partialText || undefined,
       turns: this.turns,
       totalTokens: this.totalTokens,
       totalCost: this.totalCost,
@@ -209,6 +349,19 @@ export class BoardMemberSession {
 
   markAborted(): void {
     this.status = "aborted";
+    this.activity = "Aborted";
+    this.publishUpdate();
+  }
+
+  setQueued(activity: string): void {
+    this.status = "queued";
+    this.activity = activity;
+    this.publishUpdate();
+  }
+
+  setIdle(activity = "Standing by"): void {
+    if (this.status === "idle") this.activity = activity;
+    this.publishUpdate();
   }
 }
 
@@ -226,7 +379,7 @@ export class SessionPool {
   getOrCreate(agent: AgentConfig): BoardMemberSession {
     let session = this.sessions.get(agent.slug);
     if (!session) {
-      session = new BoardMemberSession(agent.slug, agent.name, agent.model);
+      session = new BoardMemberSession(agent.slug, agent.name, agent.model, agent.modelAlt, this.onUpdate);
       this.sessions.set(agent.slug, session);
     }
     return session;
@@ -236,8 +389,11 @@ export class SessionPool {
     return this.sessions.get(slug);
   }
 
-  private emitUpdate(session: BoardMemberSession): void {
-    this.onUpdate?.(session.snapshot());
+  ensureAgents(agents: AgentConfig[], activity = "Awaiting assignment"): void {
+    for (const agent of agents) {
+      const session = this.getOrCreate(agent);
+      session.setIdle(activity);
+    }
   }
 
   async runOne(
@@ -245,23 +401,21 @@ export class SessionPool {
     agent: AgentConfig,
     systemPrompt: string,
     task: string,
+    activity: string,
     signal?: AbortSignal,
   ): Promise<AgentRunResult> {
     const session = this.getOrCreate(agent);
-    session.status = "queued";
-    this.emitUpdate(session);
+    session.setQueued(activity);
 
     try {
-      const result = await session.run(cwd, systemPrompt, task, signal);
+      const result = await session.run(cwd, systemPrompt, task, activity, signal);
       return result;
-    } finally {
-      this.emitUpdate(session);
-    }
+    } finally {}
   }
 
   async runParallel(
     cwd: string,
-    tasks: Array<{ agent: AgentConfig; systemPrompt: string; task: string }>,
+    tasks: Array<{ agent: AgentConfig; systemPrompt: string; task: string; activity: string }>,
     signal?: AbortSignal,
     concurrency = 4,
   ): Promise<AgentRunResult[]> {
@@ -269,8 +423,7 @@ export class SessionPool {
 
     for (const t of tasks) {
       const session = this.getOrCreate(t.agent);
-      session.status = "queued";
-      this.emitUpdate(session);
+      session.setQueued(t.activity);
     }
 
     const limit = Math.max(1, Math.min(concurrency, tasks.length));
@@ -284,10 +437,8 @@ export class SessionPool {
         const t = tasks[current];
         const session = this.getOrCreate(t.agent);
         try {
-          results[current] = await session.run(cwd, t.systemPrompt, t.task, signal);
-        } finally {
-          this.emitUpdate(session);
-        }
+          results[current] = await session.run(cwd, t.systemPrompt, t.task, t.activity, signal);
+        } finally {}
       }
     });
 

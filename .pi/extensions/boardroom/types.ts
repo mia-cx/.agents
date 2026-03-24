@@ -70,6 +70,7 @@ export interface ConversationLog {
   started_at: string;
   ended_at: string;
   disposition: MeetingDisposition;
+  abort_reason?: string;
   total_cost: number;
   entries: ConversationEntry[];
 }
@@ -115,6 +116,7 @@ export interface AgentRuntimeUpdate {
   slug: string;
   name: string;
   status: AgentRuntimeStatus;
+  activity?: string;
   partialText?: string;
   turns: number;
   totalTokens: number;
