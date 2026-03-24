@@ -178,8 +178,9 @@ export class BoardMemberSession {
         error: exitCode !== 0 ? (finalError || `Process exited with code ${exitCode}`) : undefined,
       };
     } catch (err: any) {
-      if (this.status !== "aborted") this.status = "failed";
       this.lastError = err.message ?? "Unknown error";
+      if (this.status === "aborted") throw err;
+      this.status = "failed";
       return {
         agent: this.slug,
         content: "",

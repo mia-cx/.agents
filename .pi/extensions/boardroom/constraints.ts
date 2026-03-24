@@ -61,8 +61,4 @@ export class ConstraintTracker {
   get currentRound(): number {
     return this.roundsUsed;
   }
-
-  get constraintLimits(): ConstraintSet {
-    return this.limits;
-  }
 }
