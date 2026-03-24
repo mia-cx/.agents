@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentConfig, ConversationEntry, ParsedBrief } from "./types.js";
+import { loadMetaPrompt } from "./meta-prompts.js";
 import { composeScratchpadInstructions } from "./scratchpad.js";
 
 function composeBoardroomArtifactDiscipline(
@@ -8,21 +9,29 @@ function composeBoardroomArtifactDiscipline(
   brief: ParsedBrief,
   options?: { finalMemo?: boolean },
 ): string {
-  const lines = [
-    "--- BOARDROOM OUTPUT DISCIPLINE ---",
-    "",
-    `The source brief at "${brief.filePath}" is immutable input.`,
-    "Never rewrite, patch, append to, or save over the source brief.",
-    "Never use file mutation tools or mutating bash commands on anything under boardroom/briefs/.",
-    `Your only allowed persistent working memory is your own scratch pad at boardroom/scratchpads/${agent.slug}.md, and it should normally be updated through the hidden scratch pad block in your response rather than by calling file mutation tools directly.`,
-    options?.finalMemo
-      ? "Return the full final memo in your assistant message. The boardroom runtime will save that message as the final memo artifact for you. Do not write the final memo to a file yourself."
-      : "Return your deliverable in your assistant message. Do not write your assessment, report, or brief to a file yourself.",
-    "Never open with preamble, meta-commentary, or narration about what you are about to do. Start directly with substantive content.",
-    "",
-    "--- END BOARDROOM OUTPUT DISCIPLINE ---",
-  ];
-  return lines.join("\n");
+  return loadMetaPrompt(
+    brief.filePath,
+    "boardroom-artifact-discipline.md",
+    [
+      "--- BOARDROOM OUTPUT DISCIPLINE ---",
+      "",
+      `The source brief at "{{BRIEF_PATH}}" is immutable input.`,
+      "Never rewrite, patch, append to, or save over the source brief.",
+      "Never use file mutation tools or mutating bash commands on anything under boardroom/briefs/.",
+      "Your only allowed persistent working memory is your own scratch pad at `{{SCRATCHPAD_PATH}}`, and it should normally be updated through the hidden scratch pad block in your response rather than by calling file mutation tools directly.",
+      "{{DELIVERABLE_DIRECTIVE}}",
+      "Never open with preamble, meta-commentary, or narration about what you are about to do. Start directly with substantive content.",
+      "",
+      "--- END BOARDROOM OUTPUT DISCIPLINE ---",
+    ].join("\n"),
+    {
+      BRIEF_PATH: brief.filePath,
+      SCRATCHPAD_PATH: `boardroom/scratchpads/${agent.slug}.md`,
+      DELIVERABLE_DIRECTIVE: options?.finalMemo
+        ? "Return the full final memo in your assistant message. The boardroom runtime will save that message as the final memo artifact for you. Do not write the final memo to a file yourself."
+        : "Return your deliverable in your assistant message. Do not write your assessment, report, or brief to a file yourself.",
+    },
+  );
 }
 
 export function composeFramingPrompt(agent: AgentConfig, brief: ParsedBrief, scratchpad: string | null = null): string {
@@ -88,8 +97,14 @@ export function composeAssessmentPrompt(
     "",
     "--- INSTRUCTIONS ---",
     "",
-    "When responding to or challenging a specific board member's position, name them explicitly (e.g., \"I disagree with the CTO's assessment because...\").",
-    "This helps the CEO and other board members follow the debate.",
+    loadMetaPrompt(
+      brief.filePath,
+      "boardroom-assessment-instructions.md",
+      [
+        `When responding to or challenging a specific board member's position, name them explicitly (e.g., "I disagree with the CTO's assessment because...").`,
+        "This helps the CEO and other board members follow the debate.",
+      ].join("\n"),
+    ),
     "",
     "--- END CONTEXT ---",
   );
@@ -137,10 +152,16 @@ export function composeSynthesisPrompt(
   parts.push(
     "--- INSTRUCTIONS ---",
     "",
-    "Synthesize all board input into your final Strategic Brief.",
-    "Address key tensions and disagreements between board members explicitly.",
-    "Produce your output in Strategic Brief format as defined in your system prompt.",
-    "Do not call tools to save, patch, or rewrite the brief or memo files. Return the final memo as your assistant message only.",
+    loadMetaPrompt(
+      brief.filePath,
+      "boardroom-synthesis-instructions.md",
+      [
+        "Synthesize all board input into your final Strategic Brief.",
+        "Address key tensions and disagreements between board members explicitly.",
+        "Produce your output in Strategic Brief format as defined in your system prompt.",
+        "Do not call tools to save, patch, or rewrite the brief or memo files. Return the final memo as your assistant message only.",
+      ].join("\n"),
+    ),
     "",
     "--- END CONTEXT ---",
   );

@@ -11,11 +11,12 @@ import type {
 } from "./types.js";
 import { ConstraintTracker } from "./constraints.js";
 import { addEntry, closeLog, createConversationLog, extractAddressees } from "./conversation.js";
+import { loadMetaPrompt } from "./meta-prompts.js";
 import { composeAssessmentPrompt, composeFramingPrompt, composeSynthesisPrompt, loadExpertise } from "./prompt-composer.js";
 import { SessionPool } from "./runtime.js";
 import { writeConversationLog, writeExpertise, writeMemo, writeVisuals } from "./artifacts.js";
 import { loadScratchpad, saveScratchpad, extractScratchpadUpdate, stripScratchpadBlock } from "./scratchpad.js";
-import { extractMermaidBlocks } from "./visuals.js";
+import { extractVisualBlocks } from "./visuals.js";
 import { findAgentsByTag } from "./agents.js";
 
 export interface MeetingCallbacks {
@@ -49,6 +50,15 @@ export interface MeetingResult {
   totalCost: number;
   elapsedMinutes: number;
   roster: string[];
+}
+
+function loadBoardroomTaskPrompt(
+  cwd: string,
+  fileName: string,
+  fallback: string,
+  replacements: Record<string, string> = {},
+): string {
+  return loadMetaPrompt(cwd, fileName, fallback, replacements);
 }
 
 export function getAbortDisposition(signal?: AbortSignal): "force-closed" | "aborted" {
@@ -199,12 +209,14 @@ function processScratchpadOutput(cwd: string, agentSlug: string, output: string)
   return stripScratchpadBlock(output);
 }
 
-function collectMermaidFromLog(log: ReturnType<typeof createConversationLog>): { label: string; code: string }[] {
-  const all: { label: string; code: string }[] = [];
+function collectVisualsFromLog(
+  log: ReturnType<typeof createConversationLog>,
+): Array<{ label: string; format: "mermaid" | "svg"; code: string }> {
+  const all: Array<{ label: string; format: "mermaid" | "svg"; code: string }> = [];
   for (const entry of log.entries) {
-    const blocks = extractMermaidBlocks(entry.content);
+    const blocks = extractVisualBlocks(entry.content);
     for (const block of blocks) {
-      all.push({ label: `${entry.from}-${entry.role}`, code: block });
+      all.push({ label: `${entry.from}-${entry.role}`, format: block.format, code: block.code });
     }
   }
   return all;
@@ -350,8 +362,8 @@ function savePartialArtifacts(
   const memoPath = writeMemo(cwd, brief.slug, memoContent, startedAt);
   const { jsonPath, mdPath } = writeConversationLog(cwd, log, startedAt);
 
-  const allMermaid = collectMermaidFromLog(log);
-  const visualPaths = allMermaid.length > 0 ? writeVisuals(cwd, meetingId, allMermaid) : [];
+  const allVisuals = collectVisualsFromLog(log);
+  const visualPaths = allVisuals.length > 0 ? writeVisuals(cwd, meetingId, allVisuals) : [];
 
   return {
     memoPath,
@@ -409,15 +421,19 @@ async function finalizeForceClosedMeeting(
     loadExpertise(cwd, ceo.slug),
     ceoScratchpad,
   );
-  const finalTask = [
-    "The operator force-closed the board meeting.",
-    "Produce your FINAL Strategic Brief using only the information gathered so far.",
-    "Do not ask for another round or more discussion.",
-    "Explicitly call out which questions, risks, or workstreams remain unresolved because the meeting was interrupted.",
-    "",
-    "If the decision involves data worth visualizing (costs, timelines, risk matrices, architectures),",
-    "include one or more Mermaid diagram blocks in your output using ```mermaid fences.",
-  ].join("\n");
+  const finalTask = loadBoardroomTaskPrompt(
+    cwd,
+    "boardroom-force-close-final-task.md",
+    [
+      "The operator force-closed the board meeting.",
+      "Produce your FINAL Strategic Brief using only the information gathered so far.",
+      "Do not ask for another round or more discussion.",
+      "Explicitly call out which questions, risks, or workstreams remain unresolved because the meeting was interrupted.",
+      "",
+      "If the decision involves data worth visualizing (costs, timelines, risk matrices, architectures),",
+      "include one or more visuals in your output using ```mermaid fences, ```svg fences, or both.",
+    ].join("\n"),
+  );
 
   const finalRes = await runCeoWithRetry(
     cwd,
@@ -445,8 +461,8 @@ async function finalizeForceClosedMeeting(
     finalRes.cost,
   );
 
-  const allMermaid = collectMermaidFromLog(state.log);
-  const visualPaths = allMermaid.length > 0 ? writeVisuals(cwd, meetingId, allMermaid) : [];
+  const allVisuals = collectVisualsFromLog(state.log);
+  const visualPaths = allVisuals.length > 0 ? writeVisuals(cwd, meetingId, allVisuals) : [];
   closeLog(state.log, "force-closed", abortReason);
   const memoPath = writeMemo(cwd, brief.slug, finalRes.content, startedAt);
   const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeConversationLog(cwd, state.log, startedAt);
@@ -673,12 +689,22 @@ export async function runFreeformMeeting(
       if (plannedRounds > 1) {
         const ceoReviewScratchpad = loadScratchpad(cwd, ceo.slug);
         const reviewPrompt = composeSynthesisPrompt(ceo, brief, framingRes.content, lastAssessmentEntries, ceoExpertise, ceoReviewScratchpad);
-        const reviewTask = [
-          `Round ${debateRound} of planned ${plannedRounds}. Budget: ${tracker.summary}`,
-          `You must continue to round ${debateRound + 1} unless budget/time constraints force an earlier stop.`,
-          "Do not produce the final Strategic Brief yet.",
-          "Summarize the strongest disagreements, missing evidence, and the concrete questions the next round must resolve.",
-        ].join("\n");
+        const reviewTask = loadBoardroomTaskPrompt(
+          cwd,
+          "boardroom-freeform-review-task.md",
+          [
+            "Round {{ROUND_NUMBER}} of planned {{PLANNED_ROUNDS}}. Budget: {{TRACKER_SUMMARY}}",
+            "You must continue to round {{NEXT_ROUND}} unless budget or time constraints force an earlier stop.",
+            "Do not produce the final Strategic Brief yet.",
+            "Summarize the strongest disagreements, missing evidence, and the concrete questions the next round must resolve.",
+          ].join("\n"),
+          {
+            ROUND_NUMBER: String(debateRound),
+            PLANNED_ROUNDS: String(plannedRounds),
+            TRACKER_SUMMARY: tracker.summary,
+            NEXT_ROUND: String(debateRound + 1),
+          },
+        );
 
         const reviewRes = await runCeoWithRetry(cwd, pool, ceo, reviewPrompt, reviewTask, "Reviewing disagreements", callbacks, callbacks.signal);
         reviewRes.content = processScratchpadOutput(cwd, ceo.slug, reviewRes.content);
@@ -711,23 +737,35 @@ export async function runFreeformMeeting(
 
     const earlyClose = !forceClosed && !tracker.canContinue(config.budget_hard_stop, config.time_hard_stop);
     const synthTask = forceClosed
-      ? [
-          "The operator force-closed the board meeting.",
-          "Produce your FINAL Strategic Brief using only the information gathered so far.",
-          "Do not ask for another round or more discussion.",
-          "Explicitly note which questions or workstreams remain unresolved because the meeting was interrupted.",
-          "",
-          "If the decision involves data worth visualizing (costs, timelines, risk matrices, architectures),",
-          "include one or more Mermaid diagram blocks in your output using ```mermaid fences.",
-        ].join("\n")
+      ? loadBoardroomTaskPrompt(
+          cwd,
+          "boardroom-force-close-final-task.md",
+          [
+            "The operator force-closed the board meeting.",
+            "Produce your FINAL Strategic Brief using only the information gathered so far.",
+            "Do not ask for another round or more discussion.",
+            "Explicitly note which questions or workstreams remain unresolved because the meeting was interrupted.",
+            "",
+            "If the decision involves data worth visualizing (costs, timelines, risk matrices, architectures),",
+            "include one or more visuals in your output using ```mermaid fences, ```svg fences, or both.",
+          ].join("\n"),
+        )
       : earlyClose
-      ? "Constraints reached. Produce your final Strategic Brief with available data. Note any gaps."
-      : [
-          "Synthesize all board input into your final Strategic Brief. Address disagreements explicitly.",
-          "",
-          "If the decision involves data worth visualizing (costs, timelines, risk matrices, architectures),",
-          "include one or more Mermaid diagram blocks in your output using ```mermaid fences.",
-        ].join("\n");
+      ? loadBoardroomTaskPrompt(
+          cwd,
+          "boardroom-constraints-reached-final-task.md",
+          "Constraints reached. Produce your final Strategic Brief with available data. Note any gaps.",
+        )
+      : loadBoardroomTaskPrompt(
+          cwd,
+          "boardroom-final-synthesis-task.md",
+          [
+            "Synthesize all board input into your final Strategic Brief. Address disagreements explicitly.",
+            "",
+            "If the decision involves data worth visualizing (costs, timelines, risk matrices, architectures),",
+            "include one or more visuals in your output using ```mermaid fences, ```svg fences, or both.",
+          ].join("\n"),
+        );
 
     const synthRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, synthTask, "Synthesizing final brief", callbacks, synthSignal);
     synthRes.content = processScratchpadOutput(cwd, ceo.slug, synthRes.content);
@@ -737,7 +775,7 @@ export async function runFreeformMeeting(
       null, synthPhase, 0, "synthesis", synthRes.content, synthRes.tokenCount, synthRes.cost);
 
     // --- Extract Visuals ---
-    const allMermaid = collectMermaidFromLog(log);
+    const allVisuals = collectVisualsFromLog(log);
     let visualPaths: string[] = [];
 
     // --- Write Artifacts ---
@@ -753,8 +791,8 @@ export async function runFreeformMeeting(
     const memoPath = writeMemo(cwd, brief.slug, synthRes.content, startedAt);
     const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeConversationLog(cwd, log, startedAt);
 
-    if (allMermaid.length > 0) {
-      visualPaths = writeVisuals(cwd, meetingId, allMermaid);
+    if (allVisuals.length > 0) {
+      visualPaths = writeVisuals(cwd, meetingId, allVisuals);
       callbacks.onStatus(`Generated ${visualPaths.length} visual(s).`);
     }
 
@@ -1053,18 +1091,37 @@ export async function runStructuredMeeting(
       const ceoConflictScratchpad = loadScratchpad(cwd, ceo.slug);
       const synthPrompt = composeSynthesisPrompt(ceo, brief, framingRes.content, allEntries, loadExpertise(cwd, ceo.slug), ceoConflictScratchpad);
       const reviewTask = tracker.currentRound < plannedRounds
-        ? [
-            `Round ${roundNumber} of planned ${plannedRounds}. Budget: ${tracker.summary}.`,
-            `You must continue to round ${roundNumber + 1} unless budget/time constraints force an earlier stop.`,
-            "Do not produce the final Strategic Brief yet.",
-            "Summarize where the board agrees, where disagreement remains, and what the next round must pressure-test.",
-          ].join("\n")
-        : [
-            `Round ${roundNumber} of planned ${plannedRounds}. Budget: ${tracker.summary}.`,
-            "The planned round target is complete.",
-            "Summarize the unresolved tensions and the points the final Strategic Brief must explicitly address.",
-            "Do not produce the final Strategic Brief yet.",
-          ].join("\n");
+        ? loadBoardroomTaskPrompt(
+            cwd,
+            "boardroom-structured-review-task.md",
+            [
+              "Round {{ROUND_NUMBER}} of planned {{PLANNED_ROUNDS}}. Budget: {{TRACKER_SUMMARY}}.",
+              "You must continue to round {{NEXT_ROUND}} unless budget or time constraints force an earlier stop.",
+              "Do not produce the final Strategic Brief yet.",
+              "Summarize where the board agrees, where disagreement remains, and what the next round must pressure-test.",
+            ].join("\n"),
+            {
+              ROUND_NUMBER: String(roundNumber),
+              PLANNED_ROUNDS: String(plannedRounds),
+              TRACKER_SUMMARY: tracker.summary,
+              NEXT_ROUND: String(roundNumber + 1),
+            },
+          )
+        : loadBoardroomTaskPrompt(
+            cwd,
+            "boardroom-structured-review-final-round-task.md",
+            [
+              "Round {{ROUND_NUMBER}} of planned {{PLANNED_ROUNDS}}. Budget: {{TRACKER_SUMMARY}}.",
+              "The planned round target is complete.",
+              "Summarize the unresolved tensions and the points the final Strategic Brief must explicitly address.",
+              "Do not produce the final Strategic Brief yet.",
+            ].join("\n"),
+            {
+              ROUND_NUMBER: String(roundNumber),
+              PLANNED_ROUNDS: String(plannedRounds),
+              TRACKER_SUMMARY: tracker.summary,
+            },
+          );
 
       const reviewRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, reviewTask, "Resolving board conflicts", callbacks, callbacks.signal);
       reviewRes.content = processScratchpadOutput(cwd, ceo.slug, reviewRes.content);
@@ -1104,21 +1161,29 @@ export async function runStructuredMeeting(
     const ceoFinalScratchpad = loadScratchpad(cwd, ceo.slug);
     const finalPrompt = composeSynthesisPrompt(ceo, brief, framingRes.content, finalEntries, loadExpertise(cwd, ceo.slug), ceoFinalScratchpad);
     const finalTask = forceClosed
-      ? [
-          "The operator force-closed the board meeting.",
-          "Produce your FINAL Strategic Brief using only the information gathered so far.",
-          "Do not ask for another round or more discussion.",
-          "Explicitly note which questions or workstreams remain unresolved because the meeting was interrupted.",
-          "",
-          "If the decision involves data worth visualizing (costs, timelines, risk matrices, architectures),",
-          "include one or more Mermaid diagram blocks in your output using ```mermaid fences.",
-        ].join("\n")
-      : [
-          "Produce your FINAL Strategic Brief.",
-          "",
-          "If the decision involves data worth visualizing (costs, timelines, risk matrices, architectures),",
-          "include one or more Mermaid diagram blocks in your output using ```mermaid fences.",
-        ].join("\n");
+      ? loadBoardroomTaskPrompt(
+          cwd,
+          "boardroom-force-close-final-task.md",
+          [
+            "The operator force-closed the board meeting.",
+            "Produce your FINAL Strategic Brief using only the information gathered so far.",
+            "Do not ask for another round or more discussion.",
+            "Explicitly note which questions or workstreams remain unresolved because the meeting was interrupted.",
+            "",
+            "If the decision involves data worth visualizing (costs, timelines, risk matrices, architectures),",
+            "include one or more visuals in your output using ```mermaid fences, ```svg fences, or both.",
+          ].join("\n"),
+        )
+      : loadBoardroomTaskPrompt(
+          cwd,
+          "boardroom-structured-final-task.md",
+          [
+            "Produce your FINAL Strategic Brief.",
+            "",
+            "If the decision involves data worth visualizing (costs, timelines, risk matrices, architectures),",
+            "include one or more visuals in your output using ```mermaid fences, ```svg fences, or both.",
+          ].join("\n"),
+        );
     const finalRes = await runCeoWithRetry(cwd, pool, ceo, finalPrompt, finalTask, "Producing final decision", callbacks, finalSignal);
     finalRes.content = processScratchpadOutput(cwd, ceo.slug, finalRes.content);
     tracker.addCost(finalRes.cost);
@@ -1127,7 +1192,7 @@ export async function runStructuredMeeting(
     memoContent = finalRes.content;
 
     // --- Extract Visuals ---
-    const allMermaid = collectMermaidFromLog(log);
+    const allVisuals = collectVisualsFromLog(log);
     let visualPaths: string[] = [];
 
     // Phase 6: Close
@@ -1140,8 +1205,8 @@ export async function runStructuredMeeting(
     const memoPath = writeMemo(cwd, brief.slug, memoContent, startedAt);
     const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeConversationLog(cwd, log, startedAt);
 
-    if (allMermaid.length > 0) {
-      visualPaths = writeVisuals(cwd, meetingId, allMermaid);
+    if (allVisuals.length > 0) {
+      visualPaths = writeVisuals(cwd, meetingId, allVisuals);
       callbacks.onStatus(`Generated ${visualPaths.length} visual(s).`);
     }
 
