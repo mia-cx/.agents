@@ -2,6 +2,7 @@
 .references/
 .worktrees/
 node_modules/
+.pi/dev-cycles/
 
 # Boardroom smoke-test / meeting transcripts (timestamped outputs)
 boardroom/debates/*.json
