@@ -38,6 +38,8 @@ export async function runAgent(
   task: string,
   signal?: AbortSignal,
 ): Promise<AgentRunResult> {
+  // Spawn board-member subprocesses in isolation so they don't rediscover
+  // project/global extensions and fail on duplicate tool registrations.
   const args: string[] = ["--no-extensions", "--mode", "json", "-p", "--no-session"];
   if (model) args.push("--model", model);
 
@@ -46,6 +48,7 @@ export async function runAgent(
 
   const usage: UsageAccumulator = { input: 0, output: 0, cost: 0, turns: 0 };
   let finalOutput = "";
+  let finalError: string | undefined;
 
   try {
     if (systemPrompt.trim()) {
@@ -107,6 +110,10 @@ export async function runAgent(
 
       proc.on("close", (code) => {
         if (buffer.trim()) processLine(buffer);
+        const trimmedStderr = stderr.trim();
+        if (trimmedStderr) {
+          finalError = trimmedStderr;
+        }
         resolve(code ?? 0);
       });
 
@@ -131,7 +138,7 @@ export async function runAgent(
       exitCode,
       tokenCount: usage.input + usage.output,
       cost: usage.cost,
-      error: exitCode !== 0 ? `Process exited with code ${exitCode}` : undefined,
+      error: exitCode !== 0 ? (finalError || `Process exited with code ${exitCode}`) : undefined,
     };
   } catch (err: any) {
     return {

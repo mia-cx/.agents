@@ -1,3 +1,9 @@
 .DS_Store
 .references/
+.worktrees/
 node_modules/
+
+# Boardroom smoke-test / meeting transcripts (timestamped outputs)
+boardroom/debates/*.json
+boardroom/debates/2*.md
+boardroom/memos/2*.md
