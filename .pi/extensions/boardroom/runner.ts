@@ -38,7 +38,7 @@ export async function runAgent(
   task: string,
   signal?: AbortSignal,
 ): Promise<AgentRunResult> {
-  const args: string[] = ["--mode", "json", "-p", "--no-session"];
+  const args: string[] = ["--no-extensions", "--mode", "json", "-p", "--no-session"];
   if (model) args.push("--model", model);
 
   let tmpDir: string | null = null;

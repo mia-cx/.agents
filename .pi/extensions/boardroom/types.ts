@@ -99,3 +99,47 @@ export interface AgentRunResult {
   cost: number;
   error?: string;
 }
+
+// --- Runtime types for persistent sessions and structured UI state ---
+
+export type AgentRuntimeStatus =
+  | "idle"
+  | "queued"
+  | "running"
+  | "streaming"
+  | "completed"
+  | "failed"
+  | "aborted";
+
+export interface AgentRuntimeUpdate {
+  slug: string;
+  name: string;
+  status: AgentRuntimeStatus;
+  partialText?: string;
+  turns: number;
+  totalTokens: number;
+  totalCost: number;
+  error?: string;
+}
+
+export interface MeetingProgressSnapshot {
+  meetingId: string;
+  briefTitle: string;
+  mode: MeetingMode;
+  constraints: string;
+  phase: number;
+  phaseLabel: string;
+  round: number;
+  startedAt: string;
+  budgetUsed: number;
+  budgetLimit: number;
+  elapsedMinutes: number;
+  timeLimitMinutes: number;
+  roundsUsed: number;
+  maxRounds: number;
+  roster: string[];
+  agents: AgentRuntimeUpdate[];
+  presidentNote: string;
+  transcript: string[];
+  disposition: MeetingDisposition | "in-progress";
+}

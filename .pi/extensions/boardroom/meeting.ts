@@ -1,8 +1,17 @@
-import type { AgentConfig, ConversationEntry, MeetingMode, MeetingState, ParsedBrief, ConstraintSet } from "./types.js";
+import type {
+  AgentConfig,
+  AgentRuntimeUpdate,
+  ConversationEntry,
+  MeetingMode,
+  MeetingProgressSnapshot,
+  MeetingState,
+  ParsedBrief,
+  ConstraintSet,
+} from "./types.js";
 import { ConstraintTracker } from "./constraints.js";
 import { addEntry, closeLog, createConversationLog, extractAddressees } from "./conversation.js";
 import { composeAssessmentPrompt, composeFramingPrompt, composeSynthesisPrompt, loadExpertise } from "./prompt-composer.js";
-import { runAgent, runAgentsParallel } from "./runner.js";
+import { SessionPool } from "./runtime.js";
 import { writeConversationLog, writeExpertise, writeMemo, writeVisuals } from "./artifacts.js";
 import { loadScratchpad, saveScratchpad, extractScratchpadUpdate, stripScratchpadBlock } from "./scratchpad.js";
 import { extractMermaidBlocks } from "./visuals.js";
@@ -10,6 +19,8 @@ import { findAgentsByTag } from "./agents.js";
 
 export interface MeetingCallbacks {
   onStatus: (msg: string) => void;
+  onAgentUpdate?: (update: AgentRuntimeUpdate) => void;
+  onSnapshot?: (snapshot: MeetingProgressSnapshot) => void;
   onConfirmRoster: (names: string[], rationale: string) => Promise<boolean>;
   signal?: AbortSignal;
 }
@@ -19,6 +30,12 @@ export interface MeetingResult {
   debateJsonPath: string;
   debateMarkdownPath: string;
   visualPaths: string[];
+  disposition: MeetingDisposition;
+  briefTitle: string;
+  mode: MeetingMode;
+  totalCost: number;
+  elapsedMinutes: number;
+  roster: string[];
 }
 
 function generateMeetingId(brief: ParsedBrief): string {
@@ -101,15 +118,50 @@ function emitConstraintWarnings(tracker: ConstraintTracker, callbacks: MeetingCa
   }
 }
 
+function emitSnapshot(
+  state: MeetingState,
+  tracker: ConstraintTracker,
+  pool: SessionPool,
+  phaseLabel: string,
+  presidentNote: string,
+  callbacks: MeetingCallbacks,
+): void {
+  if (!callbacks.onSnapshot) return;
+
+  const lastEntries = state.log.entries.slice(-5);
+  callbacks.onSnapshot({
+    meetingId: state.id,
+    briefTitle: state.brief.title,
+    mode: state.mode,
+    constraints: state.constraints,
+    phase: state.phase,
+    phaseLabel,
+    round: state.round,
+    startedAt: state.startedAt.toISOString(),
+    budgetUsed: tracker.totalCost,
+    budgetLimit: state.resolvedConstraints.budget,
+    elapsedMinutes: tracker.elapsedMinutes,
+    timeLimitMinutes: state.resolvedConstraints.time_limit_minutes,
+    roundsUsed: tracker.currentRound,
+    maxRounds: state.resolvedConstraints.max_debate_rounds,
+    roster: state.roster.map(a => a.slug),
+    agents: pool.snapshot(),
+    presidentNote,
+    transcript: lastEntries.map(e => `[${e.from}] ${e.content.slice(0, 200)}`),
+    disposition: state.disposition ?? "in-progress",
+  });
+}
+
 async function runCeoWithRetry(
   cwd: string,
+  pool: SessionPool,
   ceo: AgentConfig,
   systemPrompt: string,
   task: string,
   callbacks: MeetingCallbacks,
   signal?: AbortSignal,
 ): Promise<{ content: string; tokenCount: number; cost: number }> {
-  const result = await runAgent(cwd, ceo.slug, ceo.model, systemPrompt, task, signal);
+  const result = await pool.runOne(cwd, ceo, systemPrompt, task, signal);
 
   if (result.exitCode === 0 && result.content) {
     return { content: result.content, tokenCount: result.tokenCount, cost: result.cost };
@@ -124,7 +176,7 @@ async function runCeoWithRetry(
     "The previous attempt failed. Provide your best assessment with the information available.",
   ].join("\n");
 
-  const retry = await runAgent(cwd, ceo.slug, ceo.model, simplifiedPrompt, task, signal);
+  const retry = await pool.runOne(cwd, ceo, simplifiedPrompt, task, signal);
   const totalCost = result.cost + retry.cost;
   const totalTokens = result.tokenCount + retry.tokenCount;
 
@@ -181,6 +233,8 @@ export async function runFreeformMeeting(
   const log = createConversationLog(meetingId, brief.filePath, mode, constraintsName, []);
   const startedAt = new Date();
 
+  const pool = new SessionPool(callbacks.onAgentUpdate);
+
   const state: MeetingState = {
     id: meetingId,
     brief,
@@ -202,6 +256,7 @@ export async function runFreeformMeeting(
     // --- Phase 1: CEO Framing ---
     callbacks.onStatus("Phase 1: CEO framing the decision...");
     state.phase = 1;
+    emitSnapshot(state, tracker, pool, "CEO Framing", "Framing the strategic question...", callbacks);
 
     const ceoExpertise = loadExpertise(cwd, ceo.slug);
     const ceoScratchpad = loadScratchpad(cwd, ceo.slug);
@@ -217,7 +272,7 @@ export async function runFreeformMeeting(
       "3. Provide your initial framing and key questions for the board to address.",
     ].join("\n");
 
-    const framingRes = await runCeoWithRetry(cwd, ceo, framingPrompt, framingTask, callbacks, callbacks.signal);
+    const framingRes = await runCeoWithRetry(cwd, pool, ceo, framingPrompt, framingTask, callbacks, callbacks.signal);
     framingRes.content = processScratchpadOutput(cwd, ceo.slug, framingRes.content);
     tracker.addCost(framingRes.cost);
 
@@ -230,6 +285,7 @@ export async function runFreeformMeeting(
 
     emitConstraintWarnings(tracker, callbacks);
     callbacks.onStatus(`Phase 1 complete. ${tracker.summary}`);
+    emitSnapshot(state, tracker, pool, "CEO Framing", "Framing complete. Selecting roster.", callbacks);
 
     // --- Roster Selection ---
     const rosterAgents = resolveRoster(allAgents, framingRes.content);
@@ -256,7 +312,9 @@ export async function runFreeformMeeting(
       state.phase = 1 + debateRound;
       state.round = debateRound;
 
+      const phaseLabel = `Debate Round ${debateRound}`;
       callbacks.onStatus(`Round ${debateRound}/${constraintValues.max_debate_rounds}: ${rosterAgents.length} board members assessing in parallel...`);
+      emitSnapshot(state, tracker, pool, phaseLabel, `Round ${debateRound}: board members deliberating.`, callbacks);
 
       const priorEntries = debateRound > 1 ? lastAssessmentEntries : [];
 
@@ -268,14 +326,13 @@ export async function runFreeformMeeting(
           ? `This is round ${debateRound}. Review the prior assessments and respond to specific points of disagreement.`
           : "";
         return {
-          slug: agent.slug,
-          model: agent.model,
+          agent,
           systemPrompt: prompt,
           task: `Provide your assessment as the ${agent.name}. ${roundContext} Follow your output format.`,
         };
       });
 
-      const results = await runAgentsParallel(cwd, agentTasks, callbacks.signal);
+      const results = await pool.runParallel(cwd, agentTasks, callbacks.signal);
 
       lastAssessmentEntries = [];
       const rosterSlugs = rosterAgents.map(a => a.slug);
@@ -315,6 +372,7 @@ export async function runFreeformMeeting(
 
       emitConstraintWarnings(tracker, callbacks);
       callbacks.onStatus(`Round ${debateRound} complete. ${tracker.summary}`);
+      emitSnapshot(state, tracker, pool, phaseLabel, `Round ${debateRound} complete.`, callbacks);
 
       if (!tracker.canContinue(config.budget_hard_stop, config.time_hard_stop)) {
         callbacks.onStatus("Constraints reached. Moving to CEO final synthesis.");
@@ -332,7 +390,7 @@ export async function runFreeformMeeting(
           "Otherwise, proceed with your Strategic Brief.",
         ].join("\n");
 
-        const reviewRes = await runCeoWithRetry(cwd, ceo, reviewPrompt, reviewTask, callbacks, callbacks.signal);
+        const reviewRes = await runCeoWithRetry(cwd, pool, ceo, reviewPrompt, reviewTask, callbacks, callbacks.signal);
         reviewRes.content = processScratchpadOutput(cwd, ceo.slug, reviewRes.content);
         tracker.addCost(reviewRes.cost);
 
@@ -351,6 +409,7 @@ export async function runFreeformMeeting(
     const synthPhase = state.phase + 1;
     state.phase = synthPhase;
     callbacks.onStatus("CEO synthesizing final decision...");
+    emitSnapshot(state, tracker, pool, "CEO Synthesis", "Synthesizing final decision...", callbacks);
 
     const allAssessments = log.entries.filter(e => e.role === "assessment" || e.role === "review");
     const synthExpertise = loadExpertise(cwd, ceo.slug);
@@ -367,7 +426,7 @@ export async function runFreeformMeeting(
           "include one or more Mermaid diagram blocks in your output using ```mermaid fences.",
         ].join("\n");
 
-    const synthRes = await runCeoWithRetry(cwd, ceo, synthPrompt, synthTask, callbacks, callbacks.signal);
+    const synthRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, synthTask, callbacks, callbacks.signal);
     synthRes.content = processScratchpadOutput(cwd, ceo.slug, synthRes.content);
     tracker.addCost(synthRes.cost);
 
@@ -383,6 +442,7 @@ export async function runFreeformMeeting(
       ? (tracker.budgetState === "exceeded" ? "budget-exceeded" as const : "completed" as const)
       : "completed" as const;
 
+    state.disposition = disposition;
     closeLog(log, disposition);
     const memoPath = writeMemo(cwd, brief.slug, synthRes.content, startedAt);
     const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeConversationLog(cwd, log, startedAt);
@@ -399,15 +459,37 @@ export async function runFreeformMeeting(
     }
 
     callbacks.onStatus(`Meeting complete (${disposition}). ${tracker.summary}`);
-    return { memoPath, debateJsonPath, debateMarkdownPath, visualPaths };
+    emitSnapshot(state, tracker, pool, "Complete", `Meeting ${disposition}.`, callbacks);
+    pool.destroyAll();
+    return {
+      memoPath, debateJsonPath, debateMarkdownPath, visualPaths,
+      disposition, briefTitle: brief.title, mode,
+      totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,
+      roster: ["ceo", ...rosterAgents.map(a => a.slug)],
+    };
 
   } catch (err: any) {
+    pool.destroyAll();
     if (err.message === "Subagent was aborted" || callbacks.signal?.aborted) {
       callbacks.onStatus("Meeting aborted. Saving partial log...");
-      return savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
+      state.disposition = "aborted";
+      emitSnapshot(state, tracker, pool, "Aborted", "Meeting aborted.", callbacks);
+      const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
+      return {
+        ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode,
+        totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,
+        roster: ["ceo", ...state.roster.map(a => a.slug)],
+      };
     }
     callbacks.onStatus(`Meeting error: ${err.message}. Saving partial log...`);
-    return savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
+    state.disposition = "aborted";
+    emitSnapshot(state, tracker, pool, "Error", `Error: ${err.message}`, callbacks);
+    const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
+    return {
+      ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode,
+      totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,
+      roster: ["ceo", ...state.roster.map(a => a.slug)],
+    };
   }
 }
 
@@ -431,6 +513,8 @@ export async function runStructuredMeeting(
   const nonCeo = getNonCeoAgents(allAgents);
   const startedAt = new Date();
 
+  const pool = new SessionPool(callbacks.onAgentUpdate);
+
   const state: MeetingState = {
     id: meetingId,
     brief,
@@ -452,6 +536,7 @@ export async function runStructuredMeeting(
     // Phase 1: CEO Framing
     callbacks.onStatus("Phase 1: CEO framing...");
     state.phase = 1;
+    emitSnapshot(state, tracker, pool, "CEO Framing", "Framing the strategic question...", callbacks);
 
     const ceoStructuredScratchpad = loadScratchpad(cwd, ceo.slug);
     const framingPrompt = composeFramingPrompt(ceo, brief, ceoStructuredScratchpad);
@@ -466,7 +551,7 @@ export async function runStructuredMeeting(
       "3. Frame the key questions for parallel evaluation.",
     ].join("\n");
 
-    const framingRes = await runCeoWithRetry(cwd, ceo, framingPrompt, framingTask, callbacks, callbacks.signal);
+    const framingRes = await runCeoWithRetry(cwd, pool, ceo, framingPrompt, framingTask, callbacks, callbacks.signal);
     framingRes.content = processScratchpadOutput(cwd, ceo.slug, framingRes.content);
     tracker.addCost(framingRes.cost);
 
@@ -483,6 +568,7 @@ export async function runStructuredMeeting(
     await callbacks.onConfirmRoster(rosterAgents.map(a => a.name), rosterParsed?.rationale ?? "Full board");
 
     emitConstraintWarnings(tracker, callbacks);
+    emitSnapshot(state, tracker, pool, "CEO Framing", "Framing complete. Roster confirmed.", callbacks);
 
     let reEngagementCount = 0;
     const MAX_RE_ENGAGEMENTS = 2;
@@ -496,7 +582,9 @@ export async function runStructuredMeeting(
       // Phase 2: Parallel Evaluation
       state.phase = 2;
       tracker.incrementRound();
-      callbacks.onStatus(`Phase 2: Parallel evaluation (attempt ${reEngagementCount + 1})...`);
+      const evalLabel = `Parallel Evaluation (attempt ${reEngagementCount + 1})`;
+      callbacks.onStatus(`Phase 2: ${evalLabel}...`);
+      emitSnapshot(state, tracker, pool, evalLabel, "Board members evaluating in parallel.", callbacks);
 
       const priorAssessments = log.entries.filter(e => e.role === "assessment");
       const agentTasks = rosterAgents.map(agent => {
@@ -504,14 +592,13 @@ export async function runStructuredMeeting(
         const agentScratchpad = loadScratchpad(cwd, agent.slug);
         const prompt = composeAssessmentPrompt(agent, brief, framingRes.content, priorAssessments, expertise, agentScratchpad);
         return {
-          slug: agent.slug,
-          model: agent.model,
+          agent,
           systemPrompt: prompt,
           task: `Evaluate this decision as ${agent.name}. Follow your output format.`,
         };
       });
 
-      const evalResults = await runAgentsParallel(cwd, agentTasks, callbacks.signal);
+      const evalResults = await pool.runParallel(cwd, agentTasks, callbacks.signal);
       const rosterSlugs = rosterAgents.map(a => a.slug);
 
       for (let i = 0; i < evalResults.length; i++) {
@@ -536,11 +623,13 @@ export async function runStructuredMeeting(
       }
 
       emitConstraintWarnings(tracker, callbacks);
+      emitSnapshot(state, tracker, pool, evalLabel, "Evaluation complete.", callbacks);
       if (!tracker.canContinue(config.budget_hard_stop, config.time_hard_stop)) break;
 
       // Phase 3: Stress Test
       state.phase = 3;
       callbacks.onStatus("Phase 3: Stress test...");
+      emitSnapshot(state, tracker, pool, "Stress Test", "Running adversarial review.", callbacks);
 
       const stressAgents = findAgentsByTag(rosterAgents, "stress-test");
 
@@ -551,14 +640,13 @@ export async function runStructuredMeeting(
           const stressScratchpad = loadScratchpad(cwd, agent.slug);
           const prompt = composeAssessmentPrompt(agent, brief, framingRes.content, allAssessments, expertise, stressScratchpad);
           return {
-            slug: agent.slug,
-            model: agent.model,
+            agent,
             systemPrompt: prompt,
             task: `Stress-test the board's assessments as ${agent.name}. Challenge weak assumptions.`,
           };
         });
 
-        const stressResults = await runAgentsParallel(cwd, stressTasks, callbacks.signal);
+        const stressResults = await pool.runParallel(cwd, stressTasks, callbacks.signal);
         for (let i = 0; i < stressResults.length; i++) {
           tracker.addCost(stressResults[i].cost);
           if (stressResults[i].exitCode !== 0 || !stressResults[i].content) {
@@ -578,11 +666,13 @@ export async function runStructuredMeeting(
       }
 
       emitConstraintWarnings(tracker, callbacks);
+      emitSnapshot(state, tracker, pool, "Stress Test", "Stress test complete.", callbacks);
       if (!tracker.canContinue(config.budget_hard_stop, config.time_hard_stop)) break;
 
       // Phase 4: CEO conflict synthesis
       state.phase = 4;
       callbacks.onStatus("Phase 4: Conflict synthesis...");
+      emitSnapshot(state, tracker, pool, "Conflict Synthesis", "CEO reviewing disagreements.", callbacks);
 
       const allEntries = log.entries.filter(e => e.role === "assessment" || e.role === "stress-test");
       const ceoConflictScratchpad = loadScratchpad(cwd, ceo.slug);
@@ -593,12 +683,14 @@ export async function runStructuredMeeting(
         ? `Review all board input. If critical disagreements remain, say 'NEED MORE DATA'. Re-engagements left: ${MAX_RE_ENGAGEMENTS - reEngagementCount}. Budget: ${tracker.summary}. Otherwise, produce your Strategic Brief.`
         : "Final round. Produce your Strategic Brief now.";
 
-      const reviewRes = await runCeoWithRetry(cwd, ceo, synthPrompt, reviewTask, callbacks, callbacks.signal);
+      const reviewRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, reviewTask, callbacks, callbacks.signal);
       reviewRes.content = processScratchpadOutput(cwd, ceo.slug, reviewRes.content);
       tracker.addCost(reviewRes.cost);
       addEntry(log, nextEntryId(state), "ceo", rosterAgents.map(a => a.slug),
         null, 4, reEngagementCount + 1, "conflict-synthesis",
         reviewRes.content, reviewRes.tokenCount, reviewRes.cost);
+
+      emitSnapshot(state, tracker, pool, "Conflict Synthesis", "CEO synthesis complete.", callbacks);
 
       if (!canReEngage || parseCeoDisposition(reviewRes.content) === "close") break;
 
@@ -609,6 +701,7 @@ export async function runStructuredMeeting(
     // Phase 5: CEO Final Decision
     state.phase = 5;
     callbacks.onStatus("Phase 5: CEO final decision...");
+    emitSnapshot(state, tracker, pool, "CEO Final Decision", "CEO producing final decision.", callbacks);
 
     const lastConflict = log.entries.findLast(e => e.role === "conflict-synthesis");
     let memoContent: string;
@@ -625,7 +718,7 @@ export async function runStructuredMeeting(
         "If the decision involves data worth visualizing (costs, timelines, risk matrices, architectures),",
         "include one or more Mermaid diagram blocks in your output using ```mermaid fences.",
       ].join("\n");
-      const finalRes = await runCeoWithRetry(cwd, ceo, finalPrompt, finalTask, callbacks, callbacks.signal);
+      const finalRes = await runCeoWithRetry(cwd, pool, ceo, finalPrompt, finalTask, callbacks, callbacks.signal);
       finalRes.content = processScratchpadOutput(cwd, ceo.slug, finalRes.content);
       tracker.addCost(finalRes.cost);
       addEntry(log, nextEntryId(state), "ceo", rosterAgents.map(a => a.slug),
@@ -639,6 +732,7 @@ export async function runStructuredMeeting(
 
     // Phase 6: Close
     const disposition = tracker.budgetState === "exceeded" ? "budget-exceeded" as const : "completed" as const;
+    state.disposition = disposition;
     closeLog(log, disposition);
     const memoPath = writeMemo(cwd, brief.slug, memoContent, startedAt);
     const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeConversationLog(cwd, log, startedAt);
@@ -655,14 +749,36 @@ export async function runStructuredMeeting(
     }
 
     callbacks.onStatus(`Structured meeting complete (${disposition}). ${tracker.summary}`);
-    return { memoPath, debateJsonPath, debateMarkdownPath, visualPaths };
+    emitSnapshot(state, tracker, pool, "Complete", `Structured meeting ${disposition}.`, callbacks);
+    pool.destroyAll();
+    return {
+      memoPath, debateJsonPath, debateMarkdownPath, visualPaths,
+      disposition, briefTitle: brief.title, mode: "structured" as const,
+      totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,
+      roster: ["ceo", ...rosterAgents.map(a => a.slug)],
+    };
 
   } catch (err: any) {
+    pool.destroyAll();
     if (err.message === "Subagent was aborted" || callbacks.signal?.aborted) {
       callbacks.onStatus("Meeting aborted. Saving partial log...");
-      return savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
+      state.disposition = "aborted";
+      emitSnapshot(state, tracker, pool, "Aborted", "Meeting aborted.", callbacks);
+      const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
+      return {
+        ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode: "structured" as const,
+        totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,
+        roster: ["ceo", ...state.roster.map(a => a.slug)],
+      };
     }
     callbacks.onStatus(`Meeting error: ${err.message}. Saving partial log...`);
-    return savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
+    state.disposition = "aborted";
+    emitSnapshot(state, tracker, pool, "Error", `Error: ${err.message}`, callbacks);
+    const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
+    return {
+      ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode: "structured" as const,
+      totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,
+      roster: ["ceo", ...state.roster.map(a => a.slug)],
+    };
   }
 }
