@@ -1,5 +1,5 @@
 ---
-name: git-organize-commits
+name: gc
 description: >-
   Splits uncommitted changes into a small set of logical, single-concern git commits, then executes the commits and pushes to remote. Use when the user wants to organize changes into logical commits, split a large change into multiple commits, or create a series of conventional commits from the current working tree.
 ---
