@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { buildCloseoutSummary, buildThemedCloseoutLines } from "./closeout.js";
-import type { CloseoutInfo } from "./closeout.js";
+import { describe, it, expect, vi } from "vitest";
+import { buildCloseoutSummary, buildThemedCloseoutLines, runPostMeetingActions } from "./closeout.js";
+import type { CloseoutInfo, PostMeetingActionsDeps, PostMeetingContext } from "./closeout.js";
 
 const plainTheme = {
   fg: (_color: string, text: string) => text,
@@ -113,5 +113,107 @@ describe("buildThemedCloseoutLines", () => {
       const lines = buildThemedCloseoutLines(makeInfo({ disposition: disp }), plainTheme);
       expect(lines.length).toBeGreaterThan(5);
     }
+  });
+});
+
+describe("runPostMeetingActions", () => {
+  function makeContext(): {
+    ctx: PostMeetingContext;
+    confirms: Array<{ title: string; body: string }>;
+    notifications: Array<{ msg: string; type: "info" | "warning" | "error" }>;
+  } {
+    const confirms: Array<{ title: string; body: string }> = [];
+    const notifications: Array<{ msg: string; type: "info" | "warning" | "error" }> = [];
+    return {
+      confirms,
+      notifications,
+      ctx: {
+        hasUI: true,
+        confirm: async (title, body) => {
+          confirms.push({ title, body });
+          return false;
+        },
+        notify: (msg, type) => notifications.push({ msg, type }),
+      },
+    };
+  }
+
+  function makeDeps(overrides: Partial<PostMeetingActionsDeps> = {}): PostMeetingActionsDeps {
+    return {
+      isCursorAvailable: () => true,
+      openInCursor: async () => ({ ok: true }),
+      isElevenLabsConfigured: () => true,
+      generateNarration: async () => ({ ok: true, audioPath: "/tmp/narration.mp3" }),
+      playAudio: async () => ({ ok: true }),
+      ...overrides,
+    };
+  }
+
+  it("does nothing in headless mode", async () => {
+    const { notifications } = makeContext();
+    await runPostMeetingActions(
+      makeInfo(),
+      {
+        hasUI: false,
+        confirm: async () => false,
+        notify: (msg, type) => notifications.push({ msg, type }),
+      },
+      makeDeps(),
+    );
+    expect(notifications).toEqual([]);
+  });
+
+  it("prompts to open in Cursor when CLI is available", async () => {
+    const { ctx, confirms } = makeContext();
+    await runPostMeetingActions(makeInfo(), ctx, makeDeps());
+    expect(confirms[0]?.title).toBe("Open memo in Cursor?");
+  });
+
+  it("notifies when Cursor CLI is missing", async () => {
+    const { ctx, notifications } = makeContext();
+    await runPostMeetingActions(
+      makeInfo(),
+      ctx,
+      makeDeps({ isCursorAvailable: () => false }),
+    );
+    expect(notifications.some((n) => n.msg.includes("Cursor CLI not found"))).toBe(true);
+  });
+
+  it("prompts for ElevenLabs narration when configured", async () => {
+    const { ctx, confirms } = makeContext();
+    await runPostMeetingActions(makeInfo(), ctx, makeDeps());
+    expect(confirms.some((c) => c.title === "Generate audio narration?")).toBe(true);
+  });
+
+  it("notifies when ElevenLabs is not configured", async () => {
+    const { ctx, notifications } = makeContext();
+    await runPostMeetingActions(
+      makeInfo(),
+      ctx,
+      makeDeps({ isElevenLabsConfigured: () => false }),
+    );
+    expect(
+      notifications.some((n) => n.msg.includes("ElevenLabs is not configured")),
+    ).toBe(true);
+  });
+
+  it("opens Cursor when confirmed", async () => {
+    const notifications: Array<{ msg: string; type: "info" | "warning" | "error" }> = [];
+    const openInCursor = vi.fn(async () => ({ ok: true }));
+    const ctx: PostMeetingContext = {
+      hasUI: true,
+      confirm: async (title) => title === "Open memo in Cursor?",
+      notify: (msg, type) => notifications.push({ msg, type }),
+    };
+    await runPostMeetingActions(
+      makeInfo(),
+      ctx,
+      makeDeps({
+        openInCursor,
+        isElevenLabsConfigured: () => false,
+      }),
+    );
+    expect(openInCursor).toHaveBeenCalledWith("/meetings/memo.md");
+    expect(notifications.some((n) => n.msg.includes("Opened memo in Cursor"))).toBe(true);
   });
 });

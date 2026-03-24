@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { MeetingDisposition, MeetingMode } from "./types.js";
@@ -125,7 +125,6 @@ export function buildThemedCloseoutLines(
 
 export function isCursorAvailable(): boolean {
   try {
-    const { execFileSync } = require("node:child_process");
     execFileSync("which", ["cursor"], { stdio: "ignore" });
     return true;
   } catch {
@@ -212,19 +211,39 @@ export interface PostMeetingContext {
   notify: (msg: string, type: "info" | "warning" | "error") => void;
 }
 
+export interface PostMeetingActionsDeps {
+  isCursorAvailable: () => boolean;
+  openInCursor: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
+  isElevenLabsConfigured: () => boolean;
+  generateNarration: (
+    memoPath: string,
+    outputDir: string,
+  ) => Promise<{ ok: boolean; audioPath?: string; error?: string }>;
+  playAudio: (audioPath: string) => Promise<{ ok: boolean; error?: string }>;
+}
+
+const defaultPostMeetingDeps: PostMeetingActionsDeps = {
+  isCursorAvailable,
+  openInCursor,
+  isElevenLabsConfigured,
+  generateNarration,
+  playAudio,
+};
+
 export async function runPostMeetingActions(
   info: CloseoutInfo,
   ctx: PostMeetingContext,
+  deps: PostMeetingActionsDeps = defaultPostMeetingDeps,
 ): Promise<void> {
   if (!ctx.hasUI) return;
 
-  if (isCursorAvailable()) {
+  if (deps.isCursorAvailable()) {
     const openCursor = await ctx.confirm(
       "Open memo in Cursor?",
       `Open ${path.basename(info.memoPath)} in Cursor IDE?`,
     );
     if (openCursor) {
-      const result = await openInCursor(info.memoPath);
+      const result = await deps.openInCursor(info.memoPath);
       if (result.ok) {
         ctx.notify("Opened memo in Cursor.", "info");
       } else {
@@ -235,7 +254,7 @@ export async function runPostMeetingActions(
     ctx.notify("Cursor CLI not found. Install from Cursor > Settings > Install CLI.", "info");
   }
 
-  if (isElevenLabsConfigured()) {
+  if (deps.isElevenLabsConfigured()) {
     const generateAudio = await ctx.confirm(
       "Generate audio narration?",
       "Use ElevenLabs to generate a spoken summary of the board memo?",
@@ -243,7 +262,7 @@ export async function runPostMeetingActions(
     if (generateAudio) {
       ctx.notify("Generating narration via ElevenLabs...", "info");
       const outputDir = path.dirname(info.memoPath);
-      const result = await generateNarration(info.memoPath, outputDir);
+      const result = await deps.generateNarration(info.memoPath, outputDir);
 
       if (result.ok && result.audioPath) {
         ctx.notify(`Narration saved: ${result.audioPath}`, "info");
@@ -253,7 +272,7 @@ export async function runPostMeetingActions(
           `Play ${path.basename(result.audioPath)} now?`,
         );
         if (play) {
-          const playResult = await playAudio(result.audioPath);
+          const playResult = await deps.playAudio(result.audioPath);
           if (!playResult.ok) {
             ctx.notify(`Playback failed: ${playResult.error}`, "warning");
           }
@@ -262,5 +281,7 @@ export async function runPostMeetingActions(
         ctx.notify(`Narration failed: ${result.error}`, "warning");
       }
     }
+  } else {
+    ctx.notify("ElevenLabs is not configured. Set ELEVENLABS_API_KEY to enable narration.", "info");
   }
 }
