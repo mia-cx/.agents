@@ -24,6 +24,7 @@ export interface ConstraintSet {
   budget: number;
   time_limit_minutes: number;
   max_debate_rounds: number;
+  max_roster_size?: number;
 }
 
 export interface BoardroomConfig {
@@ -107,6 +108,9 @@ export type AgentRuntimeStatus =
   | "idle"
   | "queued"
   | "running"
+  | "thinking"
+  | "tooling"
+  | "delegating"
   | "streaming"
   | "completed"
   | "failed"
@@ -116,6 +120,8 @@ export interface AgentRuntimeUpdate {
   slug: string;
   name: string;
   status: AgentRuntimeStatus;
+  modelLabel?: string;
+  modelAltLabel?: string;
   activity?: string;
   partialText?: string;
   turns: number;

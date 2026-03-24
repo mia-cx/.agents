@@ -9,14 +9,14 @@ const DEFAULT_CONFIG: BoardroomConfig = {
   budget_hard_stop: true,
   time_hard_stop: false,
   constraints: {
-    quick: { budget: 5, time_limit_minutes: 5, max_debate_rounds: 1 },
-    standard: { budget: 15, time_limit_minutes: 15, max_debate_rounds: 3 },
-    thorough: { budget: 50, time_limit_minutes: 30, max_debate_rounds: 5 },
-    "deep-dive": { budget: 150, time_limit_minutes: 60, max_debate_rounds: 10 },
+    quick: { budget: 5, time_limit_minutes: 15, max_debate_rounds: 2, max_roster_size: 4 },
+    standard: { budget: 10, time_limit_minutes: 30, max_debate_rounds: 4 },
+    thorough: { budget: 25, time_limit_minutes: 60, max_debate_rounds: 8 },
+    "deep-dive": { budget: 500, time_limit_minutes: 240, max_debate_rounds: 20 },
   },
 };
 
-const MAX_ROUNDS_CAP = 10;
+const MAX_ROUNDS_CAP = 50;
 
 export function loadConfig(cwd: string): BoardroomConfig {
   const configPath = path.join(cwd, "boardroom", "config.yaml");
@@ -52,6 +52,7 @@ export function resolveConstraints(
     budget: overrides?.budget ?? base.budget,
     time_limit_minutes: overrides?.time_limit_minutes ?? base.time_limit_minutes,
     max_debate_rounds: Math.min(overrides?.max_debate_rounds ?? base.max_debate_rounds, MAX_ROUNDS_CAP),
+    max_roster_size: base.max_roster_size,
   };
 
   return { name, values };

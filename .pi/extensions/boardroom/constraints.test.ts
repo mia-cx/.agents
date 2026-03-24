@@ -31,13 +31,20 @@ describe("ConstraintTracker", () => {
     expect(tracker.canContinue(false, true)).toBe(true);
   });
 
-  it("tracks rounds and blocks when exceeded", () => {
+  it("tracks rounds as a target instead of a hard stop", () => {
     const tracker = new ConstraintTracker({ budget: 50, time_limit_minutes: 30, max_debate_rounds: 2 });
     tracker.incrementRound();
     expect(tracker.roundsState).toBe("ok");
     tracker.incrementRound();
-    expect(tracker.roundsState).toBe("exceeded");
-    expect(tracker.canContinue(true, true)).toBe(false);
+    expect(tracker.roundsState).toBe("warn");
+    expect(tracker.hasMetRoundTarget).toBe(true);
+    expect(tracker.canContinue(true, true)).toBe(true);
+  });
+
+  it("still stops when a hard budget limit is exceeded", () => {
+    const tracker = new ConstraintTracker({ budget: 1, time_limit_minutes: 30, max_debate_rounds: 2 });
+    tracker.addCost(1.25);
+    expect(tracker.canContinue(true, false)).toBe(false);
   });
 
   it("produces a summary string", () => {

@@ -38,7 +38,7 @@ describe("config", () => {
       expect(config.default_constraints).toBe("quick");
       expect(config.default_mode).toBe("structured");
       expect(config.budget_hard_stop).toBe(false);
-      expect(config.constraints.thorough.budget).toBe(50);
+      expect(config.constraints.thorough.budget).toBe(25);
     });
 
     it("survives invalid YAML", () => {
@@ -57,31 +57,33 @@ describe("config", () => {
     it("uses default constraints when none specified", () => {
       const { name, values } = resolveConstraints(config);
       expect(name).toBe("thorough");
-      expect(values.budget).toBe(50);
-      expect(values.time_limit_minutes).toBe(30);
-      expect(values.max_debate_rounds).toBe(5);
+      expect(values.budget).toBe(25);
+      expect(values.time_limit_minutes).toBe(60);
+      expect(values.max_debate_rounds).toBe(8);
     });
 
     it("resolves named constraints", () => {
       const { values } = resolveConstraints(config, "quick");
       expect(values.budget).toBe(5);
-      expect(values.max_debate_rounds).toBe(1);
+      expect(values.time_limit_minutes).toBe(15);
+      expect(values.max_debate_rounds).toBe(2);
+      expect(values.max_roster_size).toBe(4);
     });
 
     it("applies overrides on top of constraints", () => {
       const { values } = resolveConstraints(config, "standard", { budget: 25 });
       expect(values.budget).toBe(25);
-      expect(values.time_limit_minutes).toBe(15);
+      expect(values.time_limit_minutes).toBe(30);
     });
 
-    it("caps max_debate_rounds at 10", () => {
-      const { values } = resolveConstraints(config, "thorough", { max_debate_rounds: 20 });
-      expect(values.max_debate_rounds).toBe(10);
+    it("caps max_debate_rounds at 50", () => {
+      const { values } = resolveConstraints(config, "thorough", { max_debate_rounds: 99 });
+      expect(values.max_debate_rounds).toBe(50);
     });
 
     it("falls back to thorough for unknown constraints", () => {
       const { values } = resolveConstraints(config, "nonexistent");
-      expect(values.budget).toBe(50);
+      expect(values.budget).toBe(25);
     });
   });
 });
