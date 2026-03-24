@@ -2,6 +2,7 @@ import type {
   AgentConfig,
   AgentRuntimeUpdate,
   ConversationEntry,
+  MeetingDisposition,
   MeetingMode,
   MeetingProgressSnapshot,
   MeetingState,
@@ -36,6 +37,10 @@ export interface MeetingResult {
   totalCost: number;
   elapsedMinutes: number;
   roster: string[];
+}
+
+export function getAbortDisposition(signal?: AbortSignal): "force-closed" | "aborted" {
+  return signal?.aborted && signal.reason === "force-close" ? "force-closed" : "aborted";
 }
 
 function generateMeetingId(brief: ParsedBrief): string {
@@ -197,12 +202,17 @@ function savePartialArtifacts(
   brief: ParsedBrief,
   log: ReturnType<typeof createConversationLog>,
   startedAt: Date,
+  disposition: "force-closed" | "aborted",
 ): MeetingResult {
-  closeLog(log, "aborted");
+  closeLog(log, disposition);
 
   const lastEntry = log.entries.findLast(e => e.from === "ceo");
   const memoContent = lastEntry?.content
-    ?? "[Meeting aborted. No CEO synthesis available. See debate log for partial data.]";
+    ?? (
+      disposition === "force-closed"
+        ? "[Meeting was force-closed before CEO synthesis. See debate log for available data.]"
+        : "[Meeting aborted. No CEO synthesis available. See debate log for partial data.]"
+    );
 
   const memoPath = writeMemo(cwd, brief.slug, memoContent, startedAt);
   const { jsonPath, mdPath } = writeConversationLog(cwd, log, startedAt);
@@ -470,13 +480,15 @@ export async function runFreeformMeeting(
 
   } catch (err: any) {
     if (err.message === "Subagent was aborted" || callbacks.signal?.aborted) {
-      callbacks.onStatus("Meeting aborted. Saving partial log...");
-      state.disposition = "aborted";
-      emitSnapshot(state, tracker, pool, "Aborted", "Meeting aborted.", callbacks);
+      const disposition = getAbortDisposition(callbacks.signal);
+      const note = disposition === "force-closed" ? "Meeting force-closed." : "Meeting aborted.";
+      callbacks.onStatus(`${note} Saving partial log...`);
+      state.disposition = disposition;
+      emitSnapshot(state, tracker, pool, disposition === "force-closed" ? "Force-closed" : "Aborted", note, callbacks);
       pool.destroyAll();
-      const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
+      const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt, disposition);
       return {
-        ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode,
+        ...partial, disposition, briefTitle: brief.title, mode,
         totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,
         roster: ["ceo", ...state.roster.map(a => a.slug)],
       };
@@ -485,7 +497,7 @@ export async function runFreeformMeeting(
     state.disposition = "aborted";
     emitSnapshot(state, tracker, pool, "Error", `Error: ${err.message}`, callbacks);
     pool.destroyAll();
-    const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
+    const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt, "aborted");
     return {
       ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode,
       totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,
@@ -761,13 +773,15 @@ export async function runStructuredMeeting(
 
   } catch (err: any) {
     if (err.message === "Subagent was aborted" || callbacks.signal?.aborted) {
-      callbacks.onStatus("Meeting aborted. Saving partial log...");
-      state.disposition = "aborted";
-      emitSnapshot(state, tracker, pool, "Aborted", "Meeting aborted.", callbacks);
+      const disposition = getAbortDisposition(callbacks.signal);
+      const note = disposition === "force-closed" ? "Meeting force-closed." : "Meeting aborted.";
+      callbacks.onStatus(`${note} Saving partial log...`);
+      state.disposition = disposition;
+      emitSnapshot(state, tracker, pool, disposition === "force-closed" ? "Force-closed" : "Aborted", note, callbacks);
       pool.destroyAll();
-      const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
+      const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt, disposition);
       return {
-        ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode: "structured" as const,
+        ...partial, disposition, briefTitle: brief.title, mode: "structured" as const,
         totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,
         roster: ["ceo", ...state.roster.map(a => a.slug)],
       };
@@ -776,7 +790,7 @@ export async function runStructuredMeeting(
     state.disposition = "aborted";
     emitSnapshot(state, tracker, pool, "Error", `Error: ${err.message}`, callbacks);
     pool.destroyAll();
-    const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt);
+    const partial = savePartialArtifacts(cwd, meetingId, brief, log, startedAt, "aborted");
     return {
       ...partial, disposition: "aborted" as const, briefTitle: brief.title, mode: "structured" as const,
       totalCost: tracker.totalCost, elapsedMinutes: tracker.elapsedMinutes,

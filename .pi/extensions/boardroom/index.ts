@@ -248,7 +248,7 @@ export default function (pi: ExtensionAPI) {
       );
 
       if (ok) {
-        activeMeeting.abortController.abort();
+        activeMeeting.abortController.abort("force-close");
         ctx.ui.notify("Meeting force-close signal sent. CEO will synthesize with available data.", "warning");
       }
     },
