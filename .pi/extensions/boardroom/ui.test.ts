@@ -26,8 +26,8 @@ function makeSnapshot(overrides: Partial<MeetingProgressSnapshot> = {}): Meeting
     maxRounds: 3,
     roster: ["cto", "cfo"],
     agents: [
-      { slug: "cto", name: "CTO", status: "completed", activity: "Completed", turns: 2, totalTokens: 1200, totalCost: 0.45 },
-      { slug: "cfo", name: "CFO", status: "streaming", activity: "Evaluating the brief", turns: 1, totalTokens: 600, totalCost: 0.22 },
+      { slug: "cto", name: "CTO", status: "completed", modelLabel: "anthropic/claude-sonnet-4-6:medium", activity: "Completed", turns: 2, totalTokens: 1200, totalCost: 0.45 },
+      { slug: "cfo", name: "CFO", status: "streaming", modelLabel: "openai-codex/gpt-5.4:medium", activity: "Evaluating the brief", turns: 1, totalTokens: 600, totalCost: 0.22 },
     ],
     presidentNote: "Reviewing board input.",
     transcript: [
@@ -98,7 +98,7 @@ describe("buildDashboardWidgetLines", () => {
       theme,
     );
     const joined = lines.join("\n");
-    expect(joined).toContain("[error][████████████████████][/error]");
+    expect(joined).toMatch(/\[error\]\[[█░]+\]\[\/error\]/);
     expect(joined).toContain("[error]110%[/error]");
     expect(joined).toContain("[error]120%[/error]");
   });
@@ -108,9 +108,69 @@ describe("buildDashboardWidgetLines", () => {
     const joined = lines.join("\n");
     expect(joined).toContain("CTO");
     expect(joined).toContain("completed");
+    expect(joined).toContain("anthropic/claude");
+    expect(joined).toContain("1.2k tok");
     expect(joined).toContain("CFO");
     expect(joined).toContain("streaming");
+    expect(joined).toContain("openai-codex/gpt");
+    expect(joined).toContain("600 tok");
     expect(joined).toContain("Evaluating the brief");
+  });
+
+  it("renders streaming detail on a separate indented line", () => {
+    const lines = buildDashboardWidgetLines(
+      makeSnapshot({
+        agents: [
+          { slug: "cfo", name: "CFO", status: "streaming", activity: "Evaluating the brief", turns: 1, totalTokens: 600, totalCost: 0.22, partialText: "Revenue expansion looks promising but churn remains a concern." },
+        ],
+      }),
+      plainTheme,
+      90,
+    );
+    expect(lines.some((line) => line.includes("↳ Revenue expansion looks promising"))).toBe(true);
+  });
+
+  it("shows only the tail line for non-ceo streaming agents", () => {
+    const text = Array.from({ length: 20 }, (_, i) => `chunk${i}`).join(" ");
+    const lines = buildDashboardWidgetLines(
+      makeSnapshot({
+        agents: [
+          { slug: "cfo", name: "CFO", status: "streaming", activity: "Evaluating the brief", turns: 1, totalTokens: 600, totalCost: 0.22, partialText: text },
+        ],
+      }),
+      plainTheme,
+      60,
+    );
+    const streamLines = lines.filter((line) => line.includes("↳"));
+    expect(streamLines).toHaveLength(1);
+    expect(streamLines[0]).toContain("chunk");
+    expect(streamLines[0]).toContain("chunk19");
+  });
+
+  it("caps ceo streaming preview at five tail-aligned lines", () => {
+    const text = Array.from({ length: 120 }, (_, i) => `word${i}`).join(" ");
+    const lines = buildDashboardWidgetLines(
+      makeSnapshot({
+        agents: [
+          { slug: "ceo", name: "CEO", status: "streaming", activity: "Framing the strategic question", turns: 0, totalTokens: 0, totalCost: 0, partialText: text },
+        ],
+      }),
+      plainTheme,
+      70,
+    );
+    const streamLines = lines.filter((line) => line.includes("↳") || line.startsWith("        "));
+    expect(streamLines.length).toBeLessThanOrEqual(5);
+    expect(streamLines.join(" ")).toContain("word119");
+  });
+
+  it("stretches progress bars on wider viewports", () => {
+    const narrow = buildDashboardWidgetLines(makeSnapshot(), plainTheme, 60).join("\n");
+    const wide = buildDashboardWidgetLines(makeSnapshot(), plainTheme, 120).join("\n");
+    const narrowBar = narrow.match(/Budget:\s+\[([█░]+)\]/)?.[1];
+    const wideBar = wide.match(/Budget:\s+\[([█░]+)\]/)?.[1];
+    expect(narrowBar).toBeTruthy();
+    expect(wideBar).toBeTruthy();
+    expect((wideBar ?? "").length).toBeGreaterThan((narrowBar ?? "").length);
   });
 
   it("shows error marker for failed agents", () => {
@@ -161,6 +221,8 @@ describe("buildPlainDashboardLines", () => {
     expect(joined).toContain("Test Brief");
     expect(joined).toContain("CTO");
     expect(joined).toContain("CFO");
+    expect(joined).toContain("anthropic/claude");
+    expect(joined).toContain("1.2k tok");
     expect(joined).toContain("Budget:");
     expect(joined).toContain("Time:");
   });

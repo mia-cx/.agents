@@ -1,8 +1,9 @@
 import * as path from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { execFileSync } from "node:child_process";
+import { DynamicBorder, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
-import { Container, Text } from "@mariozechner/pi-tui";
+import { Container, Spacer, Text } from "@mariozechner/pi-tui";
 import { discoverAgents } from "./agents.js";
 import { parseBrief, listBriefs } from "./brief-parser.js";
 import { loadConfig, resolveConstraints } from "./config.js";
@@ -12,7 +13,14 @@ import type { AgentConfig } from "./types.js";
 import type { AgentRuntimeUpdate, MeetingProgressSnapshot } from "./types.js";
 import { listPastMeetings } from "./artifacts.js";
 import { formatDashboardStatus, buildDashboardWidgetLines, buildPlainDashboardLines } from "./ui.js";
-import { buildCloseoutSummary, buildThemedCloseoutLines, runPostMeetingActions } from "./closeout.js";
+import {
+  buildCloseoutSummary,
+  buildNarrationWidgetLines,
+  buildThemedCloseoutLines,
+  generateHumanReadableSummary,
+  runPostMeetingActions,
+} from "./closeout.js";
+import type { NarrationDisplayState } from "./closeout.js";
 
 interface ActiveMeetingState {
   meetingId: string;
@@ -29,6 +37,23 @@ interface ActiveMeetingState {
   pausedTotalMs: number;
 }
 
+type RosterEditorResult = string[] | undefined;
+
+type ReasoningEffort = "default" | "low" | "medium" | "high";
+type ModelPickerMode = "single" | "all";
+type ModelPickerStage = "model" | "effort";
+
+interface PiModelCatalogEntry {
+  provider: string;
+  model: string;
+  context?: string;
+  maxOut?: string;
+  thinking?: string;
+  images?: string;
+}
+
+let piModelCatalogCache: PiModelCatalogEntry[] | null = null;
+
 function prioritizeOption<T extends string>(options: T[], preferred: T): T[] {
   const unique = Array.from(new Set(options));
   const remaining = unique.filter((option) => option !== preferred);
@@ -44,6 +69,742 @@ function orderRosterSelection(
     ...available.filter((agent) => preferred.has(agent.slug)),
     ...available.filter((agent) => !preferred.has(agent.slug)),
   ];
+}
+
+function truncateInline(text: string, maxLength: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function isRightArrowKey(keyData: string, keybindings: any): boolean {
+  return keybindings.matches(keyData, "tui.select.right")
+    || keyData === "\u001b[C"
+    || keyData === "\u001bOC"
+    || /^\u001b\[[0-9;]*C$/.test(keyData);
+}
+
+function resolveModelLabel(model: string | undefined): string {
+  if (!model) return "default";
+  if (model.includes("/")) return model;
+  if (/^(claude|sonnet|opus|haiku)\b/i.test(model)) return `anthropic/${model}`;
+  if (/^(gpt|o[1-9]|codex)\b/i.test(model)) return `openai-codex/${model}`;
+  return model;
+}
+
+function parseModelSpec(model: string | undefined): { base: string | undefined; effort: ReasoningEffort } {
+  const resolved = resolveModelLabel(model);
+  if (!resolved || resolved === "default") return { base: undefined, effort: "default" };
+  const match = resolved.match(/^(.*?)(?::(low|medium|high))$/);
+  if (!match) return { base: resolved, effort: "default" };
+  return {
+    base: match[1],
+    effort: match[2] as ReasoningEffort,
+  };
+}
+
+function formatModelSpec(base: string | undefined, effort: ReasoningEffort): string | undefined {
+  if (!base) return undefined;
+  return effort === "default" ? base : `${base}:${effort}`;
+}
+
+function parsePiModelCatalog(output: string): PiModelCatalogEntry[] {
+  const lines = output
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter(Boolean);
+  if (lines.length <= 1) return [];
+
+  const entries: PiModelCatalogEntry[] = [];
+  for (const line of lines.slice(1)) {
+    const parts = line.split(/\s{2,}/).map((part) => part.trim()).filter(Boolean);
+    if (parts.length < 2) continue;
+    entries.push({
+      provider: parts[0],
+      model: parts[1],
+      context: parts[2],
+      maxOut: parts[3],
+      thinking: parts[4],
+      images: parts[5],
+    });
+  }
+  return entries;
+}
+
+function getPiModelCatalog(): PiModelCatalogEntry[] {
+  if (piModelCatalogCache) return piModelCatalogCache;
+  try {
+    const output = execFileSync("pi", ["--list-models"], {
+      encoding: "utf-8",
+      timeout: 10_000,
+    });
+    piModelCatalogCache = parsePiModelCatalog(output);
+  } catch {
+    piModelCatalogCache = [];
+  }
+  return piModelCatalogCache;
+}
+
+function modelProvider(label: string): string {
+  return label.includes("/") ? label.split("/")[0] : "other";
+}
+
+function buildAvailableModelOptions(
+  agents: AgentConfig[],
+  currentModel?: string,
+): Array<{ value: string; label: string; provider: string; meta?: string }> {
+  const options: Array<{ value: string; label: string; provider: string; meta?: string }> = [];
+  const seen = new Set<string>();
+  const push = (label: string | undefined, meta?: string) => {
+    const base = parseModelSpec(label).base;
+    const resolved = resolveModelLabel(base);
+    if (!resolved || resolved === "default" || seen.has(resolved)) return;
+    seen.add(resolved);
+    options.push({
+      value: resolved,
+      label: resolved,
+      provider: modelProvider(resolved),
+      meta,
+    });
+  };
+
+  for (const entry of getPiModelCatalog()) {
+    push(
+      `${entry.provider}/${entry.model}`,
+      [entry.context, entry.thinking === "yes" ? "thinking" : undefined].filter(Boolean).join(" · ") || undefined,
+    );
+  }
+
+  push(currentModel);
+  for (const agent of agents) {
+    push(agent.model);
+    push(agent.modelAlt);
+  }
+
+  return options;
+}
+
+function collectModelBaseOptions(agents: AgentConfig[], currentModel?: string): string[] {
+  const options = new Set<string>();
+  const current = parseModelSpec(currentModel).base;
+  if (current) options.add(current);
+  for (const agent of agents) {
+    const primary = parseModelSpec(agent.model).base;
+    const fallback = parseModelSpec(agent.modelAlt).base;
+    if (primary) options.add(primary);
+    if (fallback) options.add(fallback);
+  }
+  return Array.from(options);
+}
+
+function fuzzyMatches(text: string, query: string): boolean {
+  const target = text.toLowerCase();
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  if (target.includes(needle)) return true;
+  let index = 0;
+  for (const char of needle) {
+    index = target.indexOf(char, index);
+    if (index === -1) return false;
+    index += 1;
+  }
+  return true;
+}
+
+async function chooseAgentModel(
+  ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+  allAgents: AgentConfig[],
+  agent: AgentConfig,
+  defaultModel: string | undefined,
+  title = `Choose primary model for ${agent.name}`,
+): Promise<string | undefined | null> {
+  const current = parseModelSpec(agent.model);
+  const baseChoices = collectModelBaseOptions(allAgents, agent.model);
+  const defaultLabel = defaultModel
+    ? `Use default (${resolveModelLabel(defaultModel)})`
+    : "Use Pi default";
+  const currentBase = current.base;
+  const orderedBases = currentBase
+    ? [currentBase, ...baseChoices.filter((base) => base !== currentBase)]
+    : baseChoices;
+  const baseChoice = await ctx.ui.select(
+    [
+      title,
+      "",
+      `Current: ${resolveModelLabel(agent.model)}`,
+      agent.modelAlt ? `Fallback: ${resolveModelLabel(agent.modelAlt)}` : "Fallback: none",
+      "Tip: type to filter models.",
+    ].join("\n"),
+    [defaultLabel, ...orderedBases],
+  );
+  if (baseChoice === undefined) return null;
+  if (baseChoice === defaultLabel) return defaultModel;
+
+  const currentEffortLabel = current.effort === "default" ? "default reasoning" : current.effort;
+  const effortChoice = await ctx.ui.select(
+    [
+      `Reasoning effort for ${agent.name}`,
+      "",
+      `Model: ${baseChoice}`,
+      "Choose the effort suffix appended to this model.",
+    ].join("\n"),
+    prioritizeOption(["default reasoning", "medium", "high", "low"], currentEffortLabel),
+  );
+  if (effortChoice === undefined) return null;
+  const effort = effortChoice === "default reasoning" ? "default" : effortChoice as ReasoningEffort;
+  return formatModelSpec(baseChoice, effort) ?? null;
+}
+
+async function chooseSharedModel(
+  ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+  allAgents: AgentConfig[],
+  currentModels: Array<string | undefined>,
+): Promise<string | "reset-defaults" | null> {
+  const uniqueCurrent = Array.from(new Set(currentModels.map((model) => resolveModelLabel(model))));
+  const currentLabel = uniqueCurrent.length === 1 ? uniqueCurrent[0] : "mixed";
+  const currentEfforts = Array.from(new Set(currentModels.map((model) => parseModelSpec(model).effort)));
+  const currentEffortLabel = currentEfforts.length === 1
+    ? (currentEfforts[0] === "default" ? "default reasoning" : currentEfforts[0])
+    : "default reasoning";
+  const baseChoices = collectModelBaseOptions(allAgents);
+  const resetLabel = "Reset all to defaults";
+  const baseChoice = await ctx.ui.select(
+    [
+      "Choose one model for all listed board members",
+      "",
+      `Current: ${currentLabel}`,
+      "Tip: type to filter models.",
+    ].join("\n"),
+    [resetLabel, ...baseChoices],
+  );
+  if (baseChoice === undefined) return null;
+  if (baseChoice === resetLabel) return "reset-defaults";
+
+  const effortChoice = await ctx.ui.select(
+    [
+      "Reasoning effort for all listed board members",
+      "",
+      `Model: ${baseChoice}`,
+      "Choose the shared effort suffix appended to this model.",
+    ].join("\n"),
+    prioritizeOption(["default reasoning", "medium", "high", "low"], currentEffortLabel),
+  );
+  if (effortChoice === undefined) return null;
+  const effort = effortChoice === "default reasoning" ? "default" : effortChoice as ReasoningEffort;
+  return formatModelSpec(baseChoice, effort) ?? null;
+}
+
+function createRosterEditorComponent(
+  tui: any,
+  theme: any,
+  keybindings: any,
+  agents: AgentConfig[],
+  selectedSlugs: string[],
+  lockedSlugs: string[],
+  maxSelectable: number | undefined,
+  rationale: string,
+  onDone: (result: RosterEditorResult) => void,
+): any {
+  const MODAL_WIDTH = 110;
+  const MODAL_INNER_WIDTH = MODAL_WIDTH - 8;
+  const PICKER_GUTTER = 3;
+  const PICKER_MAX_INNER_WIDTH = 34;
+  const root: any = new Container();
+  const listContainer: any = new Container();
+  const titleText: any = new Text("", 1, 0);
+  const summaryText: any = new Text("", 1, 0);
+  const rationaleText: any = new Text("", 1, 0);
+  const statusText: any = new Text("", 1, 0);
+  const selected = new Set(selectedSlugs);
+  const initialModels = new Map(agents.map((agent) => [agent.slug, agent.model]));
+  let selectedIndex = 0;
+  let pickerState:
+    | {
+        mode: ModelPickerMode;
+        stage: ModelPickerStage;
+        targetSlug?: string;
+        query: string;
+        optionIndex: number;
+        draftBase?: string;
+      }
+    | null = null;
+
+  const getCurrentAgent = () => agents[selectedIndex];
+
+  const buildModelOptions = () => {
+    const state = pickerState;
+    if (!state) return [] as Array<{ value: string; label: string; provider: string; meta?: string }>;
+    const options = buildAvailableModelOptions(agents, getCurrentAgent()?.model);
+    const resetLabel = state.mode === "all" ? "Reset all to defaults" : "Use member default";
+    const filtered = [
+      { value: "__reset__", label: resetLabel, provider: "actions" },
+      ...options,
+    ].filter((option) =>
+      fuzzyMatches(option.label, state.query)
+      || fuzzyMatches(option.provider, state.query)
+      || fuzzyMatches(option.meta ?? "", state.query),
+    );
+    return filtered;
+  };
+
+  const buildModelDisplayRows = () => {
+    const state = pickerState;
+    if (!state || state.stage !== "model") {
+      return { rows: [] as Array<{ kind: "header" | "option"; text: string }>, optionCount: 0 };
+    }
+
+    const options = buildModelOptions();
+    const rows: Array<{ kind: "header" | "option"; text: string }> = [];
+    let currentProvider: string | null = null;
+    let selectableIndex = 0;
+    let selectedRowIndex = 0;
+
+    for (const option of options) {
+      if (option.provider !== currentProvider) {
+        currentProvider = option.provider;
+        rows.push({ kind: "header", text: `[${currentProvider}]` });
+      }
+      if (selectableIndex === state.optionIndex) selectedRowIndex = rows.length;
+      const prefix = selectableIndex === state.optionIndex ? ">" : " ";
+      const meta = option.meta ? ` (${option.meta})` : "";
+      rows.push({ kind: "option", text: `${prefix} ${truncateInline(option.label, 34)}${truncateInline(meta, 16)}` });
+      selectableIndex += 1;
+    }
+
+    const maxVisible = 10;
+    const windowStart = Math.max(0, selectedRowIndex - Math.floor(maxVisible / 2));
+    const visibleRows = rows.slice(windowStart, windowStart + maxVisible);
+    return {
+      rows: visibleRows,
+      optionCount: options.length,
+    };
+  };
+
+  const buildEffortOptions = () => {
+    return [
+      { value: "default", label: "default reasoning" },
+      { value: "medium", label: "medium" },
+      { value: "high", label: "high" },
+      { value: "low", label: "low" },
+    ] satisfies Array<{ value: ReasoningEffort; label: string }>;
+  };
+
+  const openSinglePicker = () => {
+    const current = getCurrentAgent();
+    if (!current) return;
+    pickerState = {
+      mode: "single",
+      stage: "model",
+      targetSlug: current.slug,
+      query: "",
+      optionIndex: 0,
+    };
+  };
+
+  const openAllPicker = () => {
+    pickerState = {
+      mode: "all",
+      stage: "model",
+      query: "",
+      optionIndex: 0,
+    };
+  };
+
+  const closePicker = () => {
+    pickerState = null;
+  };
+
+  const buildPickerBoxLines = (current: AgentConfig | undefined): string[] => {
+    const contentLines = renderPickerLines(current);
+    if (contentLines.length === 0) return [];
+    const innerWidth = Math.min(
+      PICKER_MAX_INNER_WIDTH,
+      Math.max(26, ...contentLines.map((line) => line.length)),
+    );
+    const pad = (text: string) => `${text}${" ".repeat(Math.max(0, innerWidth - text.length))}`;
+    return [
+      `┌${"─".repeat(innerWidth + 2)}┐`,
+      ...contentLines.map((line) => `│ ${pad(truncateInline(line, innerWidth))} │`),
+      `└${"─".repeat(innerWidth + 2)}┘`,
+    ];
+  };
+
+  const applyPickerChoice = () => {
+    const state = pickerState;
+    if (!state) return;
+    if (state.stage === "model") {
+      const options = buildModelOptions();
+      const choice = options[Math.max(0, Math.min(state.optionIndex, options.length - 1))];
+      if (!choice) return;
+      if (choice.value === "__reset__") {
+        if (state.mode === "all") {
+          for (const agent of agents) {
+            agent.model = initialModels.get(agent.slug);
+          }
+        } else if (state.targetSlug) {
+          const target = agents.find((agent) => agent.slug === state.targetSlug);
+          if (target) target.model = initialModels.get(target.slug);
+        }
+        closePicker();
+        return;
+      }
+      pickerState = {
+        ...state,
+        stage: "effort",
+        optionIndex: 0,
+        draftBase: choice.value,
+      };
+      return;
+    }
+
+    const options = buildEffortOptions();
+    const choice = options[Math.max(0, Math.min(state.optionIndex, options.length - 1))];
+    if (!choice || !state.draftBase) return;
+    const modelSpec = formatModelSpec(state.draftBase, choice.value);
+    if (state.mode === "all") {
+      for (const agent of agents) {
+        agent.model = modelSpec;
+      }
+    } else if (state.targetSlug) {
+      const target = agents.find((agent) => agent.slug === state.targetSlug);
+      if (target) target.model = modelSpec;
+    }
+    closePicker();
+  };
+
+  const renderPickerLines = (current: AgentConfig | undefined): string[] => {
+    const state = pickerState;
+    if (!state) return [];
+    const title = state.mode === "all"
+      ? "All Members Model"
+      : `${current?.name ?? "Member"} Model`;
+    if (state.stage === "model") {
+      const display = buildModelDisplayRows();
+      return [
+        title,
+        `Search: ${state.query || "type model or provider"}`,
+        ...display.rows.map((row) => row.kind === "header" ? row.text : row.text),
+        "Enter select  Esc close",
+      ];
+    }
+
+    const effortOptions = buildEffortOptions();
+    return [
+      title,
+      `Base: ${truncateInline(state.draftBase ?? "", 44)}`,
+      ...effortOptions.map((option, index) => {
+        const prefix = index === state.optionIndex ? ">" : " ";
+        return `${prefix} ${option.label}`;
+      }),
+      "Enter apply  Esc back",
+    ];
+  };
+
+  const refresh = (statusMessage?: string) => {
+    const current = agents[selectedIndex];
+    const selectableCount = Math.max(0, selected.size - lockedSlugs.length);
+    const limitLabel = maxSelectable && maxSelectable > 0
+      ? `${selectableCount}/${maxSelectable} selectable`
+      : `${selectableCount} selectable`;
+    titleText.setText(theme.bold(theme.fg("accent", "Edit Board Roster")));
+    summaryText.setText(
+      theme.fg(
+        "dim",
+        `${selected.size} total selected ${theme.fg("muted", `(${limitLabel})`)}${current ? `  |  Focus: ${current.name} [${truncateInline(resolveModelLabel(current.model), 34)}]` : ""}`,
+      ),
+    );
+    statusText.setText(
+      statusMessage
+        ? theme.fg("warning", statusMessage)
+        : current
+          ? theme.fg(
+              "muted",
+              `Primary model: ${resolveModelLabel(current.model)}${current.modelAlt ? `  |  Fallback: ${resolveModelLabel(current.modelAlt)}` : ""}`,
+            )
+          : "",
+    );
+    rationaleText.setText(theme.fg("muted", `CEO rationale: ${truncateInline(rationale ?? "", 120)}`));
+
+    listContainer.clear();
+    const boxLines = pickerState ? buildPickerBoxLines(current) : [];
+    const pickerWidth = boxLines.length > 0 ? Math.max(...boxLines.map((line) => line.length)) : 0;
+    const rowWidth = pickerState
+      ? Math.max(28, MODAL_INNER_WIDTH - pickerWidth - PICKER_GUTTER)
+      : MODAL_INNER_WIDTH;
+    const rosterRows = agents.map((agent, index) => {
+      const isCurrent = index === selectedIndex;
+      const isSelected = selected.has(agent.slug);
+      const prefix = isCurrent ? "→ " : "  ";
+      const checkbox = isSelected ? "[x]" : "[ ]";
+      const model = truncateInline(resolveModelLabel(agent.model), 34);
+      const description = truncateInline(agent.description, 34);
+      const base = `${checkbox} ${agent.name} [${model}]${description ? ` - ${description}` : ""}`;
+      const raw = `${prefix}${truncateInline(base, Math.max(16, rowWidth - prefix.length))}`;
+      return {
+        raw,
+        display: isCurrent ? theme.bold(theme.fg("accent", raw)) : raw,
+      };
+    });
+
+    if (pickerState) {
+      const boxStart = selectedIndex;
+      const totalRows = Math.max(rosterRows.length, boxStart + boxLines.length);
+      for (let rowIndex = 0; rowIndex < totalRows; rowIndex += 1) {
+        const row = rosterRows[rowIndex];
+        const boxLine = rowIndex >= boxStart && rowIndex < boxStart + boxLines.length
+          ? boxLines[rowIndex - boxStart]
+          : null;
+
+        if (!boxLine) {
+          if (row) listContainer.addChild(new Text(row.display, 1, 0));
+          continue;
+        }
+
+        const leftRaw = truncateInline(row?.raw ?? "", rowWidth).padEnd(rowWidth);
+        const leftDisplay = row && rowIndex === selectedIndex
+          ? theme.bold(theme.fg("accent", leftRaw))
+          : leftRaw;
+        listContainer.addChild(new Text(`${leftDisplay}${" ".repeat(PICKER_GUTTER)}${theme.fg("muted", boxLine)}`, 1, 0));
+      }
+      root.invalidate();
+      tui.requestRender();
+      return;
+    }
+
+    for (let index = 0; index < agents.length; index += 1) {
+      listContainer.addChild(new Text(rosterRows[index].display, 1, 0));
+    }
+
+    root.invalidate();
+    tui.requestRender();
+  };
+
+  const toggleCurrent = () => {
+    const current = agents[selectedIndex];
+    if (!current) return;
+    if (lockedSlugs.includes(current.slug)) {
+      refresh(`${current.name} is always included.`);
+      return;
+    }
+    if (selected.has(current.slug)) selected.delete(current.slug);
+    else {
+      const selectableCount = selected.size - lockedSlugs.length;
+      if (maxSelectable && maxSelectable > 0 && selectableCount >= maxSelectable) {
+        refresh(`Roster cap reached: choose up to ${maxSelectable} non-CEO member${maxSelectable === 1 ? "" : "s"}.`);
+        return;
+      }
+      selected.add(current.slug);
+    }
+  };
+
+  const reset = () => {
+    selected.clear();
+    for (const slug of selectedSlugs) selected.add(slug);
+    for (const agent of agents) {
+      agent.model = initialModels.get(agent.slug);
+    }
+  };
+
+  const finish = () => {
+    if (selected.size === 0) {
+      refresh("Select at least one board member before continuing.");
+      return;
+    }
+    onDone(agents.filter((agent) => selected.has(agent.slug)).map((agent) => agent.slug));
+  };
+
+  root.addChild(new DynamicBorder());
+  root.addChild(new Spacer(1));
+  root.addChild(titleText);
+  root.addChild(summaryText);
+  root.addChild(rationaleText);
+  root.addChild(new Spacer(1));
+  root.addChild(listContainer);
+  root.addChild(new Spacer(1));
+  root.addChild(statusText);
+  root.addChild(new Spacer(1));
+  root.addChild(new Text("Space toggle  Right/M model  A all models  Enter continue  R reset  Esc cancel", 1, 0));
+  if (maxSelectable && maxSelectable > 0) {
+    root.addChild(new Text(`Cap: choose up to ${maxSelectable} non-CEO member${maxSelectable === 1 ? "" : "s"}.`, 1, 0));
+    root.addChild(new Spacer(1));
+  }
+  root.addChild(new Spacer(1));
+  root.addChild(new DynamicBorder());
+
+  root.handleInput = (keyData: string) => {
+    if (pickerState) {
+      if (keybindings.matches(keyData, "tui.select.up") || keyData === "k") {
+        pickerState.optionIndex = Math.max(0, pickerState.optionIndex - 1);
+        refresh();
+        return;
+      }
+      if (keybindings.matches(keyData, "tui.select.down") || keyData === "j") {
+        const optionsLength = pickerState.stage === "model" ? buildModelDisplayRows().optionCount : buildEffortOptions().length;
+        pickerState.optionIndex = Math.min(Math.max(0, optionsLength - 1), pickerState.optionIndex + 1);
+        refresh();
+        return;
+      }
+      if (keybindings.matches(keyData, "tui.select.confirm") || keyData === "\n") {
+        applyPickerChoice();
+        refresh();
+        return;
+      }
+      if (keybindings.matches(keyData, "tui.select.cancel")) {
+        if (pickerState.stage === "effort") {
+          pickerState = {
+            ...pickerState,
+            stage: "model",
+            optionIndex: 0,
+          };
+        } else {
+          closePicker();
+        }
+        refresh();
+        return;
+      }
+      if (pickerState.stage === "model" && (keyData === "\u007f" || keyData === "\b")) {
+        pickerState.query = pickerState.query.slice(0, -1);
+        pickerState.optionIndex = 0;
+        refresh();
+        return;
+      }
+      if (pickerState.stage === "model" && /^[ -~]$/.test(keyData)) {
+        pickerState.query += keyData;
+        pickerState.optionIndex = 0;
+        refresh();
+        return;
+      }
+    }
+
+    if (keybindings.matches(keyData, "tui.select.up") || keyData === "k") {
+      selectedIndex = Math.max(0, selectedIndex - 1);
+      refresh();
+      return;
+    }
+    if (keybindings.matches(keyData, "tui.select.down") || keyData === "j") {
+      selectedIndex = Math.min(agents.length - 1, selectedIndex + 1);
+      refresh();
+      return;
+    }
+    if (keyData === " ") {
+      toggleCurrent();
+      refresh();
+      return;
+    }
+    if (isRightArrowKey(keyData, keybindings) || keyData === "l" || keyData === "m" || keyData === "M") {
+      openSinglePicker();
+      refresh();
+      return;
+    }
+    if (keyData === "a" || keyData === "A") {
+      openAllPicker();
+      refresh();
+      return;
+    }
+    if (keybindings.matches(keyData, "tui.select.confirm") || keyData === "\n") {
+      finish();
+      return;
+    }
+    if (keybindings.matches(keyData, "tui.select.cancel")) {
+      onDone(undefined);
+      return;
+    }
+    if (keyData === "r" || keyData === "R") {
+      reset();
+      refresh();
+    }
+  };
+
+  refresh();
+  return root;
+}
+
+function createRosterApprovalComponent(
+  tui: any,
+  theme: any,
+  keybindings: any,
+  proposed: AgentConfig[],
+  rationale: string,
+  onDone: (result: "Yes" | "Edit roster" | "No" | undefined) => void,
+): any {
+  const root: any = new Container();
+  const titleText: any = new Text("", 1, 0);
+  const rosterText: any = new Text("", 1, 0);
+  const rationaleText: any = new Text("", 1, 0);
+  const listContainer: any = new Container();
+  const statusText: any = new Text("", 1, 0);
+  const options = ["Yes", "Edit roster", "No"] as const;
+  let selectedIndex = 0;
+
+  const refresh = (statusMessage?: string) => {
+    titleText.setText(theme.bold(theme.fg("accent", "Approve Board Roster?")));
+    rosterText.setText(theme.fg("muted", `CEO selected: ${proposed.map((agent) => agent.name).join(", ")}`));
+    rationaleText.setText(theme.fg("muted", `Rationale: ${truncateInline(rationale, 120)}`));
+    statusText.setText(statusMessage ? theme.fg("warning", statusMessage) : "");
+
+    listContainer.clear();
+    for (let index = 0; index < options.length; index += 1) {
+      const option = options[index];
+      const isCurrent = index === selectedIndex;
+      const prefix = isCurrent ? theme.fg("accent", "→ ") : "  ";
+      const line = isCurrent
+        ? `${prefix}${theme.bold(theme.fg("accent", option))}`
+        : `  ${option}`;
+      listContainer.addChild(new Text(line, 1, 0));
+    }
+
+    root.invalidate();
+    tui.requestRender();
+  };
+
+  root.addChild(new DynamicBorder());
+  root.addChild(new Spacer(1));
+  root.addChild(titleText);
+  root.addChild(rosterText);
+  root.addChild(rationaleText);
+  root.addChild(new Spacer(1));
+  root.addChild(listContainer);
+  root.addChild(new Spacer(1));
+  root.addChild(statusText);
+  root.addChild(new Spacer(1));
+  root.addChild(new Text("Y yes  N no  E edit roster  Enter select  Esc cancel", 1, 0));
+  root.addChild(new Spacer(1));
+  root.addChild(new DynamicBorder());
+
+  root.handleInput = (keyData: string) => {
+    if (keybindings.matches(keyData, "tui.select.up") || keyData === "k") {
+      selectedIndex = Math.max(0, selectedIndex - 1);
+      refresh();
+      return;
+    }
+    if (keybindings.matches(keyData, "tui.select.down") || keyData === "j") {
+      selectedIndex = Math.min(options.length - 1, selectedIndex + 1);
+      refresh();
+      return;
+    }
+    if (keyData === "y" || keyData === "Y") {
+      onDone("Yes");
+      return;
+    }
+    if (keyData === "n" || keyData === "N") {
+      onDone("No");
+      return;
+    }
+    if (keyData === "e" || keyData === "E") {
+      onDone("Edit roster");
+      return;
+    }
+    if (keybindings.matches(keyData, "tui.select.confirm") || keyData === "\n") {
+      onDone(options[selectedIndex]);
+      return;
+    }
+    if (keybindings.matches(keyData, "tui.select.cancel")) {
+      onDone(undefined);
+    }
+  };
+
+  refresh();
+  return root;
 }
 
 async function runMeeting(
@@ -79,8 +840,10 @@ export default function (pi: ExtensionAPI) {
     ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
     snapshot: MeetingProgressSnapshot,
   ) => {
-    const theme = ctx.ui.theme;
-    ctx.ui.setWidget("boardroom", renderWidgetLines(buildDashboardWidgetLines(snapshot, theme)));
+    ctx.ui.setWidget("boardroom", (_tui: unknown, theme: unknown) => ({
+      render: (width: number) => buildDashboardWidgetLines(snapshot, theme as any, width),
+      invalidate: () => {},
+    }));
   };
 
   const setCloseoutWidget = (
@@ -91,20 +854,33 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setWidget("boardroom", renderWidgetLines(buildThemedCloseoutLines(result, theme)));
   };
 
+  const setNarrationWidget = (
+    ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+    state: NarrationDisplayState,
+  ) => {
+    const theme = ctx.ui.theme;
+    ctx.ui.setWidget("boardroom", renderWidgetLines(buildNarrationWidgetLines(state, theme)));
+  };
+
   const withLiveElapsed = (
     snapshot: MeetingProgressSnapshot,
     startedAtMs: number,
     agentSnapshots: AgentRuntimeUpdate[],
     pausedAtMs: number | null,
     pausedTotalMs: number,
-  ): MeetingProgressSnapshot => ({
-    ...snapshot,
-    elapsedMinutes: Math.max(
-      snapshot.elapsedMinutes,
-      (((pausedAtMs ?? Date.now()) - startedAtMs - pausedTotalMs) / 60_000),
-    ),
-    agents: agentSnapshots.length > 0 ? [...agentSnapshots] : snapshot.agents,
-  });
+  ): MeetingProgressSnapshot => {
+    const mergedAgents = agentSnapshots.length > 0 ? [...agentSnapshots] : snapshot.agents;
+    const liveBudgetUsed = mergedAgents.reduce((sum, agent) => sum + agent.totalCost, 0);
+    return {
+      ...snapshot,
+      budgetUsed: Math.max(snapshot.budgetUsed, liveBudgetUsed),
+      elapsedMinutes: Math.max(
+        snapshot.elapsedMinutes,
+        (((pausedAtMs ?? Date.now()) - startedAtMs - pausedTotalMs) / 60_000),
+      ),
+      agents: mergedAgents,
+    };
+  };
 
   const clearActiveMeetingTimer = () => {
     if (activeMeetingTimer) {
@@ -159,38 +935,62 @@ export default function (pi: ExtensionAPI) {
 
   const editRosterSelection = async (
     ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+    ceo: AgentConfig,
     proposed: AgentConfig[],
     available: AgentConfig[],
+    maxRosterSize: number | undefined,
+    rationale: string,
   ): Promise<string[] | undefined> => {
-    const selected = new Set(proposed.map((agent) => agent.slug));
-    const defaultSlugs = proposed.map((agent) => agent.slug);
+    let selectedRosterSlugs = proposed.map((agent) => agent.slug);
+    const orderedAgents = [ceo, ...orderRosterSelection(available, selectedRosterSlugs)];
+    const result = await ctx.ui.custom(
+      (tui, theme, keybindings, done) => (
+        createRosterEditorComponent(
+          tui,
+          theme,
+          keybindings,
+          orderedAgents,
+          [ceo.slug, ...selectedRosterSlugs],
+          [ceo.slug],
+          maxRosterSize,
+          rationale,
+          done,
+        )
+      ),
+      {
+        overlay: true,
+        overlayOptions: {
+          width: 110,
+          maxHeight: "80%",
+          anchor: "center",
+          margin: 1,
+        },
+      },
+    ) as RosterEditorResult;
+    if (result === undefined) return undefined;
+    selectedRosterSlugs = result.filter((slug) => slug !== ceo.slug);
+    return selectedRosterSlugs;
+  };
 
-    while (true) {
-      const orderedAgents = orderRosterSelection(available, Array.from(selected));
-      const options = [
-        `Continue with ${selected.size} selected member${selected.size === 1 ? "" : "s"}`,
-        "Reset to CEO picks",
-        ...orderedAgents.map((agent) => `${selected.has(agent.slug) ? "[x]" : "[ ]"} ${agent.name}`),
-      ];
-      const choice = await ctx.ui.select("Edit Board Roster:", options);
-      if (choice === undefined) return undefined;
-      if (choice.startsWith("Continue with")) {
-        if (selected.size === 0) {
-          ctx.ui.notify("Select at least one board member before continuing.", "warning");
-          continue;
-        }
-        return available.filter((agent) => selected.has(agent.slug)).map((agent) => agent.slug);
-      }
-      if (choice === "Reset to CEO picks") {
-        selected.clear();
-        for (const slug of defaultSlugs) selected.add(slug);
-        continue;
-      }
-      const chosenAgent = available.find((agent) => choice.endsWith(agent.name));
-      if (!chosenAgent) continue;
-      if (selected.has(chosenAgent.slug)) selected.delete(chosenAgent.slug);
-      else selected.add(chosenAgent.slug);
-    }
+  const confirmRosterDecision = async (
+    ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+    proposed: AgentConfig[],
+    rationale: string,
+  ): Promise<"Yes" | "Edit roster" | "No" | undefined> => {
+    return ctx.ui.custom(
+      (tui, theme, keybindings, done) => (
+        createRosterApprovalComponent(tui, theme, keybindings, proposed, rationale, done)
+      ),
+      {
+        overlay: true,
+        overlayOptions: {
+          width: 78,
+          maxHeight: "70%",
+          anchor: "center",
+          margin: 1,
+        },
+      },
+    );
   };
 
   pi.registerCommand("board-meeting", {
@@ -271,11 +1071,26 @@ export default function (pi: ExtensionAPI) {
       });
 
       const mode = selectedMode;
+      const ceo = agents.find((agent) => agent.slug === "ceo");
+      if (!ceo) {
+        ctx.ui.notify("CEO agent not found in agents/executive-board/", "error");
+        return;
+      }
+      const selectedCeoModel = await chooseAgentModel(
+        ctx,
+        agents,
+        ceo,
+        ceo.model,
+        "Select CEO model:",
+      );
+      if (selectedCeoModel === null) return;
+      ceo.model = selectedCeoModel;
 
       const confirmMsg = [
         `Brief: ${brief.title}`,
         `Mode: ${mode}`,
         `Constraints: ${constraintsName} ($${constraintValues.budget} / ${constraintValues.time_limit_minutes}min / ${constraintValues.max_debate_rounds} rounds)`,
+        `CEO Model: ${resolveModelLabel(ceo.model)}`,
         `Agents found: ${agents.length}`,
       ].join("\n");
 
@@ -336,19 +1151,7 @@ export default function (pi: ExtensionAPI) {
               pauseMeetingUi(ctx);
               try {
                 while (true) {
-                  const choice = await ctx.ui.select(
-                    [
-                      "Approve board roster?",
-                      "",
-                      `CEO selected: ${proposed.map((agent) => agent.name).join(", ")}`,
-                      `Rationale: ${rationale}`,
-                    ].join("\n"),
-                    [
-                      "Yes",
-                      "Edit roster",
-                      "No",
-                    ],
-                  );
+                  const choice = await confirmRosterDecision(ctx, proposed, rationale);
                   if (choice === undefined || choice === "No") {
                     return { action: "reject" };
                   }
@@ -356,7 +1159,14 @@ export default function (pi: ExtensionAPI) {
                     return { action: "approve" };
                   }
 
-                  const edited = await editRosterSelection(ctx, proposed, available);
+                  const edited = await editRosterSelection(
+                    ctx,
+                    ceo,
+                    proposed,
+                    available,
+                    constraintValues.max_roster_size,
+                    rationale,
+                  );
                   if (edited === undefined) continue;
                   return { action: "edit", roster: edited };
                 }
@@ -371,6 +1181,14 @@ export default function (pi: ExtensionAPI) {
         clearActiveMeetingTimer();
         activeMeeting = null;
 
+        const humanSummary = await generateHumanReadableSummary(result.memoPath, path.dirname(result.memoPath));
+        if (humanSummary.ok) {
+          result.summaryPath = humanSummary.summaryPath;
+          result.summaryText = humanSummary.summaryText;
+        } else if (ctx.hasUI) {
+          ctx.ui.notify(`Human-readable summary failed: ${humanSummary.error}`, "warning");
+        }
+
         if (ctx.hasUI) {
           setCloseoutWidget(ctx, result);
           ctx.ui.setStatus("boardroom", undefined);
@@ -382,6 +1200,16 @@ export default function (pi: ExtensionAPI) {
           hasUI: ctx.hasUI,
           confirm: (title, body) => ctx.ui.confirm(title, body),
           notify: (msg, type) => ctx.ui.notify(msg, type),
+          setNarrationState: (state) => {
+            if (!ctx.hasUI) return;
+            if (state) {
+              setNarrationWidget(ctx, state);
+              ctx.ui.setStatus("boardroom", state.phase === "generating" ? "Narration generating..." : "Narration playing...");
+            } else {
+              setCloseoutWidget(ctx, result);
+              ctx.ui.setStatus("boardroom", undefined);
+            }
+          },
         });
 
         ctx.ui.setWidget("boardroom", undefined);
@@ -418,14 +1246,23 @@ export default function (pi: ExtensionAPI) {
         for (const agent of activeMeeting.agentSnapshots) {
           const cost = `$${agent.totalCost.toFixed(4)}`;
           const tokens = agent.totalTokens > 0 ? `${agent.totalTokens} tok` : "";
-          lines.push(`  ${agent.name}: ${agent.status} (${agent.turns} turns, ${cost}${tokens ? `, ${tokens}` : ""})`);
+          lines.push(
+            `  ${agent.name} [${agent.modelLabel ?? "default"}]: ${agent.status} (${agent.turns} turns, ${cost}${tokens ? `, ${tokens}` : ""})`,
+          );
           if (agent.error) lines.push(`    Error: ${agent.error}`);
         }
       }
 
       if (activeMeeting.lastSnapshot) {
+        const liveSnapshot = withLiveElapsed(
+          activeMeeting.lastSnapshot,
+          activeMeeting.startedAt,
+          activeMeeting.agentSnapshots,
+          activeMeeting.pausedAt,
+          activeMeeting.pausedTotalMs,
+        );
         lines.push("");
-        lines.push(...buildPlainDashboardLines(activeMeeting.lastSnapshot));
+        lines.push(...buildPlainDashboardLines(liveSnapshot));
       }
 
       ctx.ui.notify(`Active Meeting\n\n${lines.join("\n")}`, "info");
@@ -562,6 +1399,11 @@ export default function (pi: ExtensionAPI) {
       }
 
       ctx.ui.setStatus("boardroom", undefined);
+      const humanSummary = await generateHumanReadableSummary(result.memoPath, path.dirname(result.memoPath));
+      if (humanSummary.ok) {
+        result.summaryPath = humanSummary.summaryPath;
+        result.summaryText = humanSummary.summaryText;
+      }
       if (ctx.hasUI) {
         setCloseoutWidget(ctx, result);
       }
@@ -579,6 +1421,7 @@ export default function (pi: ExtensionAPI) {
         details: {
           memoPath: result.memoPath,
           debateJsonPath: result.debateJsonPath,
+          summaryPath: result.summaryPath,
           visualPaths: result.visualPaths,
           disposition: result.disposition,
           totalCost: result.totalCost,
