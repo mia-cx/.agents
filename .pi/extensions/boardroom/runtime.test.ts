@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { BoardMemberSession, SessionPool } from "./runtime.js";
 import type { AgentConfig, AgentRuntimeUpdate } from "./types.js";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 
 function makeAgent(slug: string, name: string, model?: string): AgentConfig {
   return {
@@ -45,6 +48,46 @@ describe("BoardMemberSession", () => {
     session.markAborted();
     expect(session.status).toBe("aborted");
     expect(session.snapshot().status).toBe("aborted");
+  });
+
+  it("rethrows aborts after preserving accumulated usage", async () => {
+    const session = new BoardMemberSession("cfo", "CFO", undefined);
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
+    const scriptPath = path.join(tmpDir, "emit-usage.js");
+    const controller = new AbortController();
+    const originalArgv1 = process.argv[1];
+
+    await fs.writeFile(
+      scriptPath,
+      [
+        "process.stdout.write(JSON.stringify({",
+        '  type: "message_end",',
+        "  message: {",
+        '    role: "assistant",',
+        "    usage: { input: 11, output: 7, cost: { total: 0.42 } },",
+        '    content: [{ type: "text", text: "partial" }],',
+        "  },",
+        '}) + "\\n");',
+        "setInterval(() => {}, 1000);",
+      ].join("\n"),
+    );
+
+    process.argv[1] = scriptPath;
+
+    try {
+      const runPromise = session.run(tmpDir, "", "test task", controller.signal);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      controller.abort();
+
+      await expect(runPromise).rejects.toThrow("Subagent was aborted");
+      expect(session.status).toBe("aborted");
+      expect(session.totalTokens).toBe(18);
+      expect(session.totalCost).toBeCloseTo(0.42);
+      expect(session.lastError).toBe("Subagent was aborted");
+    } finally {
+      process.argv[1] = originalArgv1;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 
