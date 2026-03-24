@@ -211,6 +211,25 @@ describe("buildDashboardWidgetLines", () => {
     const joined = lines.join("\n");
     expect(joined).not.toContain("Board Members:");
   });
+
+  it("renders thread graph lines when provided", () => {
+    const lines = buildDashboardWidgetLines(
+      makeSnapshot({
+        threadGraphLines: [
+          "3 threads · 8 msgs · 4 participants (2 active, 1 resolved, 0 closed)",
+          "",
+          "├─● Revenue Growth Strategy  active · 3 msgs · 2 mbrs",
+          "└─✓ Pricing Model Analysis  resolved · 2 msgs",
+        ],
+      }),
+      plainTheme,
+    );
+    const joined = lines.join("\n");
+    expect(joined).toContain("Thread Graph:");
+    expect(joined).toContain("Revenue Growth Strategy");
+    expect(joined).toContain("Pricing Model Analysis");
+  });
+
 });
 
 describe("buildPlainDashboardLines", () => {
@@ -233,4 +252,18 @@ describe("buildPlainDashboardLines", () => {
     expect(joined).toContain("✓");
     expect(joined).toContain("◉");
   });
+
+  it("includes thread graph lines when provided", () => {
+    const lines = buildPlainDashboardLines(makeSnapshot({
+      threadGraphLines: [
+        "2 threads · 5 msgs · 3 participants (1 active, 1 resolved, 0 closed)",
+        "",
+        "└─● Technical Debt Risk  active · 2 msgs",
+      ],
+    }));
+    const joined = lines.join("\n");
+    expect(joined).toContain("Thread Graph:");
+    expect(joined).toContain("Technical Debt Risk");
+  });
+
 });
