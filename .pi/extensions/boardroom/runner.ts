@@ -60,8 +60,6 @@ export async function runAgent(
 
     args.push(`Task: ${task}`);
 
-    let wasAborted = false;
-
     const exitCode = await new Promise<number>((resolve) => {
       const invocation = getPiInvocation(args);
       const proc = spawn(invocation.command, invocation.args, {
@@ -121,7 +119,6 @@ export async function runAgent(
 
       if (signal) {
         const killProc = () => {
-          wasAborted = true;
           proc.kill("SIGTERM");
           setTimeout(() => {
             if (!proc.killed) proc.kill("SIGKILL");
@@ -153,29 +150,4 @@ export async function runAgent(
     if (tmpPath) try { fs.unlinkSync(tmpPath); } catch {}
     if (tmpDir) try { fs.rmdirSync(tmpDir); } catch {}
   }
-}
-
-export async function runAgentsParallel(
-  cwd: string,
-  agents: Array<{ slug: string; model?: string; systemPrompt: string; task: string }>,
-  signal?: AbortSignal,
-  concurrency = 4,
-): Promise<AgentRunResult[]> {
-  if (agents.length === 0) return [];
-
-  const limit = Math.max(1, Math.min(concurrency, agents.length));
-  const results: AgentRunResult[] = new Array(agents.length);
-  let nextIndex = 0;
-
-  const workers = new Array(limit).fill(null).map(async () => {
-    while (true) {
-      const current = nextIndex++;
-      if (current >= agents.length) return;
-      const a = agents[current];
-      results[current] = await runAgent(cwd, a.slug, a.model, a.systemPrompt, a.task, signal);
-    }
-  });
-
-  await Promise.all(workers);
-  return results;
 }
