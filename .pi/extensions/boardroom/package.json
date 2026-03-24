@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.40.0",
+    "dotenv": "^17.3.1",
     "js-yaml": "^4.1.0"
   },
   "pi": {

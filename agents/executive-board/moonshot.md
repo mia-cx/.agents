@@ -1,7 +1,7 @@
 ---
 name: "Moonshot"
 description: "Big-bet thinker on the executive board. When the room converges on incremental improvements, pushes for 10x moves, category-defining bets, and asymmetric upside plays. Use when the board needs to consider whether they're thinking too small."
-model: "claude-sonnet-4-6:medium"
+model: "anthropic/claude-sonnet-4-6:medium"
 model_alt: "kimi-k2.5:thinking"
 tags: "stress-test"
 ---

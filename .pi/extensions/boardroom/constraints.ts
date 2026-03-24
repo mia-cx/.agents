@@ -4,6 +4,8 @@ export class ConstraintTracker {
   private budgetUsed = 0;
   private startTime: number;
   private roundsUsed = 0;
+  private pausedStartedAt: number | null = null;
+  private pausedMs = 0;
 
   constructor(private readonly limits: ConstraintSet) {
     this.startTime = Date.now();
@@ -18,7 +20,19 @@ export class ConstraintTracker {
   }
 
   get elapsedMinutes(): number {
-    return (Date.now() - this.startTime) / 60_000;
+    const now = this.pausedStartedAt ?? Date.now();
+    return (now - this.startTime - this.pausedMs) / 60_000;
+  }
+
+  pause(): void {
+    if (this.pausedStartedAt !== null) return;
+    this.pausedStartedAt = Date.now();
+  }
+
+  resume(): void {
+    if (this.pausedStartedAt === null) return;
+    this.pausedMs += Date.now() - this.pausedStartedAt;
+    this.pausedStartedAt = null;
   }
 
   get budgetState(): ConstraintState {
@@ -36,12 +50,11 @@ export class ConstraintTracker {
   }
 
   get roundsState(): ConstraintState {
-    if (this.roundsUsed >= this.limits.max_debate_rounds) return "exceeded";
+    if (this.roundsUsed >= this.limits.max_debate_rounds) return "warn";
     return "ok";
   }
 
   canContinue(budgetHardStop: boolean, timeHardStop: boolean): boolean {
-    if (this.roundsState === "exceeded") return false;
     if (budgetHardStop && this.budgetState === "exceeded") return false;
     if (timeHardStop && this.timeState === "exceeded") return false;
     return true;
@@ -60,5 +73,9 @@ export class ConstraintTracker {
 
   get currentRound(): number {
     return this.roundsUsed;
+  }
+
+  get hasMetRoundTarget(): boolean {
+    return this.roundsUsed >= this.limits.max_debate_rounds;
   }
 }

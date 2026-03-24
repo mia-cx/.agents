@@ -24,6 +24,7 @@ export interface ConstraintSet {
   budget: number;
   time_limit_minutes: number;
   max_debate_rounds: number;
+  max_roster_size?: number;
 }
 
 export interface BoardroomConfig {
@@ -64,12 +65,15 @@ export interface ConversationEntry {
 export interface ConversationLog {
   meeting_id: string;
   brief: string;
+  source_brief_path?: string;
+  source_brief_title?: string;
   mode: MeetingMode;
   constraints: string;
   roster: string[];
   started_at: string;
   ended_at: string;
   disposition: MeetingDisposition;
+  abort_reason?: string;
   total_cost: number;
   entries: ConversationEntry[];
 }
@@ -98,4 +102,54 @@ export interface AgentRunResult {
   tokenCount: number;
   cost: number;
   error?: string;
+}
+
+// --- Runtime types for persistent sessions and structured UI state ---
+
+export type AgentRuntimeStatus =
+  | "idle"
+  | "queued"
+  | "running"
+  | "thinking"
+  | "tooling"
+  | "delegating"
+  | "streaming"
+  | "completed"
+  | "failed"
+  | "aborted";
+
+export interface AgentRuntimeUpdate {
+  slug: string;
+  name: string;
+  status: AgentRuntimeStatus;
+  modelLabel?: string;
+  modelAltLabel?: string;
+  activity?: string;
+  partialText?: string;
+  turns: number;
+  totalTokens: number;
+  totalCost: number;
+  error?: string;
+}
+
+export interface MeetingProgressSnapshot {
+  meetingId: string;
+  briefTitle: string;
+  mode: MeetingMode;
+  constraints: string;
+  phase: number;
+  phaseLabel: string;
+  round: number;
+  startedAt: string;
+  budgetUsed: number;
+  budgetLimit: number;
+  elapsedMinutes: number;
+  timeLimitMinutes: number;
+  roundsUsed: number;
+  maxRounds: number;
+  roster: string[];
+  agents: AgentRuntimeUpdate[];
+  presidentNote: string;
+  transcript: string[];
+  disposition: MeetingDisposition | "in-progress";
 }

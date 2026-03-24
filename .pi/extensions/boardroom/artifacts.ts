@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ConversationLog } from "./types.js";
+import type { ExtractedVisualBlock } from "./visuals.js";
 
 function ensureDir(dir: string): void {
   if (!fs.existsSync(dir)) {
@@ -44,6 +45,7 @@ function renderLogAsMarkdown(log: ConversationLog): string {
     `- **Started**: ${log.started_at}`,
     `- **Ended**: ${log.ended_at}`,
     `- **Disposition**: ${log.disposition}`,
+    ...(log.abort_reason ? [`- **Abort Reason**: ${log.abort_reason}`] : []),
     `- **Total Cost**: $${log.total_cost.toFixed(2)}`,
     "",
     "---",
@@ -82,14 +84,19 @@ export function writeExpertise(cwd: string, agentSlug: string, meetingId: string
   fs.appendFileSync(filePath, entry, "utf-8");
 }
 
-export function writeVisuals(cwd: string, meetingId: string, diagrams: { label: string; code: string }[]): string[] {
+export function writeVisuals(
+  cwd: string,
+  meetingId: string,
+  diagrams: Array<ExtractedVisualBlock & { label: string }>,
+): string[] {
   const dir = path.join(cwd, "boardroom", "visuals");
   ensureDir(dir);
 
   const paths: string[] = [];
   for (let i = 0; i < diagrams.length; i++) {
     const suffix = diagrams.length === 1 ? "" : `-${i + 1}`;
-    const filename = `${meetingId}-${diagrams[i].label}${suffix}.mmd`;
+    const extension = diagrams[i].format === "svg" ? "svg" : "mmd";
+    const filename = `${meetingId}-${diagrams[i].label}${suffix}.${extension}`;
     const filePath = path.join(dir, filename);
     fs.writeFileSync(filePath, diagrams[i].code + "\n", "utf-8");
     paths.push(filePath);

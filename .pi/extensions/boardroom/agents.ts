@@ -57,9 +57,12 @@ export function discoverAgents(cwd: string): AgentConfig[] {
     const { frontmatter, body } = parseFrontmatter(content);
     if (!frontmatter.name || !frontmatter.description) continue;
 
+    const slug = slugify(frontmatter.name);
+    if (!slug || /[/\\]|\.\./.test(slug)) continue;
+
     agents.push({
       name: frontmatter.name,
-      slug: slugify(frontmatter.name),
+      slug,
       description: frontmatter.description,
       model: frontmatter.model,
       modelAlt: frontmatter.model_alt,
