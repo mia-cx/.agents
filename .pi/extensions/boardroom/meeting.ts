@@ -22,9 +22,18 @@ export interface MeetingCallbacks {
   onStatus: (msg: string) => void;
   onAgentUpdate?: (update: AgentRuntimeUpdate) => void;
   onSnapshot?: (snapshot: MeetingProgressSnapshot) => void;
-  onConfirmRoster: (names: string[], rationale: string) => Promise<boolean>;
+  onConfirmRoster: (
+    proposed: AgentConfig[],
+    available: AgentConfig[],
+    rationale: string,
+  ) => Promise<RosterConfirmation>;
   signal?: AbortSignal;
 }
+
+export type RosterConfirmation =
+  | { action: "approve" }
+  | { action: "reject" }
+  | { action: "edit"; roster: string[] };
 
 export interface MeetingResult {
   memoPath: string;
@@ -142,6 +151,13 @@ function dedupeAgentsBySlug(agents: AgentConfig[]): AgentConfig[] {
     seen.add(agent.slug);
     return true;
   });
+}
+
+function resolveRosterSelection(allAgents: AgentConfig[], slugs: string[]): AgentConfig[] {
+  const resolved = slugs
+    .map((slug) => allAgents.find((agent) => agent.slug === slug))
+    .filter((agent): agent is AgentConfig => !!agent && agent.slug !== "ceo" && agent.slug !== "executive-board-orchestrator");
+  return dedupeAgentsBySlug(resolved);
 }
 
 function resolveRoster(allAgents: AgentConfig[], ceoOutput: string): AgentConfig[] {
@@ -412,20 +428,28 @@ export async function runFreeformMeeting(
     emitSnapshot(state, tracker, pool, "CEO Framing", "Framing complete. Selecting roster.", callbacks);
 
     // --- Roster Selection ---
-    const rosterAgents = resolveRoster(allAgents, framingRes.content);
+    let rosterAgents = resolveRoster(allAgents, framingRes.content);
     log.roster = ["ceo", ...rosterAgents.map(a => a.slug)];
     state.roster = rosterAgents;
-    pool.ensureAgents(rosterAgents, "Awaiting first evaluation");
 
     const rosterParsed = parseRosterJson(framingRes.content);
     const rosterRationale = rosterParsed?.rationale ?? "Full board (CEO roster selection could not be parsed)";
-
-    const confirmed = await callbacks.onConfirmRoster(rosterAgents.map(a => a.name), rosterRationale);
-    if (!confirmed) {
-      rosterAgents.length = 0;
-      rosterAgents.push(...getNonCeoAgents(allAgents));
-      log.roster = ["ceo", ...rosterAgents.map(a => a.slug)];
+    tracker.pause();
+    let rosterDecision: RosterConfirmation;
+    try {
+      rosterDecision = await callbacks.onConfirmRoster(rosterAgents, getNonCeoAgents(allAgents), rosterRationale);
+    } finally {
+      tracker.resume();
     }
+    if (rosterDecision.action === "reject") {
+      rosterAgents = [...getNonCeoAgents(allAgents)];
+    } else if (rosterDecision.action === "edit") {
+      const editedRoster = resolveRosterSelection(allAgents, rosterDecision.roster);
+      rosterAgents = editedRoster.length > 0 ? editedRoster : [...getNonCeoAgents(allAgents)];
+    }
+    log.roster = ["ceo", ...rosterAgents.map(a => a.slug)];
+    state.roster = rosterAgents;
+    pool.ensureAgents(rosterAgents, "Awaiting first evaluation");
 
     // --- Debate Rounds ---
     let debateRound = 0;
@@ -698,13 +722,27 @@ export async function runStructuredMeeting(
       null, 1, 0, "framing", framingRes.content, framingRes.tokenCount, framingRes.cost,
     );
 
-    const rosterAgents = resolveRoster(allAgents, framingRes.content);
+    let rosterAgents = resolveRoster(allAgents, framingRes.content);
+    log.roster = ["ceo", ...rosterAgents.map(a => a.slug)];
+    state.roster = rosterAgents;
+
+    const rosterParsed = parseRosterJson(framingRes.content);
+    tracker.pause();
+    let rosterDecision: RosterConfirmation;
+    try {
+      rosterDecision = await callbacks.onConfirmRoster(rosterAgents, nonCeo, rosterParsed?.rationale ?? "Full board");
+    } finally {
+      tracker.resume();
+    }
+    if (rosterDecision.action === "reject") {
+      rosterAgents = [...nonCeo];
+    } else if (rosterDecision.action === "edit") {
+      const editedRoster = resolveRosterSelection(allAgents, rosterDecision.roster);
+      rosterAgents = editedRoster.length > 0 ? editedRoster : [...nonCeo];
+    }
     log.roster = ["ceo", ...rosterAgents.map(a => a.slug)];
     state.roster = rosterAgents;
     pool.ensureAgents(rosterAgents, "Awaiting evaluation");
-
-    const rosterParsed = parseRosterJson(framingRes.content);
-    await callbacks.onConfirmRoster(rosterAgents.map(a => a.name), rosterParsed?.rationale ?? "Full board");
 
     emitConstraintWarnings(tracker, callbacks);
     emitSnapshot(state, tracker, pool, "CEO Framing", "Framing complete. Roster confirmed.", callbacks);

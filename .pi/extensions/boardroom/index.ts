@@ -7,7 +7,8 @@ import { discoverAgents } from "./agents.js";
 import { parseBrief, listBriefs } from "./brief-parser.js";
 import { loadConfig, resolveConstraints } from "./config.js";
 import { runFreeformMeeting, runStructuredMeeting } from "./meeting.js";
-import type { MeetingCallbacks, MeetingResult } from "./meeting.js";
+import type { MeetingCallbacks, MeetingResult, RosterConfirmation } from "./meeting.js";
+import type { AgentConfig } from "./types.js";
 import type { AgentRuntimeUpdate, MeetingProgressSnapshot } from "./types.js";
 import { listPastMeetings } from "./artifacts.js";
 import { formatDashboardStatus, buildDashboardWidgetLines, buildPlainDashboardLines } from "./ui.js";
@@ -24,12 +25,25 @@ interface ActiveMeetingState {
   abortController: AbortController;
   agentSnapshots: AgentRuntimeUpdate[];
   lastSnapshot: MeetingProgressSnapshot | null;
+  pausedAt: number | null;
+  pausedTotalMs: number;
 }
 
 function prioritizeOption<T extends string>(options: T[], preferred: T): T[] {
   const unique = Array.from(new Set(options));
   const remaining = unique.filter((option) => option !== preferred);
   return [preferred, ...remaining];
+}
+
+function orderRosterSelection(
+  available: AgentConfig[],
+  preferredSlugs: string[],
+): AgentConfig[] {
+  const preferred = new Set(preferredSlugs);
+  return [
+    ...available.filter((agent) => preferred.has(agent.slug)),
+    ...available.filter((agent) => !preferred.has(agent.slug)),
+  ];
 }
 
 async function runMeeting(
@@ -81,9 +95,14 @@ export default function (pi: ExtensionAPI) {
     snapshot: MeetingProgressSnapshot,
     startedAtMs: number,
     agentSnapshots: AgentRuntimeUpdate[],
+    pausedAtMs: number | null,
+    pausedTotalMs: number,
   ): MeetingProgressSnapshot => ({
     ...snapshot,
-    elapsedMinutes: Math.max(snapshot.elapsedMinutes, (Date.now() - startedAtMs) / 60_000),
+    elapsedMinutes: Math.max(
+      snapshot.elapsedMinutes,
+      (((pausedAtMs ?? Date.now()) - startedAtMs - pausedTotalMs) / 60_000),
+    ),
     agents: agentSnapshots.length > 0 ? [...agentSnapshots] : snapshot.agents,
   });
 
@@ -105,9 +124,73 @@ export default function (pi: ExtensionAPI) {
     }
 
     const theme = ctx.ui.theme;
-    const snapshot = withLiveElapsed(meeting.lastSnapshot, meeting.startedAt, meeting.agentSnapshots);
+    const snapshot = withLiveElapsed(
+      meeting.lastSnapshot,
+      meeting.startedAt,
+      meeting.agentSnapshots,
+      meeting.pausedAt,
+      meeting.pausedTotalMs,
+    );
     ctx.ui.setStatus("boardroom", formatDashboardStatus(snapshot, theme));
     setBoardroomWidget(ctx, snapshot);
+  };
+
+  const pauseMeetingUi = (
+    ctx: { hasUI: boolean; ui: ExtensionAPI["commands"][number] extends never ? never : any },
+  ) => {
+    if (!activeMeeting || activeMeeting.pausedAt !== null) return;
+    activeMeeting.pausedAt = Date.now();
+    clearActiveMeetingTimer();
+    renderMeetingUi(ctx, activeMeeting);
+  };
+
+  const resumeMeetingUi = (
+    ctx: { hasUI: boolean; ui: ExtensionAPI["commands"][number] extends never ? never : any },
+  ) => {
+    if (!activeMeeting || activeMeeting.pausedAt === null) return;
+    activeMeeting.pausedTotalMs += Date.now() - activeMeeting.pausedAt;
+    activeMeeting.pausedAt = null;
+    renderMeetingUi(ctx, activeMeeting);
+    if (ctx.hasUI) {
+      clearActiveMeetingTimer();
+      activeMeetingTimer = setInterval(() => renderMeetingUi(ctx, activeMeeting), 1000);
+    }
+  };
+
+  const editRosterSelection = async (
+    ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+    proposed: AgentConfig[],
+    available: AgentConfig[],
+  ): Promise<string[] | undefined> => {
+    const selected = new Set(proposed.map((agent) => agent.slug));
+    const defaultSlugs = proposed.map((agent) => agent.slug);
+
+    while (true) {
+      const orderedAgents = orderRosterSelection(available, Array.from(selected));
+      const options = [
+        `Continue with ${selected.size} selected member${selected.size === 1 ? "" : "s"}`,
+        "Reset to CEO picks",
+        ...orderedAgents.map((agent) => `${selected.has(agent.slug) ? "[x]" : "[ ]"} ${agent.name}`),
+      ];
+      const choice = await ctx.ui.select("Edit Board Roster:", options);
+      if (choice === undefined) return undefined;
+      if (choice.startsWith("Continue with")) {
+        if (selected.size === 0) {
+          ctx.ui.notify("Select at least one board member before continuing.", "warning");
+          continue;
+        }
+        return available.filter((agent) => selected.has(agent.slug)).map((agent) => agent.slug);
+      }
+      if (choice === "Reset to CEO picks") {
+        selected.clear();
+        for (const slug of defaultSlugs) selected.add(slug);
+        continue;
+      }
+      const chosenAgent = available.find((agent) => choice.endsWith(agent.name));
+      if (!chosenAgent) continue;
+      if (selected.has(chosenAgent.slug)) selected.delete(chosenAgent.slug);
+      else selected.add(chosenAgent.slug);
+    }
   };
 
   pi.registerCommand("board-meeting", {
@@ -211,6 +294,8 @@ export default function (pi: ExtensionAPI) {
         abortController,
         agentSnapshots: [],
         lastSnapshot: null,
+        pausedAt: null,
+        pausedTotalMs: 0,
       };
 
       ctx.ui.setStatus("boardroom", "Board meeting in progress...");
@@ -246,12 +331,38 @@ export default function (pi: ExtensionAPI) {
               }
               renderMeetingUi(ctx, activeMeeting);
             },
-            onConfirmRoster: async (names, rationale) => {
-              if (!ctx.hasUI) return true;
-              return ctx.ui.confirm(
-                "Confirm Board Roster",
-                `CEO selected: ${names.join(", ")}\n\nRationale: ${rationale}\n\nProceed with this roster?`,
-              );
+            onConfirmRoster: async (proposed, available, rationale): Promise<RosterConfirmation> => {
+              if (!ctx.hasUI) return { action: "approve" };
+              pauseMeetingUi(ctx);
+              try {
+                while (true) {
+                  const choice = await ctx.ui.select(
+                    [
+                      "Approve board roster?",
+                      "",
+                      `CEO selected: ${proposed.map((agent) => agent.name).join(", ")}`,
+                      `Rationale: ${rationale}`,
+                    ].join("\n"),
+                    [
+                      "Yes",
+                      "Edit roster",
+                      "No",
+                    ],
+                  );
+                  if (choice === undefined || choice === "No") {
+                    return { action: "reject" };
+                  }
+                  if (choice === "Yes") {
+                    return { action: "approve" };
+                  }
+
+                  const edited = await editRosterSelection(ctx, proposed, available);
+                  if (edited === undefined) continue;
+                  return { action: "edit", roster: edited };
+                }
+              } finally {
+                resumeMeetingUi(ctx);
+              }
             },
             signal: abortController.signal,
           },
@@ -392,7 +503,7 @@ export default function (pi: ExtensionAPI) {
       const renderToolUi = () => {
         if (!ctx.hasUI || !lastSnapshot) return;
         const theme = ctx.ui.theme;
-        const snapshot = withLiveElapsed(lastSnapshot, startedAtMs, agentSnapshots);
+        const snapshot = withLiveElapsed(lastSnapshot, startedAtMs, agentSnapshots, null, 0);
         ctx.ui.setStatus("boardroom", formatDashboardStatus(snapshot, theme));
         ctx.ui.setWidget("boardroom", buildDashboardWidgetLines(snapshot, theme));
       };
@@ -443,7 +554,7 @@ export default function (pi: ExtensionAPI) {
             agentSnapshots = [...snapshot.agents];
             renderToolUi();
           },
-          onConfirmRoster: async () => true,
+          onConfirmRoster: async () => ({ action: "approve" }),
           signal,
         });
       } finally {

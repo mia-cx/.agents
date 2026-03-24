@@ -4,6 +4,8 @@ export class ConstraintTracker {
   private budgetUsed = 0;
   private startTime: number;
   private roundsUsed = 0;
+  private pausedStartedAt: number | null = null;
+  private pausedMs = 0;
 
   constructor(private readonly limits: ConstraintSet) {
     this.startTime = Date.now();
@@ -18,7 +20,19 @@ export class ConstraintTracker {
   }
 
   get elapsedMinutes(): number {
-    return (Date.now() - this.startTime) / 60_000;
+    const now = this.pausedStartedAt ?? Date.now();
+    return (now - this.startTime - this.pausedMs) / 60_000;
+  }
+
+  pause(): void {
+    if (this.pausedStartedAt !== null) return;
+    this.pausedStartedAt = Date.now();
+  }
+
+  resume(): void {
+    if (this.pausedStartedAt === null) return;
+    this.pausedMs += Date.now() - this.pausedStartedAt;
+    this.pausedStartedAt = null;
   }
 
   get budgetState(): ConstraintState {

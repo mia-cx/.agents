@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { ConstraintTracker } from "./constraints.js";
 
 describe("ConstraintTracker", () => {
@@ -54,5 +54,24 @@ describe("ConstraintTracker", () => {
     tracker.addCost(3.14);
     tracker.addCost(2.86);
     expect(tracker.totalCost).toBeCloseTo(6);
+  });
+
+  it("pauses and resumes elapsed time tracking", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-24T00:00:00.000Z"));
+    const tracker = new ConstraintTracker({ budget: 50, time_limit_minutes: 30, max_debate_rounds: 5 });
+
+    vi.advanceTimersByTime(60_000);
+    tracker.pause();
+    const pausedElapsed = tracker.elapsedMinutes;
+
+    vi.advanceTimersByTime(120_000);
+    expect(tracker.elapsedMinutes).toBeCloseTo(pausedElapsed);
+
+    tracker.resume();
+    vi.advanceTimersByTime(60_000);
+    expect(tracker.elapsedMinutes).toBeCloseTo(pausedElapsed + 1, 3);
+
+    vi.useRealTimers();
   });
 });
