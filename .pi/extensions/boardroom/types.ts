@@ -65,6 +65,8 @@ export interface ConversationEntry {
 export interface ConversationLog {
   meeting_id: string;
   brief: string;
+  source_brief_path?: string;
+  source_brief_title?: string;
   mode: MeetingMode;
   constraints: string;
   roster: string[];

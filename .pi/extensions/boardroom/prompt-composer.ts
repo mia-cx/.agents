@@ -3,6 +3,28 @@ import * as path from "node:path";
 import type { AgentConfig, ConversationEntry, ParsedBrief } from "./types.js";
 import { composeScratchpadInstructions } from "./scratchpad.js";
 
+function composeBoardroomArtifactDiscipline(
+  agent: AgentConfig,
+  brief: ParsedBrief,
+  options?: { finalMemo?: boolean },
+): string {
+  const lines = [
+    "--- BOARDROOM OUTPUT DISCIPLINE ---",
+    "",
+    `The source brief at "${brief.filePath}" is immutable input.`,
+    "Never rewrite, patch, append to, or save over the source brief.",
+    "Never use file mutation tools or mutating bash commands on anything under boardroom/briefs/.",
+    `Your only allowed persistent working memory is your own scratch pad at boardroom/scratchpads/${agent.slug}.md, and it should normally be updated through the hidden scratch pad block in your response rather than by calling file mutation tools directly.`,
+    options?.finalMemo
+      ? "Return the full final memo in your assistant message. The boardroom runtime will save that message as the final memo artifact for you. Do not write the final memo to a file yourself."
+      : "Return your deliverable in your assistant message. Do not write your assessment, report, or brief to a file yourself.",
+    "Never open with preamble, meta-commentary, or narration about what you are about to do. Start directly with substantive content.",
+    "",
+    "--- END BOARDROOM OUTPUT DISCIPLINE ---",
+  ];
+  return lines.join("\n");
+}
+
 export function composeFramingPrompt(agent: AgentConfig, brief: ParsedBrief, scratchpad: string | null = null): string {
   const parts = [
     agent.systemPrompt,
@@ -14,6 +36,8 @@ export function composeFramingPrompt(agent: AgentConfig, brief: ParsedBrief, scr
     brief.content,
     "",
     "--- END BRIEF ---",
+    "",
+    composeBoardroomArtifactDiscipline(agent, brief),
   ];
 
   if (scratchpad !== undefined) {
@@ -39,6 +63,8 @@ export function composeAssessmentPrompt(
     `## Brief: ${brief.title}`,
     "",
     brief.content,
+    "",
+    composeBoardroomArtifactDiscipline(agent, brief),
     "",
     "## CEO's Framing",
     "",
@@ -88,6 +114,8 @@ export function composeSynthesisPrompt(
     "",
     brief.content,
     "",
+    composeBoardroomArtifactDiscipline(ceo, brief, { finalMemo: true }),
+    "",
     "## Your Earlier Framing",
     "",
     ceoFraming,
@@ -112,6 +140,7 @@ export function composeSynthesisPrompt(
     "Synthesize all board input into your final Strategic Brief.",
     "Address key tensions and disagreements between board members explicitly.",
     "Produce your output in Strategic Brief format as defined in your system prompt.",
+    "Do not call tools to save, patch, or rewrite the brief or memo files. Return the final memo as your assistant message only.",
     "",
     "--- END CONTEXT ---",
   );

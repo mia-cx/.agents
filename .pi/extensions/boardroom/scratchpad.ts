@@ -70,6 +70,9 @@ export function composeScratchpadInstructions(existing: string | null): string {
   }
 
   parts.push(
+    "Do not use write, edit, or mutating bash commands to persist notes or deliverables.",
+    "If you want to preserve private working notes, update them through the hidden scratch pad block below and the boardroom runtime will save it for you.",
+    "",
     "To update your scratch pad, include this block anywhere in your response:",
     "",
     SCRATCHPAD_OPEN,
