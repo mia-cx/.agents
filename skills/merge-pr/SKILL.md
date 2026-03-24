@@ -1,14 +1,14 @@
 ---
 name: merge-pr
 description: >-
-  Merges a pull request with a flavourful, context-aware merge commit message. Reads the PR diff, conversations, and linked issues, then generates a merge commit with a professional subject line and a fun body. Use when a PR is ready to merge and you want a memorable commit message.
+  Merges a pull request with style. Posts a flavourful summary as a PR comment (visible in GitHub), then merges with a clean conventional commit subject. Use when a PR is ready to merge and you want memorable context without cluttering the git log.
 ---
 
 <!-- @format -->
 
 # Merge a Pull Request
 
-You merge pull requests with style. You read the PR, understand what it does, generate a flavourful merge commit message, and execute the merge — no copy-pasting required. Follow the workflow below.
+You merge pull requests with style. You read the PR, understand what it does, post a flavourful comment on the PR, then execute the merge with a clean commit — no copy-pasting required. Follow the workflow below.
 
 ## Workflow
 
@@ -38,13 +38,54 @@ Before merging, verify:
 
 If the PR is **not ready** (failing checks, no approvals, conflicts), report the blockers and stop. Do NOT merge a PR that isn't green.
 
-### 5. Merge the PR
+### 5. Post the flavour comment
 
-**Do not ask for approval — merge immediately.** Use the `gh` CLI:
+**Before merging**, post the flavourful summary as a PR comment so it's readable in GitHub's timeline:
 
 ```
-gh pr merge <number> --merge --subject "<subject>" --body "<body>"
+gh pr comment <number> --body "<flavour body>"
 ```
+
+The comment body should **summarize the PR's impact** with **personality and a light touch of fun**. Think: a senior dev who's proud of what the team shipped.
+
+Guidelines:
+- Use casual, conversational tone — short sentences, contractions fine.
+- Flavour can take many forms: dry wit, a pun, a one-liner, a relevant song lyric or quote, a mini-poem, a metaphor, a cheeky aside — all fair game.
+- Don't overdo it — flavour should complement the substance, not drown it.
+- Still cover the real substance: what the PR delivers, key decisions, anything to watch out for.
+- End with a `Co-Authored-By` trailer reflecting **your own model name** (e.g. `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>` — use whatever model you actually are).
+
+#### Comment examples
+
+**feat:**
+> *"We're not in Kansas anymore"* — and neither is the dashboard. Ships the analytics overview: real-time charts, filterable date ranges, and an export button that actually works.
+>
+> Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+**fix:**
+> The auth token was expiring mid-request like a carton of milk left on the counter. Added a refresh buffer so tokens get renewed 30 seconds before expiry instead of after the 401 hits.
+>
+> Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+**chore:**
+> *"I fought the deps and the deps won"* — bumped everything that wasn't pinned, fixed the two breaking changes, and updated the lockfile. CI is green and the audit is clean.
+>
+> Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+**refactor:**
+> Same behaviour, new skeleton. Extracted the shared validation logic into a single module instead of the previous three-headed hydra approach. Fewer lines, fewer bugs, fewer "wait, which validator does this endpoint use?" conversations.
+>
+> Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+### 6. Merge the PR
+
+**Do not ask for approval — merge immediately after posting the comment.** Use the `gh` CLI:
+
+```
+gh pr merge <number> --merge --subject "<subject>"
+```
+
+The commit subject only — **no body**. The flavour lives in the comment.
 
 Use `--merge` (merge commit) by default. If the repo convention is squash or rebase, match it:
 - `--squash` for squash-and-merge repos
@@ -54,11 +95,9 @@ Check the repo's merge settings if unsure: `gh api repos/{owner}/{repo} --jq '.a
 
 Then confirm with a summary like **"PR #N merged. Another one bites the dust. 🎤"**
 
-## Merge commit message format
+## Merge commit subject format
 
-### Subject (heading)
-
-Clean and professional — conventional commit style when possible:
+Clean and professional — conventional commit style:
 
 ```
 type(scope): short imperative description (#N)
@@ -67,74 +106,15 @@ type(scope): short imperative description (#N)
 - Infer the type from the PR content: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `style`
 - Include the PR number at the end
 - Under ~72 chars, no trailing period
+- **No body** — all narrative goes in the comment (step 5)
 
-### Body (flavour zone 🎉)
-
-Every merge gets a body. The body should **summarize the PR's impact** (what changed and why it matters) but written with **personality and a light touch of fun**. Think: a senior dev who's proud of what the team shipped.
-
-Guidelines for flavourful bodies:
-- Use casual, conversational tone — short sentences, contractions fine.
-- Flavour can take many forms: dry wit, a pun, a one-liner, a relevant song lyric or quote, a mini-poem, a metaphor, a cheeky aside — all fair game.
-- Don't overdo it — the flavour should complement the summary, not drown it.
-- Still cover the real substance: what the PR delivers, key decisions, anything to watch out for.
-- If the PR closes issues, add `Closes #N` on its own line after the body text.
-- End with a `Co-Authored-By` trailer reflecting **your own model name** (e.g. `Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>` — use whatever model you actually are).
-
-#### Body examples
-
-**feat merge:**
-> *"We're not in Kansas anymore"* — and neither is the dashboard. This PR adds the analytics overview that product has been asking about since Q2. Real-time charts, filterable date ranges, and an export button that actually works.
->
-> Closes #42
->
-> Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
-**fix merge:**
-> The auth token was expiring mid-request like a carton of milk left on the counter. Added a refresh buffer so tokens get renewed 30 seconds before expiry instead of after the 401 hits.
->
-> Closes #87
->
-> Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
-
-**chore merge:**
-> *"I fought the deps and the deps won"* — bumped everything that wasn't pinned, fixed the two breaking changes, and updated the lockfile. CI is green and the audit is clean.
->
-> Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
-**refactor merge:**
-> Same behaviour, new skeleton. Extracted the shared validation logic into a single module instead of the previous three-headed hydra approach. Fewer lines, fewer bugs, fewer "wait, which validator does this endpoint use?" conversations.
->
-> Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
-
-## Full example
-
-```
-feat(analytics): add real-time dashboard with export (#42)
-
-"We're not in Kansas anymore" — and neither is the dashboard. This PR
-ships the analytics overview: real-time charts via WebSocket, filterable
-date ranges, CSV/PDF export, and a responsive layout that doesn't fall
-apart on mobile.
-
-Three weeks of work across 12 commits. The WebSocket connection handles
-reconnects gracefully and the export queue is async so it won't block
-the UI thread. Watch the memory footprint on the charts — we're capping
-at 1000 data points in the viewport but it hasn't been load-tested yet.
-
-Closes #42
-Closes #38
-
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-```
-
-> **Note on the trailer:** Always use your actual model name — if you're Claude Opus 4.5, write `Claude Opus 4.5`; if you're GPT-5.4, write `GPT-5.4`, etc. Don't hardcode a model name that isn't yours.
+> **Note on the trailer:** In the comment, always use your actual model name — if you're Claude Opus 4.5, write `Claude Opus 4.5`; if you're GPT-5.4, write `GPT-5.4`, etc. Don't hardcode a model name that isn't yours.
 
 ## Checklist before finishing
 
 - [ ] PR context fully read (diff, body, comments, linked issues).
 - [ ] CI checks confirmed passing.
-- [ ] Merge executed via `gh pr merge` — not just printed.
-- [ ] Merge commit body has real substance + a touch of flavour.
-- [ ] Issue references included (`Closes #N`) where applicable.
-- [ ] `Co-Authored-By` trailer reflects your actual model name.
+- [ ] Flavour comment posted via `gh pr comment` — visible in GitHub timeline.
+- [ ] Merge executed via `gh pr merge` with subject only — no body.
+- [ ] `Co-Authored-By` trailer in the comment reflects your actual model name.
 - [ ] Confirmation summary sent to user.
