@@ -154,5 +154,6 @@ export interface MeetingProgressSnapshot {
   agents: AgentRuntimeUpdate[];
   presidentNote: string;
   transcript: string[];
+  threadGraphLines?: string[];
   disposition: MeetingDisposition | "in-progress";
 }
