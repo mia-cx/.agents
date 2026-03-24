@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { DynamicBorder, isToolCallEventType, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
@@ -21,7 +21,6 @@ import {
   buildThemedCloseoutLines,
   generateHumanReadableSummary,
   NarrationPlaybackController,
-  playAudio,
   runPostMeetingActions,
 } from "./closeout.js";
 import type {
@@ -50,6 +49,7 @@ interface ActiveNarrationState {
   request: NarrationPlaybackRequest;
   state: NarrationDisplayState;
   controller: NarrationPlaybackController | null;
+  fallbackProcess: ReturnType<typeof spawn> | null;
   ui: ExtensionAPI["commands"][number] extends never ? never : any;
 }
 
@@ -142,6 +142,9 @@ function isMutatingBashCommand(command: string): boolean {
     /(^|[;&|])\s*(rm|mv|cp|touch|install|truncate)\b/i,
     /(^|[;&|])\s*sed\b[^\n]*\s-i\b/i,
     /(^|[;&|])\s*perl\b[^\n]*-pi\b/i,
+    /(^|[;&|])\s*(python[23]?|node|ruby|php|lua)\b/i,
+    /(^|[;&|])\s*(curl|wget)\b[^\n]*(-o|--output)\b/i,
+    /(^|[;&|])\s*dd\b/i,
     /\|\s*tee\b/i,
     /(^|[^<])>>?/,
   ];
@@ -879,7 +882,8 @@ function createRosterEditorComponent(
   };
 
   const finish = () => {
-    if (selected.size === 0) {
+    const nonLockedSelectionCount = Array.from(selected).filter((slug) => !lockedSlugs.includes(slug)).length;
+    if (nonLockedSelectionCount === 0) {
       refresh("Select at least one board member before continuing.");
       return;
     }
@@ -1148,6 +1152,31 @@ export default function (pi: ExtensionAPI) {
   let lastCloseoutResult: MeetingResult | null = null;
   const NARRATION_CONTROLS_LABEL = "Controls: Alt+Space pause/resume · Left/Right seek · Home restart · End stop · Esc dismiss · /board-narration ...";
 
+  const stopFallbackNarrationProcess = async (proc: ReturnType<typeof spawn> | null | undefined) => {
+    if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
+    await new Promise<void>((resolve) => {
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        resolve();
+      };
+      proc.once("close", finish);
+      try {
+        proc.kill("SIGTERM");
+      } catch {
+        finish();
+        return;
+      }
+      setTimeout(() => {
+        if (proc.exitCode === null && proc.signalCode === null) {
+          try { proc.kill("SIGKILL"); } catch {}
+        }
+        finish();
+      }, 1000);
+    });
+  };
+
   const getWidgetLineBudget = () => {
     const rows = typeof process.stdout?.rows === "number" && Number.isFinite(process.stdout.rows)
       ? process.stdout.rows
@@ -1267,6 +1296,9 @@ export default function (pi: ExtensionAPI) {
     if (narration?.controller) {
       await narration.controller.dispose();
     }
+    if (narration?.fallbackProcess) {
+      await stopFallbackNarrationProcess(narration.fallbackProcess);
+    }
     const ui = ctx?.ui ?? narration?.ui;
     if (ui) {
       ui.setStatus("boardroom", undefined);
@@ -1296,9 +1328,12 @@ export default function (pi: ExtensionAPI) {
       },
       state: {
         ...state,
-        controlsLabel: state.controlsLabel ?? NARRATION_CONTROLS_LABEL,
+        controlsLabel: state.controlsLabel ?? (state.phase === "generating"
+          ? "Generating narration audio..."
+          : NARRATION_CONTROLS_LABEL),
       },
       controller: activeNarration?.controller ?? null,
+      fallbackProcess: activeNarration?.fallbackProcess ?? null,
       ui: ctx.ui,
     };
     renderNarrationUi();
@@ -1311,6 +1346,10 @@ export default function (pi: ExtensionAPI) {
     const existingController = activeNarration?.controller;
     if (existingController) {
       await existingController.dispose();
+    }
+    const existingFallback = activeNarration?.fallbackProcess;
+    if (existingFallback) {
+      await stopFallbackNarrationProcess(existingFallback);
     }
     const controller = new NarrationPlaybackController(request.audioPath, () => {
       if (!activeNarration) return;
@@ -1333,52 +1372,94 @@ export default function (pi: ExtensionAPI) {
             : "Playback controls require mpv. Dismiss with Escape or a new prompt.",
         },
         controller: null,
+        fallbackProcess: null,
         ui: ctx.ui,
       };
       renderNarrationUi();
       if (request.autoplay === false) {
         return { ok: true };
       }
+      if (process.platform !== "darwin") {
+        return { ok: false, error: "Controllable playback requires mpv on this platform." };
+      }
 
-      let indicatorFrame = 0;
-      const startedAt = Date.now();
-      const playbackTimer = setInterval(() => {
-        if (!activeNarration || activeNarration.request.audioPath !== request.audioPath) {
-          clearInterval(playbackTimer);
-          return;
-        }
+      try {
+        const proc = spawn("afplay", [request.audioPath], {
+          stdio: ["ignore", "ignore", "ignore"],
+        });
+        activeNarration.fallbackProcess = proc;
         activeNarration.state = {
           ...activeNarration.state,
           phase: "playing",
-          indicatorFrame,
-          elapsedSeconds: (Date.now() - startedAt) / 1000,
-          durationSeconds,
-          activeRange: request.alignment
-            ? findNarrationActiveRange(
-                request.summaryText,
-                request.alignment,
-                (Date.now() - startedAt) / 1000,
-              )
-            : undefined,
+          controlsLabel: "Playback controls require mpv. Stop or dismiss to end system playback.",
         };
-        indicatorFrame += 1;
         renderNarrationUi();
-      }, 200);
+        ensureNarrationTimer();
 
-      const playbackResult = await playAudio(request.audioPath);
-      clearInterval(playbackTimer);
-      if (activeNarration && activeNarration.request.audioPath === request.audioPath) {
-        activeNarration.state = {
-          ...activeNarration.state,
-          phase: "completed",
-          indicatorFrame: 0,
-          activeRange: undefined,
-          elapsedSeconds: durationSeconds ?? ((Date.now() - startedAt) / 1000),
-          durationSeconds,
-        };
-        renderNarrationUi();
+        const startedAt = Date.now();
+        let indicatorFrame = 0;
+        const playbackTimer = setInterval(() => {
+          if (!activeNarration || activeNarration.request.audioPath !== request.audioPath || activeNarration.fallbackProcess !== proc) {
+            clearInterval(playbackTimer);
+            return;
+          }
+          activeNarration.state = {
+            ...activeNarration.state,
+            phase: "playing",
+            indicatorFrame,
+            elapsedSeconds: (Date.now() - startedAt) / 1000,
+            durationSeconds,
+            activeRange: request.alignment
+              ? findNarrationActiveRange(
+                  request.summaryText,
+                  request.alignment,
+                  (Date.now() - startedAt) / 1000,
+                )
+              : undefined,
+          };
+          indicatorFrame += 1;
+          renderNarrationUi();
+        }, 200);
+
+        proc.once("close", () => {
+          clearInterval(playbackTimer);
+          if (!activeNarration || activeNarration.request.audioPath !== request.audioPath || activeNarration.fallbackProcess !== proc) {
+            return;
+          }
+          activeNarration.fallbackProcess = null;
+          activeNarration.state = {
+            ...activeNarration.state,
+            phase: "completed",
+            indicatorFrame: 0,
+            activeRange: undefined,
+            elapsedSeconds: durationSeconds ?? ((Date.now() - startedAt) / 1000),
+            durationSeconds,
+            controlsLabel: "Restart to play again, or dismiss with Escape or a new prompt.",
+          };
+          renderNarrationUi();
+          clearNarrationTimer();
+        });
+
+        proc.once("error", (err) => {
+          clearInterval(playbackTimer);
+          if (!activeNarration || activeNarration.request.audioPath !== request.audioPath || activeNarration.fallbackProcess !== proc) {
+            return;
+          }
+          activeNarration.fallbackProcess = null;
+          activeNarration.state = {
+            ...activeNarration.state,
+            phase: "completed",
+            controlsLabel: "Playback failed. Dismiss with Escape or a new prompt.",
+          };
+          renderNarrationUi();
+          clearNarrationTimer();
+          ctx.ui.notify(err.message ?? "Failed to start narration playback", "warning");
+        });
+
+        return { ok: true };
+      } catch (err: any) {
+        return { ok: false, error: err.message ?? "Failed to start fallback playback" };
       }
-      return playbackResult;
     }
 
     activeNarration = {
@@ -1393,6 +1474,7 @@ export default function (pi: ExtensionAPI) {
         controlsLabel: NARRATION_CONTROLS_LABEL,
       },
       controller: request.autoplay === false ? null : controller,
+      fallbackProcess: null,
       ui: ctx.ui,
     };
 
@@ -1429,6 +1511,10 @@ export default function (pi: ExtensionAPI) {
       await dismissNarration(ctx);
       return;
     }
+    if (!activeNarration.request.audioPath) {
+      ctx.ui.notify("Narration audio is still being generated.", "info");
+      return;
+    }
     if (action === "restart") {
       const result = await startNarrationPlayback(ctx, { ...activeNarration.request, autoplay: true });
       if (!result.ok && result.error) ctx.ui.notify(result.error, "warning");
@@ -1437,6 +1523,10 @@ export default function (pi: ExtensionAPI) {
     if (action === "stop") {
       if (activeNarration.controller) {
         await activeNarration.controller.dispose();
+      }
+      if (activeNarration.fallbackProcess) {
+        await stopFallbackNarrationProcess(activeNarration.fallbackProcess);
+        activeNarration.fallbackProcess = null;
       }
       activeNarration.controller = null;
       activeNarration.state = {
@@ -1613,13 +1703,17 @@ export default function (pi: ExtensionAPI) {
     let selectedRosterSlugs = proposed.map((agent) => agent.slug);
     const orderedAgents = [ceo, ...orderRosterSelection(available, selectedRosterSlugs)];
     const FORCE_CLOSE_SENTINEL = "__force_close__";
+    let removeAbortListener: (() => void) | undefined;
     const result = await ctx.ui.custom(
       (tui, theme, keybindings, done) => (
         (() => {
           const onAbort = () => done(FORCE_CLOSE_SENTINEL as any);
           if (signal) {
             if (signal.aborted) onAbort();
-            else signal.addEventListener("abort", onAbort, { once: true });
+            else {
+              signal.addEventListener("abort", onAbort, { once: true });
+              removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+            }
           }
           return createRosterEditorComponent(
             tui,
@@ -1644,6 +1738,7 @@ export default function (pi: ExtensionAPI) {
         },
       },
     ) as RosterEditorResult;
+    removeAbortListener?.();
     if ((result as string | undefined) === FORCE_CLOSE_SENTINEL) {
       throw new Error("Subagent was aborted");
     }
@@ -1659,12 +1754,16 @@ export default function (pi: ExtensionAPI) {
     signal?: AbortSignal,
   ): Promise<"Yes" | "Edit roster" | "No" | undefined> => {
     const FORCE_CLOSE_SENTINEL = "__force_close__";
+    let removeAbortListener: (() => void) | undefined;
     return ctx.ui.custom(
       (tui, theme, keybindings, done) => {
         const onAbort = () => done(FORCE_CLOSE_SENTINEL as any);
         if (signal) {
           if (signal.aborted) onAbort();
-          else signal.addEventListener("abort", onAbort, { once: true });
+          else {
+            signal.addEventListener("abort", onAbort, { once: true });
+            removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+          }
         }
         return createRosterApprovalComponent(tui, theme, keybindings, proposed, rationale, done);
       },
@@ -1678,6 +1777,7 @@ export default function (pi: ExtensionAPI) {
         },
       },
     ).then((result) => {
+      removeAbortListener?.();
       if (result === FORCE_CLOSE_SENTINEL) {
         throw new Error("Subagent was aborted");
       }
@@ -1848,7 +1948,10 @@ export default function (pi: ExtensionAPI) {
               try {
                 while (true) {
                   const choice = await confirmRosterDecision(ctx, proposed, rationale, abortController.signal);
-                  if (choice === undefined || choice === "No") {
+                  if (choice === undefined) {
+                    return { action: "cancel" };
+                  }
+                  if (choice === "No") {
                     return { action: "reject" };
                   }
                   if (choice === "Yes") {
@@ -1876,7 +1979,10 @@ export default function (pi: ExtensionAPI) {
         );
 
         clearActiveMeetingTimer();
-        activeMeeting = null;
+        if (activeMeeting) {
+          activeMeeting.phase = "closeout";
+          activeMeeting.lastStatus = "Generating spoken narration summary...";
+        }
 
         if (ctx.hasUI) {
           ctx.ui.setStatus("boardroom", "Generating spoken narration summary...");
@@ -1912,8 +2018,10 @@ export default function (pi: ExtensionAPI) {
         });
 
         if (!activeNarration) {
-          ctx.ui.setWidget("boardroom", undefined);
+          setCloseoutWidget(ctx, result);
+          ctx.ui.setStatus("boardroom", undefined);
         }
+        activeMeeting = null;
       } catch (err: any) {
         clearActiveMeetingTimer();
         activeMeeting = null;
@@ -1977,6 +2085,10 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("No active meeting to close.", "info");
         return;
       }
+      if (activeMeeting.phase === "closeout") {
+        ctx.ui.notify("Closeout is already running. Force-close no longer applies at this stage.", "info");
+        return;
+      }
 
       const ok = await ctx.ui.confirm(
         "Force-close meeting?",
@@ -2034,71 +2146,74 @@ export default function (pi: ExtensionAPI) {
       if (activeMeeting) {
         throw new Error("A board meeting is already in progress. Use /board-close before starting another one.");
       }
+      if (activeNarration) {
+        await dismissNarration(ctx as any);
+      }
       try {
-      const config = loadConfig(cwd);
-      const agents = discoverAgents(cwd);
-      let agentSnapshots: AgentRuntimeUpdate[] = [];
-      let lastSnapshot: MeetingProgressSnapshot | null = null;
-      const startedAtMs = Date.now();
-      let toolUiTimer: ReturnType<typeof setInterval> | null = null;
-      const abortController = new AbortController();
-      const forwardAbort = () => abortController.abort(signal?.reason ?? "aborted");
+        const config = loadConfig(cwd);
+        const agents = discoverAgents(cwd);
+        let agentSnapshots: AgentRuntimeUpdate[] = [];
+        let lastSnapshot: MeetingProgressSnapshot | null = null;
+        const startedAtMs = Date.now();
+        let toolUiTimer: ReturnType<typeof setInterval> | null = null;
+        const abortController = new AbortController();
+        const forwardAbort = () => abortController.abort(signal?.reason ?? "aborted");
 
-      lastCloseoutResult = null;
+        lastCloseoutResult = null;
 
-      const renderToolUi = () => {
-        if (!ctx.hasUI || !lastSnapshot) return;
-        const theme = ctx.ui.theme;
-        const snapshot = withLiveElapsed(lastSnapshot, startedAtMs, agentSnapshots, null, 0);
-        ctx.ui.setStatus("boardroom", formatDashboardStatus(snapshot, theme));
-        setBoardroomWidget(ctx, snapshot);
-      };
+        const renderToolUi = () => {
+          if (!ctx.hasUI || !lastSnapshot) return;
+          const theme = ctx.ui.theme;
+          const snapshot = withLiveElapsed(lastSnapshot, startedAtMs, agentSnapshots, null, 0);
+          ctx.ui.setStatus("boardroom", formatDashboardStatus(snapshot, theme));
+          setBoardroomWidget(ctx, snapshot);
+        };
 
-      if (agents.length === 0) throw new Error("No executive board agents found in agents/executive-board/");
+        if (agents.length === 0) throw new Error("No executive board agents found in agents/executive-board/");
 
-      const briefPath = path.resolve(cwd, params.brief);
-      const fs = await import("node:fs");
-      if (!fs.existsSync(briefPath)) {
-        const available = listBriefs(cwd);
-        const names = available.map(p => path.basename(p, ".md")).join(", ");
-        throw new Error(`Brief not found: ${params.brief}. Available briefs: ${names || "none"}`);
-      }
-      const brief = parseBrief(briefPath);
-      const { name: constraintsName, values: constraintValues } = resolveConstraints(config, params.constraints ?? brief.constraints, {
-        budget: brief.budgetOverride,
-        time_limit_minutes: brief.timeLimitOverride,
-        max_debate_rounds: brief.maxRoundsOverride,
-      });
-      const mode = params.mode ?? brief.mode ?? config.default_mode;
+        const briefPath = path.resolve(cwd, params.brief);
+        const fs = await import("node:fs");
+        if (!fs.existsSync(briefPath)) {
+          const available = listBriefs(cwd);
+          const names = available.map(p => path.basename(p, ".md")).join(", ");
+          throw new Error(`Brief not found: ${params.brief}. Available briefs: ${names || "none"}`);
+        }
+        const brief = parseBrief(briefPath);
+        const { name: constraintsName, values: constraintValues } = resolveConstraints(config, params.constraints ?? brief.constraints, {
+          budget: brief.budgetOverride,
+          time_limit_minutes: brief.timeLimitOverride,
+          max_debate_rounds: brief.maxRoundsOverride,
+        });
+        const mode = params.mode ?? brief.mode ?? config.default_mode;
 
-      activeMeeting = {
-        meetingId: "",
-        brief: brief.title,
-        mode,
-        constraints: constraintsName,
-        phase: "starting",
-        startedAt: startedAtMs,
-        lastStatus: "Starting...",
-        abortController,
-        agentSnapshots: [],
-        lastSnapshot: null,
-        pausedAt: null,
-        pausedTotalMs: 0,
-      };
-      if (signal) {
-        if (signal.aborted) forwardAbort();
-        else signal.addEventListener("abort", forwardAbort, { once: true });
-      }
+        activeMeeting = {
+          meetingId: "",
+          brief: brief.title,
+          mode,
+          constraints: constraintsName,
+          phase: "starting",
+          startedAt: startedAtMs,
+          lastStatus: "Starting...",
+          abortController,
+          agentSnapshots: [],
+          lastSnapshot: null,
+          pausedAt: null,
+          pausedTotalMs: 0,
+        };
+        if (signal) {
+          if (signal.aborted) forwardAbort();
+          else signal.addEventListener("abort", forwardAbort, { once: true });
+        }
 
-      onUpdate?.({ content: [{ type: "text", text: `Starting board meeting: ${brief.title} (${mode}, ${constraintsName})...` }] });
-      if (ctx.hasUI) {
-        ctx.ui.setStatus("boardroom", "Board meeting in progress...");
-        toolUiTimer = setInterval(renderToolUi, 1000);
-      }
+        onUpdate?.({ content: [{ type: "text", text: `Starting board meeting: ${brief.title} (${mode}, ${constraintsName})...` }] });
+        if (ctx.hasUI) {
+          ctx.ui.setStatus("boardroom", "Board meeting in progress...");
+          toolUiTimer = setInterval(renderToolUi, 1000);
+        }
 
-      let result: MeetingResult;
-      try {
-        result = await runMeeting(cwd, brief, agents, mode, constraintsName, constraintValues, config, {
+        let result: MeetingResult;
+        try {
+          result = await runMeeting(cwd, brief, agents, mode, constraintsName, constraintValues, config, {
           onStatus: (msg) => {
             onUpdate?.({ content: [{ type: "text", text: msg }] });
             if (activeMeeting) {
@@ -2106,7 +2221,7 @@ export default function (pi: ExtensionAPI) {
               const phaseMatch = msg.match(/Phase (\d+)/i) || msg.match(/Round (\d+)/i);
               if (phaseMatch) activeMeeting.phase = `Phase ${phaseMatch[1]}`;
             }
-            if (!lastSnapshot) ctx.ui.setStatus("boardroom", msg);
+            if (!lastSnapshot && ctx.hasUI) ctx.ui.setStatus("boardroom", msg);
             else renderToolUi();
           },
           onAgentUpdate: (update) => {
@@ -2137,73 +2252,77 @@ export default function (pi: ExtensionAPI) {
           onConfirmRoster: async () => ({ action: "approve" }),
           signal: abortController.signal,
         });
-      } finally {
-        if (toolUiTimer) clearInterval(toolUiTimer);
-        if (signal) signal.removeEventListener("abort", forwardAbort);
-      }
-
-      activeMeeting = null;
-      ctx.ui.setStatus("boardroom", "Generating spoken narration summary...");
-      const humanSummary = await generateHumanReadableSummary(result.memoPath, path.dirname(result.memoPath));
-      if (humanSummary.ok) {
-        result.summaryPath = humanSummary.summaryPath;
-        result.summaryText = humanSummary.summaryText;
-        if (humanSummary.warning && ctx.hasUI) {
-          ctx.ui.notify(humanSummary.warning, "warning");
+        } finally {
+          if (toolUiTimer) clearInterval(toolUiTimer);
+          if (signal) signal.removeEventListener("abort", forwardAbort);
         }
-      } else if (ctx.hasUI) {
-        ctx.ui.notify(`Human-readable summary failed: ${humanSummary.error}`, "warning");
-      }
-      if (ctx.hasUI) {
-        lastCloseoutResult = result;
-        setCloseoutWidget(ctx, result);
-        ctx.ui.setStatus("boardroom", undefined);
-      }
 
-      await runPostMeetingActions(result, {
-        hasUI: ctx.hasUI,
-        confirm: (title, body) => ctx.ui.confirm(title, body),
-        notify: (msg, type) => ctx.ui.notify(msg, type),
-        setNarrationState: (state) => {
-          if (!ctx.hasUI) return;
-          setPinnedNarrationState(ctx as any, state);
-        },
-        startNarrationPlayback: (request) => startNarrationPlayback(ctx as any, request),
-      });
+        if (activeMeeting) {
+          activeMeeting.phase = "closeout";
+          activeMeeting.lastStatus = "Generating spoken narration summary...";
+        }
+        if (ctx.hasUI) ctx.ui.setStatus("boardroom", "Generating spoken narration summary...");
+        const humanSummary = await generateHumanReadableSummary(result.memoPath, path.dirname(result.memoPath));
+        if (humanSummary.ok) {
+          result.summaryPath = humanSummary.summaryPath;
+          result.summaryText = humanSummary.summaryText;
+          if (humanSummary.warning && ctx.hasUI) {
+            ctx.ui.notify(humanSummary.warning, "warning");
+          }
+        } else if (ctx.hasUI) {
+          ctx.ui.notify(`Human-readable summary failed: ${humanSummary.error}`, "warning");
+        }
+        if (ctx.hasUI) {
+          lastCloseoutResult = result;
+          setCloseoutWidget(ctx, result);
+          ctx.ui.setStatus("boardroom", undefined);
+        }
 
-      if (!activeNarration && ctx.hasUI) {
-        setCloseoutWidget(ctx, result);
-        ctx.ui.setStatus("boardroom", undefined);
-      }
+        await runPostMeetingActions(result, {
+          hasUI: ctx.hasUI,
+          confirm: (title, body) => ctx.ui.confirm(title, body),
+          notify: (msg, type) => ctx.ui.notify(msg, type),
+          setNarrationState: (state) => {
+            if (!ctx.hasUI) return;
+            setPinnedNarrationState(ctx as any, state);
+          },
+          startNarrationPlayback: (request) => startNarrationPlayback(ctx as any, request),
+        });
 
-      const summary = buildCloseoutSummary(result);
+        if (!activeNarration && ctx.hasUI) {
+          setCloseoutWidget(ctx, result);
+          ctx.ui.setStatus("boardroom", undefined);
+        }
 
-      const response = {
-        content: [{
-          type: "text",
-          text: [
-            summary,
-            brief.warnings.length > 0 ? `\nWarnings: ${brief.warnings.join("; ")}` : "",
-          ].filter(Boolean).join("\n"),
-        }],
-        details: {
-          memoPath: result.memoPath,
-          debateJsonPath: result.debateJsonPath,
-          summaryPath: result.summaryPath,
-          visualPaths: result.visualPaths,
-          disposition: result.disposition,
-          totalCost: result.totalCost,
-        },
-      };
+        activeMeeting = null;
+        const summary = buildCloseoutSummary(result);
 
-      return response;
+        const response = {
+          content: [{
+            type: "text",
+            text: [
+              summary,
+              brief.warnings.length > 0 ? `\nWarnings: ${brief.warnings.join("; ")}` : "",
+            ].filter(Boolean).join("\n"),
+          }],
+          details: {
+            memoPath: result.memoPath,
+            debateJsonPath: result.debateJsonPath,
+            summaryPath: result.summaryPath,
+            visualPaths: result.visualPaths,
+            disposition: result.disposition,
+            totalCost: result.totalCost,
+          },
+        };
+
+        return response;
       } catch (err) {
-      activeMeeting = null;
-      if (!activeNarration && ctx.hasUI) {
-        ctx.ui.setStatus("boardroom", undefined);
-        ctx.ui.setWidget("boardroom", undefined);
-      }
-      throw err;
+        activeMeeting = null;
+        if (!activeNarration && ctx.hasUI) {
+          ctx.ui.setStatus("boardroom", undefined);
+          ctx.ui.setWidget("boardroom", undefined);
+        }
+        throw err;
       }
     },
 

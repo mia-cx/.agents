@@ -51,6 +51,12 @@ const DISPOSITIONS: Record<MeetingDisposition, DispositionDisplay> = {
     description: "Budget limit was reached. CEO synthesized with available data.",
     color: "warning",
   },
+  "constraints-reached": {
+    icon: "⏱",
+    label: "Constraints reached",
+    description: "Time or round constraints ended the meeting. CEO synthesized with available data.",
+    color: "warning",
+  },
   aborted: {
     icon: "✗",
     label: "Aborted",
@@ -349,9 +355,9 @@ async function summarizeMemoWithLlm(
         if (completionRequested || timedOut) return;
         completionRequested = true;
         completionTimer = setTimeout(() => {
-          if (!proc.killed) proc.kill("SIGTERM");
+          if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGTERM");
           completionForcedKillTimer = setTimeout(() => {
-            if (!proc.killed) proc.kill("SIGKILL");
+            if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
           }, 2000);
         }, 100);
       };
@@ -623,7 +629,7 @@ export function buildNarrationWidgetLines(
     ? ["[ paused    ]"]
     : state.phase === "completed"
     ? ["[ complete  ]"]
-    : ["[generating ]", "[ generating]", "[  generating]", "[   generating]"];
+    : ["[generating ]", "[generating ]", "[ generating]", "[ generating]"];
   const frame = frames[state.indicatorFrame % frames.length] ?? frames[0];
   const muted = (text: string) => theme.fg("muted", text);
   const accent = (text: string) => theme.fg("accent", text);
@@ -1325,7 +1331,7 @@ export async function generateNarration(
 export async function playAudio(audioPath: string): Promise<{ ok: boolean; error?: string }> {
   return new Promise((resolve) => {
     const player = process.platform === "darwin" ? "afplay" : "mpv";
-    execFile(player, [audioPath], (err) => {
+    execFile(player, ["--", audioPath], (err) => {
       if (err) resolve({ ok: false, error: err.message });
       else resolve({ ok: true });
     });
@@ -1352,6 +1358,7 @@ function getAudioDurationSeconds(audioPath: string): number | undefined {
         "format=duration",
         "-of",
         "default=noprint_wrappers=1:nokey=1",
+        "--",
         audioPath,
       ],
       { encoding: "utf-8" },
@@ -1431,14 +1438,23 @@ export class NarrationPlaybackController {
     this.proc = null;
     this.stopping = true;
     await new Promise<void>((resolve) => {
-      const finish = () => resolve();
+      let killTimer: ReturnType<typeof setTimeout> | null = null;
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        if (killTimer) clearTimeout(killTimer);
+        resolve();
+      };
       proc.once("close", finish);
       proc.kill("SIGTERM");
-      setTimeout(() => {
-        try {
-          proc.kill("SIGKILL");
-        } catch {
-          // Ignore if already closed.
+      killTimer = setTimeout(() => {
+        if (proc.exitCode === null && proc.signalCode === null) {
+          try {
+            proc.kill("SIGKILL");
+          } catch {
+            // Ignore if already closed.
+          }
         }
       }, 1000);
     });
@@ -1462,6 +1478,7 @@ export class NarrationPlaybackController {
       `--input-ipc-server=${this.socketPath}`,
       ...(startSeconds > 0 ? [`--start=${startSeconds}`] : []),
       ...(paused ? ["--pause=yes"] : []),
+      "--",
       this.audioPath,
     ];
 
@@ -1469,11 +1486,27 @@ export class NarrationPlaybackController {
     this.startedAtMs = paused ? null : Date.now();
     this.paused = paused;
     this.completed = false;
-    this.proc = spawn("mpv", args, {
+    const proc = spawn("mpv", args, {
       stdio: ["ignore", "ignore", "ignore"],
     });
+    this.proc = proc;
 
-    this.proc.once("close", () => {
+    await new Promise<void>((resolve, reject) => {
+      const handleSpawn = () => {
+        proc.off("error", handleError);
+        resolve();
+      };
+      const handleError = (err: Error) => {
+        proc.off("spawn", handleSpawn);
+        this.proc = null;
+        try { fs.unlinkSync(this.socketPath); } catch {}
+        reject(err);
+      };
+      proc.once("spawn", handleSpawn);
+      proc.once("error", handleError);
+    });
+
+    proc.once("close", () => {
       this.proc = null;
       try { fs.unlinkSync(this.socketPath); } catch {}
       if (this.stopping) return;

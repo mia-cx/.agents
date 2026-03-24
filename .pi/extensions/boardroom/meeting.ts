@@ -1,5 +1,6 @@
 import type {
   AgentConfig,
+  AgentRunResult,
   AgentRuntimeUpdate,
   ConversationEntry,
   MeetingDisposition,
@@ -12,7 +13,7 @@ import type {
 import { ConstraintTracker } from "./constraints.js";
 import { addEntry, closeLog, createConversationLog, extractAddressees } from "./conversation.js";
 import { loadMetaPrompt } from "./meta-prompts.js";
-import { composeAssessmentPrompt, composeFramingPrompt, composeSynthesisPrompt, loadExpertise } from "./prompt-composer.js";
+import { composeAssessmentPrompt, composeFramingPrompt, composeReviewPrompt, composeSynthesisPrompt, loadExpertise } from "./prompt-composer.js";
 import { SessionPool } from "./runtime.js";
 import { writeConversationLog, writeExpertise, writeMemo, writeVisuals } from "./artifacts.js";
 import { loadScratchpad, saveScratchpad, extractScratchpadUpdate, stripScratchpadBlock } from "./scratchpad.js";
@@ -34,6 +35,7 @@ export interface MeetingCallbacks {
 export type RosterConfirmation =
   | { action: "approve" }
   | { action: "reject" }
+  | { action: "cancel" }
   | { action: "edit"; roster: string[] };
 
 export interface MeetingResult {
@@ -266,6 +268,10 @@ function buildVisibleAgentSnapshots(state: MeetingState, pool: SessionPool): Age
   return ordered;
 }
 
+function hasUsableText(content: string | null | undefined): content is string {
+  return typeof content === "string" && content.trim().length > 0;
+}
+
 function emitSnapshot(
   state: MeetingState,
   tracker: ConstraintTracker,
@@ -310,22 +316,48 @@ async function runCeoWithRetry(
   callbacks: MeetingCallbacks,
   signal?: AbortSignal,
 ): Promise<{ content: string; tokenCount: number; cost: number }> {
-  const result = await pool.runOne(cwd, ceo, systemPrompt, task, activity, signal);
+  let result: AgentRunResult;
+  try {
+    result = await pool.runOne(cwd, ceo, systemPrompt, task, activity, signal);
+  } catch (err: any) {
+    if (signal?.reason === "force-close" && err?.message === "Subagent was aborted" && err.partialResult?.content?.trim()) {
+      callbacks.onStatus("CEO was interrupted by force-close. Using partial output.");
+      return {
+        content: err.partialResult.content,
+        tokenCount: err.partialResult.tokenCount ?? 0,
+        cost: err.partialResult.cost ?? 0,
+      };
+    }
+    throw err;
+  }
 
   if (result.exitCode === 0 && result.content) {
     return { content: result.content, tokenCount: result.tokenCount, cost: result.cost };
   }
 
-  callbacks.onStatus(`CEO failed (${result.error ?? "no output"}). Retrying with simplified context...`);
+  callbacks.onStatus(`CEO failed (${result.error ?? "no output"}). Retrying with preserved guardrails...`);
 
   const simplifiedPrompt = [
-    ceo.systemPrompt,
+    systemPrompt,
     "",
     "--- SIMPLIFIED CONTEXT (retry after failure) ---",
     "The previous attempt failed. Provide your best assessment with the information available.",
   ].join("\n");
 
-  const retry = await pool.runOne(cwd, ceo, simplifiedPrompt, task, `${activity} (retry)`, signal);
+  let retry: AgentRunResult;
+  try {
+    retry = await pool.runOne(cwd, ceo, simplifiedPrompt, task, `${activity} (retry)`, signal);
+  } catch (err: any) {
+    if (signal?.reason === "force-close" && err?.message === "Subagent was aborted" && err.partialResult?.content?.trim()) {
+      callbacks.onStatus("CEO retry was interrupted by force-close. Using partial output.");
+      return {
+        content: err.partialResult.content,
+        tokenCount: result.tokenCount + (err.partialResult.tokenCount ?? 0),
+        cost: result.cost + (err.partialResult.cost ?? 0),
+      };
+    }
+    throw err;
+  }
   const totalCost = result.cost + retry.cost;
   const totalTokens = result.tokenCount + retry.tokenCount;
 
@@ -333,11 +365,16 @@ async function runCeoWithRetry(
     return { content: retry.content, tokenCount: totalTokens, cost: totalCost };
   }
 
-  return {
-    content: `[CEO failed after retry. Error: ${retry.error ?? "no output"}. Partial data from this meeting may be available in the debate log.]`,
-    tokenCount: totalTokens,
-    cost: totalCost,
-  };
+  if (hasUsableText(retry.content)) {
+    callbacks.onStatus("CEO retry ended early. Using partial output.");
+    return { content: retry.content, tokenCount: totalTokens, cost: totalCost };
+  }
+  if (hasUsableText(result.content)) {
+    callbacks.onStatus("CEO retry failed. Falling back to the first partial output.");
+    return { content: result.content, tokenCount: totalTokens, cost: totalCost };
+  }
+
+  throw new Error(`CEO failed after retry. Error: ${retry.error ?? "no output"}.`);
 }
 
 function savePartialArtifacts(
@@ -359,9 +396,7 @@ function savePartialArtifacts(
           ? "[Meeting was force-closed before CEO synthesis. See debate log for available data.]"
           : "[Meeting aborted. No CEO synthesis available. See debate log for partial data.]"
       );
-  const memoContent = lastEntry?.content
-    ? `${lastEntry.content}\n\n---\n\n${traceLine}`
-    : traceLine;
+  const memoContent = appendMeetingTrace(lastEntry?.content, traceLine);
 
   const memoPath = writeMemo(cwd, brief.slug, memoContent, startedAt);
   const { jsonPath, mdPath } = writeConversationLog(cwd, log, startedAt);
@@ -382,6 +417,14 @@ function savePartialArtifacts(
     elapsedMinutes: Math.max(0, (Date.now() - startedAt.getTime()) / 60000),
     roster: log.roster,
   };
+}
+
+function appendMeetingTrace(content: string | null | undefined, traceLine?: string): string {
+  const body = content?.trim() ?? "";
+  const trace = traceLine?.trim() ?? "";
+  if (!body) return trace;
+  if (!trace) return body;
+  return `${body}\n\n---\n\n${trace}`;
 }
 
 async function finalizeForceClosedMeeting(
@@ -468,7 +511,12 @@ async function finalizeForceClosedMeeting(
   const allVisuals = collectVisualsFromLog(state.log);
   const visualPaths = allVisuals.length > 0 ? writeVisuals(cwd, meetingId, allVisuals) : [];
   closeLog(state.log, "force-closed", abortReason);
-  const memoPath = writeMemo(cwd, brief.slug, finalRes.content, startedAt);
+  const memoPath = writeMemo(
+    cwd,
+    brief.slug,
+    appendMeetingTrace(finalRes.content, `[Boardroom force-closed. Reason: ${abortReason}]`),
+    startedAt,
+  );
   const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeConversationLog(cwd, state.log, startedAt);
 
   for (const entry of state.log.entries) {
@@ -518,7 +566,6 @@ export async function runFreeformMeeting(
 
   const pool = new SessionPool(callbacks.onAgentUpdate);
   let framingContent = "";
-  pool.ensureAgents([ceo], "Preparing framing");
   pool.ensureAgents([ceo], "Preparing framing");
 
   const state: MeetingState = {
@@ -587,6 +634,11 @@ export async function runFreeformMeeting(
       rosterDecision = await callbacks.onConfirmRoster(rosterAgents, getNonCeoAgents(allAgents), rosterRationale);
     } finally {
       tracker.resume();
+    }
+    if (rosterDecision.action === "cancel") {
+      callbacks.onStatus("Meeting cancelled during roster review.");
+      pool.destroyAll(true);
+      return savePartialArtifacts(cwd, meetingId, brief, log, startedAt, "aborted", "Meeting cancelled during roster review.");
     }
     if (rosterDecision.action === "reject") {
       rosterAgents = applyRosterLimit([...getNonCeoAgents(allAgents)], constraintValues);
@@ -696,7 +748,7 @@ export async function runFreeformMeeting(
 
       if (plannedRounds > 1) {
         const ceoReviewScratchpad = loadScratchpad(cwd, ceo.slug);
-        const reviewPrompt = composeSynthesisPrompt(ceo, brief, framingRes.content, lastAssessmentEntries, ceoExpertise, ceoReviewScratchpad);
+        const reviewPrompt = composeReviewPrompt(ceo, brief, framingRes.content, lastAssessmentEntries, ceoExpertise, ceoReviewScratchpad);
         const reviewTask = loadBoardroomTaskPrompt(
           cwd,
           "boardroom-freeform-review-task.md",
@@ -790,13 +842,21 @@ export async function runFreeformMeeting(
     const disposition = forceClosed
       ? "force-closed" as const
       : earlyClose
-      ? (tracker.budgetState === "exceeded" ? "budget-exceeded" as const : "completed" as const)
+      ? (tracker.budgetState === "exceeded" ? "budget-exceeded" as const : "constraints-reached" as const)
       : "completed" as const;
     const abortReason = forceClosed ? "Meeting was force-closed by operator." : undefined;
 
     state.disposition = disposition;
     closeLog(log, disposition, abortReason);
-    const memoPath = writeMemo(cwd, brief.slug, synthRes.content, startedAt);
+    const memoPath = writeMemo(
+      cwd,
+      brief.slug,
+      appendMeetingTrace(
+        synthRes.content,
+        forceClosed ? `[Boardroom force-closed. Reason: ${abortReason}]` : undefined,
+      ),
+      startedAt,
+    );
     const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeConversationLog(cwd, log, startedAt);
 
     if (allVisuals.length > 0) {
@@ -953,6 +1013,11 @@ export async function runStructuredMeeting(
     } finally {
       tracker.resume();
     }
+    if (rosterDecision.action === "cancel") {
+      callbacks.onStatus("Meeting cancelled during roster review.");
+      pool.destroyAll(true);
+      return savePartialArtifacts(cwd, meetingId, brief, log, startedAt, "aborted", "Meeting cancelled during roster review.");
+    }
     if (rosterDecision.action === "reject") {
       rosterAgents = applyRosterLimit([...nonCeo], constraintValues);
     } else if (rosterDecision.action === "edit") {
@@ -1105,7 +1170,7 @@ export async function runStructuredMeeting(
 
       const allEntries = log.entries.filter(e => e.role === "assessment" || e.role === "stress-test");
       const ceoConflictScratchpad = loadScratchpad(cwd, ceo.slug);
-      const synthPrompt = composeSynthesisPrompt(ceo, brief, framingRes.content, allEntries, loadExpertise(cwd, ceo.slug), ceoConflictScratchpad);
+      const synthPrompt = composeReviewPrompt(ceo, brief, framingRes.content, allEntries, loadExpertise(cwd, ceo.slug), ceoConflictScratchpad);
       const reviewTask = tracker.currentRound < plannedRounds
         ? loadBoardroomTaskPrompt(
             cwd,
@@ -1205,7 +1270,10 @@ export async function runStructuredMeeting(
     tracker.addCost(finalRes.cost);
     addEntry(log, nextEntryId(state), "ceo", rosterAgents.map(a => a.slug),
       null, 5, 0, "final-decision", finalRes.content, finalRes.tokenCount, finalRes.cost);
-    memoContent = finalRes.content;
+    memoContent = appendMeetingTrace(
+      finalRes.content,
+      forceClosed ? `[Boardroom force-closed. Reason: Meeting was force-closed by operator.]` : undefined,
+    );
 
     // --- Extract Visuals ---
     const allVisuals = collectVisualsFromLog(log);
@@ -1214,7 +1282,9 @@ export async function runStructuredMeeting(
     // Phase 6: Close
     const disposition = forceClosed
       ? "force-closed" as const
-      : (tracker.budgetState === "exceeded" ? "budget-exceeded" as const : "completed" as const);
+      : (!tracker.canContinue(config.budget_hard_stop, config.time_hard_stop)
+          ? (tracker.budgetState === "exceeded" ? "budget-exceeded" as const : "constraints-reached" as const)
+          : "completed" as const);
     const abortReason = forceClosed ? "Meeting was force-closed by operator." : undefined;
     state.disposition = disposition;
     closeLog(log, disposition, abortReason);
