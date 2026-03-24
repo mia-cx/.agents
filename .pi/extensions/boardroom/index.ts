@@ -9,9 +9,9 @@ import { discoverAgents } from "./agents.js";
 import { parseBrief, listBriefs } from "./brief-parser.js";
 import { loadConfig, resolveConstraints } from "./config.js";
 import { runFreeformMeeting, runStructuredMeeting } from "./meeting.js";
+import { runFreeformMessagingMeeting, runStructuredMessagingMeeting } from "./messaging-meeting.js";
 import type { MeetingCallbacks, MeetingResult, RosterConfirmation } from "./meeting.js";
-import type { AgentConfig } from "./types.js";
-import type { AgentRuntimeUpdate, MeetingProgressSnapshot } from "./types.js";
+import type { AgentConfig, AgentRuntimeUpdate, MeetingMode, MeetingProgressSnapshot, MessagingMode } from "./types.js";
 import { listPastMeetings } from "./artifacts.js";
 import { formatDashboardStatus, buildDashboardWidgetLines, buildPlainDashboardLines } from "./ui.js";
 import {
@@ -1090,20 +1090,35 @@ function createRosterApprovalComponent(
   return root;
 }
 
+function resolveMessagingMode(value: string | undefined): MessagingMode | undefined {
+  return value === "threading"
+    ? "threading"
+    : value === "fanout"
+      ? "fanout"
+      : undefined;
+}
+
 async function runMeeting(
   cwd: string,
   brief: ReturnType<typeof parseBrief>,
   agents: ReturnType<typeof discoverAgents>,
-  mode: string,
+  mode: MeetingMode,
+  messagingMode: MessagingMode,
   constraintsName: string,
   constraintValues: ReturnType<typeof resolveConstraints>["values"],
   config: ReturnType<typeof loadConfig>,
   callbacks: MeetingCallbacks,
 ): Promise<MeetingResult> {
+  if (messagingMode === "threading") {
+    if (mode === "structured") {
+      return runStructuredMessagingMeeting(cwd, brief, agents, constraintsName, constraintValues, config, callbacks);
+    }
+    return runFreeformMessagingMeeting(cwd, brief, agents, mode, constraintsName, constraintValues, config, callbacks);
+  }
   if (mode === "structured") {
     return runStructuredMeeting(cwd, brief, agents, constraintsName, constraintValues, config, callbacks);
   }
-  return runFreeformMeeting(cwd, brief, agents, mode as any, constraintsName, constraintValues, config, callbacks);
+  return runFreeformMeeting(cwd, brief, agents, mode, constraintsName, constraintValues, config, callbacks);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -1788,7 +1803,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("board-meeting", {
     description: "Start a boardroom meeting with the executive board",
     getArgumentCompletions: (prefix: string) => {
-      const flags = ["--constraints quick", "--constraints standard", "--constraints thorough", "--constraints deep-dive", "--mode freeform", "--mode structured"];
+      const flags = ["--constraints quick", "--constraints standard", "--constraints thorough", "--constraints deep-dive", "--mode freeform", "--mode structured", "--messaging-mode fanout", "--messaging-mode threading"];
       return flags.filter(f => f.startsWith(prefix)).map(f => ({ value: f, label: f }));
     },
     handler: async (args, ctx) => {
@@ -1811,11 +1826,14 @@ export default function (pi: ExtensionAPI) {
 
       let cliConstraints: string | undefined;
       let cliMode: string | undefined;
+      let cliMessagingMode: string | undefined;
       if (args) {
         const constraintsMatch = args.match(/--constraints\s+(\S+)/);
         if (constraintsMatch) cliConstraints = constraintsMatch[1];
         const modeMatch = args.match(/--mode\s+(\S+)/);
         if (modeMatch) cliMode = modeMatch[1];
+        const messagingModeMatch = args.match(/--messaging-mode\s+(\S+)/);
+        if (messagingModeMatch) cliMessagingMode = messagingModeMatch[1];
       }
 
       const briefPaths = listBriefs(cwd);
@@ -1848,6 +1866,14 @@ export default function (pi: ExtensionAPI) {
             prioritizeOption(["structured", "freeform"], defaultMode),
           );
       if (selectedMode === undefined) return;
+
+      const defaultMessagingMode = brief.messagingMode ?? config.default_messaging_mode;
+      const selectedMessagingMode = resolveMessagingMode(cliMessagingMode)
+        ?? await ctx.ui.select(
+          "Select messaging mode:",
+          prioritizeOption(["fanout", "threading"], defaultMessagingMode),
+        );
+      if (selectedMessagingMode === undefined) return;
 
       const defaultConstraints = brief.constraints && config.constraints[brief.constraints]
         ? brief.constraints
@@ -1884,6 +1910,7 @@ export default function (pi: ExtensionAPI) {
       const confirmMsg = [
         `Brief: ${brief.title}`,
         `Mode: ${mode}`,
+        `Messaging: ${selectedMessagingMode}`,
         `Constraints: ${constraintsName} ($${constraintValues.budget} / ${constraintValues.time_limit_minutes}min / ${constraintValues.max_debate_rounds} rounds)`,
         `CEO Model: ${resolveModelLabel(ceo.model)}`,
         `Agents found: ${agents.length}`,
@@ -1897,7 +1924,7 @@ export default function (pi: ExtensionAPI) {
       activeMeeting = {
         meetingId: "",
         brief: brief.title,
-        mode,
+        mode: `${mode} / ${selectedMessagingMode}`,
         constraints: constraintsName,
         phase: "starting",
         startedAt: Date.now(),
@@ -1917,7 +1944,7 @@ export default function (pi: ExtensionAPI) {
 
       try {
         const result = await runMeeting(
-          cwd, brief, agents, mode, constraintsName, constraintValues, config,
+          cwd, brief, agents, mode, selectedMessagingMode, constraintsName, constraintValues, config,
           {
             onStatus: (msg) => {
               if (activeMeeting) {
@@ -2139,6 +2166,7 @@ export default function (pi: ExtensionAPI) {
       brief: Type.String({ description: "Path to the brief file in boardroom/briefs/" }),
       constraints: Type.Optional(Type.String({ description: "Constraint level: quick, standard, thorough, deep-dive" })),
       mode: Type.Optional(StringEnum(["freeform", "structured"] as const, { description: "Meeting mode" })),
+      messagingMode: Type.Optional(StringEnum(["fanout", "threading"] as const, { description: "Messaging mode" })),
     }),
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
@@ -2185,11 +2213,12 @@ export default function (pi: ExtensionAPI) {
           max_debate_rounds: brief.maxRoundsOverride,
         });
         const mode = params.mode ?? brief.mode ?? config.default_mode;
+        const messagingMode = resolveMessagingMode(params.messagingMode) ?? brief.messagingMode ?? config.default_messaging_mode;
 
         activeMeeting = {
           meetingId: "",
           brief: brief.title,
-          mode,
+          mode: `${mode} / ${messagingMode}`,
           constraints: constraintsName,
           phase: "starting",
           startedAt: startedAtMs,
@@ -2205,7 +2234,7 @@ export default function (pi: ExtensionAPI) {
           else signal.addEventListener("abort", forwardAbort, { once: true });
         }
 
-        onUpdate?.({ content: [{ type: "text", text: `Starting board meeting: ${brief.title} (${mode}, ${constraintsName})...` }] });
+        onUpdate?.({ content: [{ type: "text", text: `Starting board meeting: ${brief.title} (${mode}, ${messagingMode}, ${constraintsName})...` }] });
         if (ctx.hasUI) {
           ctx.ui.setStatus("boardroom", "Board meeting in progress...");
           toolUiTimer = setInterval(renderToolUi, 1000);
@@ -2213,7 +2242,7 @@ export default function (pi: ExtensionAPI) {
 
         let result: MeetingResult;
         try {
-          result = await runMeeting(cwd, brief, agents, mode, constraintsName, constraintValues, config, {
+          result = await runMeeting(cwd, brief, agents, mode, messagingMode, constraintsName, constraintValues, config, {
           onStatus: (msg) => {
             onUpdate?.({ content: [{ type: "text", text: msg }] });
             if (activeMeeting) {
@@ -2332,6 +2361,7 @@ export default function (pi: ExtensionAPI) {
       text += theme.fg("accent", briefName);
       if (args.constraints) text += theme.fg("muted", ` [${args.constraints}]`);
       if (args.mode) text += theme.fg("dim", ` (${args.mode})`);
+      if (args.messagingMode) text += theme.fg("muted", ` <${args.messagingMode}>`);
       return new Text(text, 0, 0);
     },
 

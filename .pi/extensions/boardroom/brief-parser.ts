@@ -17,6 +17,7 @@ interface BriefFrontmatter {
   title?: string;
   constraints?: string;
   mode?: string;
+  messaging_mode?: string;
   budget?: number;
   time_limit_minutes?: number;
   max_debate_rounds?: number;
@@ -36,6 +37,7 @@ function parseBriefFrontmatter(content: string): { frontmatter: BriefFrontmatter
     if (key === "title") fm.title = val;
     else if (key === "constraints") fm.constraints = val;
     else if (key === "mode") fm.mode = val;
+    else if (key === "messaging_mode") fm.messaging_mode = val;
     else if (key === "budget") fm.budget = Number(val);
     else if (key === "time_limit_minutes") fm.time_limit_minutes = Number(val);
     else if (key === "max_debate_rounds") fm.max_debate_rounds = Number(val);
@@ -64,6 +66,11 @@ export function parseBrief(filePath: string): ParsedBrief {
     filePath,
     constraints: frontmatter.constraints,
     mode: frontmatter.mode === "structured" ? "structured" : frontmatter.mode === "freeform" ? "freeform" : undefined,
+    messagingMode: frontmatter.messaging_mode === "threading"
+      ? "threading"
+      : frontmatter.messaging_mode === "fanout"
+        ? "fanout"
+        : undefined,
     budgetOverride: frontmatter.budget && !isNaN(frontmatter.budget) ? frontmatter.budget : undefined,
     timeLimitOverride: frontmatter.time_limit_minutes && !isNaN(frontmatter.time_limit_minutes) ? frontmatter.time_limit_minutes : undefined,
     maxRoundsOverride: frontmatter.max_debate_rounds && !isNaN(frontmatter.max_debate_rounds) ? frontmatter.max_debate_rounds : undefined,

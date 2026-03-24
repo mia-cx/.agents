@@ -6,6 +6,7 @@ import type { BoardroomConfig, ConstraintSet } from "./types.js";
 const DEFAULT_CONFIG: BoardroomConfig = {
   default_constraints: "thorough",
   default_mode: "freeform",
+  default_messaging_mode: "fanout",
   budget_hard_stop: true,
   time_hard_stop: false,
   constraints: {
@@ -31,6 +32,7 @@ export function loadConfig(cwd: string): BoardroomConfig {
     return {
       default_constraints: parsed.default_constraints ?? DEFAULT_CONFIG.default_constraints,
       default_mode: parsed.default_mode ?? DEFAULT_CONFIG.default_mode,
+      default_messaging_mode: parsed.default_messaging_mode ?? DEFAULT_CONFIG.default_messaging_mode,
       budget_hard_stop: parsed.budget_hard_stop ?? DEFAULT_CONFIG.budget_hard_stop,
       time_hard_stop: parsed.time_hard_stop ?? DEFAULT_CONFIG.time_hard_stop,
       constraints: { ...DEFAULT_CONFIG.constraints, ...parsed.constraints },

@@ -20,6 +20,7 @@ describe("config", () => {
       const config = loadConfig(tmpDir);
       expect(config.default_constraints).toBe("thorough");
       expect(config.default_mode).toBe("freeform");
+      expect(config.default_messaging_mode).toBe("fanout");
       expect(config.budget_hard_stop).toBe(true);
       expect(config.time_hard_stop).toBe(false);
       expect(Object.keys(config.constraints)).toEqual(["quick", "standard", "thorough", "deep-dive"]);
@@ -31,12 +32,14 @@ describe("config", () => {
       fs.writeFileSync(path.join(configDir, "config.yaml"), [
         "default_constraints: quick",
         "default_mode: structured",
+        "default_messaging_mode: threading",
         "budget_hard_stop: false",
       ].join("\n"));
 
       const config = loadConfig(tmpDir);
       expect(config.default_constraints).toBe("quick");
       expect(config.default_mode).toBe("structured");
+      expect(config.default_messaging_mode).toBe("threading");
       expect(config.budget_hard_stop).toBe(false);
       expect(config.constraints.thorough.budget).toBe(25);
     });

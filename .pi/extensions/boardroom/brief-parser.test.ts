@@ -23,6 +23,7 @@ describe("brief-parser", () => {
         'title: "Test Decision"',
         "constraints: quick",
         "mode: structured",
+        "messaging_mode: threading",
         "budget: 10",
         "---",
         "",
@@ -44,6 +45,7 @@ describe("brief-parser", () => {
       expect(brief.slug).toBe("test-decision");
       expect(brief.constraints).toBe("quick");
       expect(brief.mode).toBe("structured");
+      expect(brief.messagingMode).toBe("threading");
       expect(brief.budgetOverride).toBe(10);
       expect(brief.warnings).toHaveLength(0);
     });
@@ -78,6 +80,7 @@ describe("brief-parser", () => {
       const brief = parseBrief(briefPath);
       expect(brief.constraints).toBeUndefined();
       expect(brief.mode).toBeUndefined();
+      expect(brief.messagingMode).toBeUndefined();
       expect(brief.content).toContain("Context");
     });
   });
