@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { slugify } from "./slugify.js";
 import type { DiscoveredAgent } from "./types.js";
 
 interface Frontmatter {
@@ -8,10 +9,6 @@ interface Frontmatter {
   description?: string;
   model?: string;
   tools?: string;
-}
-
-function slugify(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 function parseFrontmatter(content: string): { frontmatter: Frontmatter; body: string } {

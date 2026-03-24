@@ -38,4 +38,8 @@ describe("classify", () => {
     expect(deriveCycleTitle("Build the Dev Cycle Pi Extension", [])).toBe("Build the Dev Cycle Pi Extension");
     expect(slugify("Build the Dev Cycle Pi Extension")).toBe("build-the-dev-cycle-pi-extension");
   });
+
+  it("truncates slugs when a max length is provided", () => {
+    expect(slugify("A ".repeat(40), 60)).toHaveLength(60);
+  });
 });

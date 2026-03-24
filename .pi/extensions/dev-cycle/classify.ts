@@ -1,3 +1,4 @@
+import { slugify as baseSlugify } from "./slugify.js";
 import type { BranchType, CycleClassification, CycleRequest, CycleRoute } from "./types.js";
 
 const BUG_KEYWORDS = [
@@ -24,11 +25,7 @@ const CHORE_KEYWORDS = [
 ];
 
 export function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 60);
+  return baseSlugify(value, 60);
 }
 
 export function normalizeUserStories(value?: string | string[]): string[] {

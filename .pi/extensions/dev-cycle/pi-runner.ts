@@ -187,7 +187,7 @@ export async function runPiTask(options: PiRunOptions): Promise<PiRunResult> {
       aborted ? "aborted" : exitCode === 0 ? "completed" : "failed",
       finalOutput || stderr || errorMessage,
     );
-    if (rootNodeId === graph.rootId) {
+    if (parentNodeId === graph.rootId) {
       finishNode(graph, graph.rootId, aborted ? "aborted" : exitCode === 0 ? "completed" : "failed");
     }
     options.onGraphUpdate?.(graph);
@@ -204,6 +204,9 @@ export async function runPiTask(options: PiRunOptions): Promise<PiRunResult> {
     };
   } catch (error: any) {
     finishNode(graph, rootNodeId, "failed", error.message ?? "Unknown error");
+    if (parentNodeId === graph.rootId) {
+      finishNode(graph, graph.rootId, "failed");
+    }
     options.onGraphUpdate?.(graph);
     return {
       exitCode: 1,
