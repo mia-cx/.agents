@@ -7,6 +7,11 @@ node_modules/
 boardroom/debates/*.json
 boardroom/debates/2*.md
 boardroom/memos/2*.md
+boardroom/expertise/*.md
+boardroom/scratchpads/*.md
+boardroom/visuals/*.mmd
+
+# Keep any future intentionally checked-in demos under a separate examples/fixtures path.
 
 .env*
 !.env*.example
