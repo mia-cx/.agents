@@ -62,6 +62,41 @@ function stringifyRuntimeError(value: unknown): string | undefined {
   return undefined;
 }
 
+function stringifyToolName(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "object" && value) {
+    if ("name" in value && typeof (value as { name?: unknown }).name === "string") {
+      const name = (value as { name: string }).name.trim();
+      if (name) return name;
+    }
+    if ("toolName" in value && typeof (value as { toolName?: unknown }).toolName === "string") {
+      const name = (value as { toolName: string }).toolName.trim();
+      if (name) return name;
+    }
+  }
+  return undefined;
+}
+
+function isDelegationTool(name: string | undefined): boolean {
+  if (!name) return false;
+  return /\b(task|subagent|agent)\b/i.test(name);
+}
+
+function getUnstickMinElapsedMs(): number {
+  const raw = Number(process.env.BOARDROOM_UNSTICK_MIN_ELAPSED_MS ?? "45000");
+  return Number.isFinite(raw) ? Math.max(0, raw) : 45000;
+}
+
+function getUnstickToolCountThreshold(): number {
+  const raw = Number(process.env.BOARDROOM_UNSTICK_TOOL_COUNT ?? "12");
+  return Number.isFinite(raw) ? Math.max(1, Math.floor(raw)) : 12;
+}
+
+function getUnstickSameToolThreshold(): number {
+  const raw = Number(process.env.BOARDROOM_UNSTICK_SAME_TOOL_COUNT ?? "6");
+  return Number.isFinite(raw) ? Math.max(1, Math.floor(raw)) : 6;
+}
+
 /**
  * Wraps repeated Pi invocations for a single board member, tracking
  * cumulative usage across turns and emitting structured lifecycle state.
@@ -74,14 +109,21 @@ export class BoardMemberSession {
   lastError: string | null = null;
   activity = "Standing by";
   partialText = "";
+  currentModelLabel: string;
+  model: string | undefined;
+  modelAlt: string | undefined;
 
   constructor(
     readonly slug: string,
     readonly name: string,
-    readonly model: string | undefined,
-    readonly modelAlt?: string,
+    model: string | undefined,
+    modelAlt: string | undefined,
     private readonly onUpdate?: RuntimeEventHandler,
-  ) {}
+  ) {
+    this.model = model;
+    this.modelAlt = modelAlt;
+    this.currentModelLabel = preferLocalProviderModel(model) ?? "default";
+  }
 
   private publishUpdate(): void {
     this.onUpdate?.(this.snapshot());
@@ -90,6 +132,21 @@ export class BoardMemberSession {
   private shouldRetryWithFallback(error: string | undefined): boolean {
     if (!error) return false;
     return /No API key found for/i.test(error);
+  }
+
+  private shouldRetryAfterUnstick(error: string | undefined): boolean {
+    if (!error) return false;
+    return /stuck in a repeated tool loop/i.test(error);
+  }
+
+  private buildUnstuckTask(task: string): string {
+    return [
+      task,
+      "",
+      "IMPORTANT: Your previous attempt got stuck in repeated tool use before delivering an answer.",
+      "Do not keep browsing or looping through tools.",
+      "Use the information you already gathered, or at most one final essential tool call, then produce your best answer now.",
+    ].join("\n");
   }
 
   private getAttemptModels(): Array<string | undefined> {
@@ -118,6 +175,7 @@ export class BoardMemberSession {
     this.lastError = null;
     this.activity = activity ?? "Working";
     this.partialText = "";
+    this.currentModelLabel = model ?? "default";
     this.publishUpdate();
 
     const args: string[] = ["--no-extensions", "--mode", "json", "-p", "--no-session"];
@@ -130,6 +188,12 @@ export class BoardMemberSession {
     let finalOutput = "";
     let streamedOutput = "";
     let finalError = "";
+    let sawAssistantText = false;
+    let completedToolExecutions = 0;
+    let repeatedToolExecutions = 0;
+    let lastCompletedToolName: string | undefined;
+    let forcedStopReason: "stuck-tool-loop" | null = null;
+    const startedAt = Date.now();
 
     try {
       if (systemPrompt.trim()) {
@@ -143,6 +207,23 @@ export class BoardMemberSession {
       let wasAborted = false;
 
       const exitCode = await new Promise<number>((resolve) => {
+        let abortListener: (() => void) | null = null;
+        const stopProc = (proc: ReturnType<typeof spawn>, reason: "signal" | "stuck-tool-loop") => {
+          if (reason === "signal") wasAborted = true;
+          else forcedStopReason = reason;
+          proc.kill("SIGTERM");
+          setTimeout(() => {
+            if (!proc.killed) proc.kill("SIGKILL");
+          }, 5000);
+        };
+        const shouldTriggerUnstick = () =>
+          !sawAssistantText
+          && Date.now() - startedAt >= getUnstickMinElapsedMs()
+          && (
+            completedToolExecutions >= getUnstickToolCountThreshold()
+            || repeatedToolExecutions >= getUnstickSameToolThreshold()
+          );
+
         const invocation = getPiInvocation(args);
         const proc = spawn(invocation.command, invocation.args, {
           cwd,
@@ -166,6 +247,7 @@ export class BoardMemberSession {
             event.assistantMessageEvent?.type === "text_delta"
           ) {
             const delta = String(event.assistantMessageEvent.delta ?? "");
+            sawAssistantText = sawAssistantText || delta.trim().length > 0;
             this.status = "streaming";
             this.activity = activity ?? "Streaming response";
             streamedOutput += delta;
@@ -173,6 +255,111 @@ export class BoardMemberSession {
             this.lastError = null;
             this.publishUpdate();
             onStream?.(delta);
+          }
+
+          if (
+            event.type === "message_update" &&
+            event.assistantMessageEvent?.type === "thinking_start"
+          ) {
+            this.status = "thinking";
+            this.activity = "Reasoning";
+            this.lastError = null;
+            this.publishUpdate();
+          }
+
+          if (
+            event.type === "message_update" &&
+            event.assistantMessageEvent?.type === "thinking_delta"
+          ) {
+            this.status = "thinking";
+            this.activity = "Reasoning";
+            this.lastError = null;
+            this.publishUpdate();
+          }
+
+          if (
+            event.type === "message_update" &&
+            event.assistantMessageEvent?.type === "thinking_end"
+          ) {
+            this.status = "running";
+            this.activity = activity ?? "Working";
+            this.lastError = null;
+            this.publishUpdate();
+          }
+
+          if (
+            event.type === "message_update" &&
+            event.assistantMessageEvent?.type === "toolcall_start"
+          ) {
+            this.status = "tooling";
+            this.activity = "Preparing tool call";
+            this.lastError = null;
+            this.publishUpdate();
+          }
+
+          if (
+            event.type === "message_update" &&
+            event.assistantMessageEvent?.type === "toolcall_delta"
+          ) {
+            this.status = "tooling";
+            this.activity = "Preparing tool call";
+            this.lastError = null;
+            this.publishUpdate();
+          }
+
+          if (
+            event.type === "message_update" &&
+            event.assistantMessageEvent?.type === "toolcall_end"
+          ) {
+            const toolName = stringifyToolName(event.assistantMessageEvent.toolCall);
+            this.status = isDelegationTool(toolName) ? "delegating" : "tooling";
+            this.activity = toolName
+              ? (isDelegationTool(toolName) ? `delegating - ${toolName}` : `tooling - ${toolName}`)
+              : "Calling tool";
+            this.lastError = null;
+            this.publishUpdate();
+          }
+
+          if (event.type === "tool_execution_start") {
+            const toolName = stringifyToolName(event.toolCall) ?? stringifyToolName(event.tool) ?? stringifyToolName(event.name);
+            this.status = isDelegationTool(toolName) ? "delegating" : "tooling";
+            this.activity = toolName
+              ? (isDelegationTool(toolName) ? `delegating - ${toolName}` : `tooling - ${toolName}`)
+              : "Running tool";
+            this.lastError = null;
+            this.publishUpdate();
+          }
+
+          if (event.type === "tool_execution_update") {
+            const toolName = stringifyToolName(event.toolCall) ?? stringifyToolName(event.tool) ?? stringifyToolName(event.name);
+            this.status = isDelegationTool(toolName) ? "delegating" : "tooling";
+            this.activity = toolName
+              ? (isDelegationTool(toolName) ? `delegating - ${toolName}` : `tooling - ${toolName}`)
+              : "Using tool";
+            this.lastError = null;
+            this.publishUpdate();
+          }
+
+          if (event.type === "tool_execution_end") {
+            const toolName = stringifyToolName(event.toolCall) ?? stringifyToolName(event.tool) ?? stringifyToolName(event.name);
+            completedToolExecutions += 1;
+            if (toolName && toolName === lastCompletedToolName) repeatedToolExecutions += 1;
+            else {
+              lastCompletedToolName = toolName;
+              repeatedToolExecutions = toolName ? 1 : 0;
+            }
+            if (shouldTriggerUnstick()) {
+              this.status = "failed";
+              this.activity = toolName ? `tooling - ${toolName} (unsticking)` : "tooling (unsticking)";
+              this.lastError = "Agent appeared stuck in a repeated tool loop; retrying with a direct answer prompt.";
+              this.publishUpdate();
+              stopProc(proc, "stuck-tool-loop");
+              return;
+            }
+            this.status = "running";
+            this.activity = sawAssistantText ? (activity ?? "Working") : "Synthesizing";
+            this.lastError = null;
+            this.publishUpdate();
           }
 
           if (event.type === "error") {
@@ -192,7 +379,10 @@ export class BoardMemberSession {
               for (const part of msg.content || []) {
                 if (part.type === "text") textParts.push(part.text);
               }
-              if (textParts.length > 0) finalOutput = textParts.join("");
+              if (textParts.length > 0) {
+                finalOutput = textParts.join("");
+                sawAssistantText = sawAssistantText || finalOutput.trim().length > 0;
+              }
               if (typeof msg.errorMessage === "string" && msg.errorMessage.trim()) {
                 finalError = msg.errorMessage.trim();
               }
@@ -210,6 +400,7 @@ export class BoardMemberSession {
             }
             if (textParts.length > 0) {
               finalOutput = textParts.join("");
+              sawAssistantText = sawAssistantText || finalOutput.trim().length > 0;
             }
           }
         };
@@ -229,19 +420,18 @@ export class BoardMemberSession {
           if (buffer.trim()) processLine(buffer);
           const trimmedStderr = stderr.trim();
           if (trimmedStderr) finalError = trimmedStderr;
+          abortListener?.();
           resolve(code ?? 0);
         });
 
-        proc.on("error", () => resolve(1));
+        proc.on("error", () => {
+          abortListener?.();
+          resolve(1);
+        });
 
         if (signal) {
-          const killProc = () => {
-            wasAborted = true;
-            proc.kill("SIGTERM");
-            setTimeout(() => {
-              if (!proc.killed) proc.kill("SIGKILL");
-            }, 5000);
-          };
+          const killProc = () => stopProc(proc, "signal");
+          abortListener = () => signal.removeEventListener("abort", killProc);
           if (signal.aborted) killProc();
           else signal.addEventListener("abort", killProc, { once: true });
         }
@@ -260,7 +450,31 @@ export class BoardMemberSession {
         this.activity = "Aborted";
         this.lastError = "Subagent was aborted";
         this.publishUpdate();
-        throw new Error("Subagent was aborted");
+        const abortError = new Error("Subagent was aborted") as Error & { partialResult?: AgentRunResult };
+        abortError.partialResult = {
+          agent: this.slug,
+          content: finalOutput,
+          exitCode: 130,
+          tokenCount,
+          cost: usage.cost,
+          error: "Subagent was aborted",
+        };
+        throw abortError;
+      }
+
+      if (forcedStopReason === "stuck-tool-loop") {
+        this.status = "failed";
+        this.activity = "Unsticking";
+        this.lastError = "Agent got stuck in a repeated tool loop";
+        this.publishUpdate();
+        return {
+          agent: this.slug,
+          content: finalOutput,
+          exitCode: 124,
+          tokenCount,
+          cost: usage.cost,
+          error: this.lastError,
+        };
       }
 
       if (exitCode !== 0) {
@@ -315,10 +529,23 @@ export class BoardMemberSession {
 
     for (let i = 0; i < attemptModels.length; i++) {
       const attemptModel = attemptModels[i];
-      const result = await this.runOnce(cwd, attemptModel, systemPrompt, task, activity, signal, onStream);
+      let result = await this.runOnce(cwd, attemptModel, systemPrompt, task, activity, signal, onStream);
       lastResult = result;
 
       if (result.exitCode === 0) return result;
+      if (this.shouldRetryAfterUnstick(result.error)) {
+        result = await this.runOnce(
+          cwd,
+          attemptModel,
+          systemPrompt,
+          this.buildUnstuckTask(task),
+          activity ? `${activity} (unstick retry)` : "Unstick retry",
+          signal,
+          onStream,
+        );
+        lastResult = result;
+        if (result.exitCode === 0) return result;
+      }
       if (!this.shouldRetryWithFallback(result.error)) return result;
       if (i === attemptModels.length - 1) return result;
     }
@@ -338,6 +565,8 @@ export class BoardMemberSession {
       slug: this.slug,
       name: this.name,
       status: this.status,
+      modelLabel: this.currentModelLabel,
+      modelAltLabel: preferLocalProviderModel(this.modelAlt),
       activity: this.activity,
       partialText: this.partialText || undefined,
       turns: this.turns,
@@ -345,6 +574,18 @@ export class BoardMemberSession {
       totalCost: this.totalCost,
       error: this.lastError ?? undefined,
     };
+  }
+
+  syncConfig(model: string | undefined, modelAlt: string | undefined): void {
+    const resolvedModel = preferLocalProviderModel(model) ?? "default";
+    const changed = this.model !== model || this.modelAlt !== modelAlt || this.currentModelLabel !== resolvedModel;
+    this.model = model;
+    this.modelAlt = modelAlt;
+    if (!changed) return;
+    if (this.status === "idle" || this.status === "queued" || this.status === "completed" || this.status === "failed") {
+      this.currentModelLabel = resolvedModel;
+      this.publishUpdate();
+    }
   }
 
   markAborted(): void {
@@ -381,6 +622,8 @@ export class SessionPool {
     if (!session) {
       session = new BoardMemberSession(agent.slug, agent.name, agent.model, agent.modelAlt, this.onUpdate);
       this.sessions.set(agent.slug, session);
+    } else {
+      session.syncConfig(agent.model, agent.modelAlt);
     }
     return session;
   }
@@ -438,7 +681,20 @@ export class SessionPool {
         const session = this.getOrCreate(t.agent);
         try {
           results[current] = await session.run(cwd, t.systemPrompt, t.task, t.activity, signal);
-        } finally {}
+        } catch (err: any) {
+          if (signal?.aborted && signal.reason === "force-close" && err?.message === "Subagent was aborted") {
+            results[current] = err.partialResult ?? {
+              agent: t.agent.slug,
+              content: "",
+              exitCode: 130,
+              tokenCount: 0,
+              cost: 0,
+              error: "Subagent was aborted",
+            };
+            continue;
+          }
+          throw err;
+        }
       }
     });
 

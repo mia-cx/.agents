@@ -23,7 +23,7 @@ async function writeExecutableScript(filePath: string, lines: string[]): Promise
 
 describe("BoardMemberSession", () => {
   it("initialises with idle status and zero counters", () => {
-    const session = new BoardMemberSession("cfo", "CFO", undefined);
+    const session = new BoardMemberSession("cfo", "CFO", undefined, undefined);
     expect(session.slug).toBe("cfo");
     expect(session.name).toBe("CFO");
     expect(session.status).toBe("idle");
@@ -34,12 +34,14 @@ describe("BoardMemberSession", () => {
   });
 
   it("produces a valid snapshot", () => {
-    const session = new BoardMemberSession("cto", "CTO", "gpt-4o");
+    const session = new BoardMemberSession("cto", "CTO", "gpt-4o", undefined);
     const snap = session.snapshot();
     expect(snap).toEqual({
       slug: "cto",
       name: "CTO",
       status: "idle",
+      modelLabel: "openai-codex/gpt-4o",
+      modelAltLabel: undefined,
       activity: "Standing by",
       turns: 0,
       totalTokens: 0,
@@ -49,14 +51,14 @@ describe("BoardMemberSession", () => {
   });
 
   it("markAborted sets status", () => {
-    const session = new BoardMemberSession("ceo", "CEO", undefined);
+    const session = new BoardMemberSession("ceo", "CEO", undefined, undefined);
     session.markAborted();
     expect(session.status).toBe("aborted");
     expect(session.snapshot().status).toBe("aborted");
   });
 
   it("rethrows aborts after preserving accumulated usage", async () => {
-    const session = new BoardMemberSession("cfo", "CFO", undefined);
+    const session = new BoardMemberSession("cfo", "CFO", undefined, undefined);
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
     const scriptPath = path.join(tmpDir, "emit-usage.js");
     const controller = new AbortController();
@@ -96,7 +98,7 @@ describe("BoardMemberSession", () => {
   });
 
   it("pins bare Claude aliases to the anthropic provider", async () => {
-    const session = new BoardMemberSession("ceo", "CEO", "claude-opus-4-6:high");
+    const session = new BoardMemberSession("ceo", "CEO", "claude-opus-4-6:high", undefined);
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
     const scriptPath = path.join(tmpDir, "capture-args.js");
     const originalArgv1 = process.argv[1];
@@ -177,6 +179,67 @@ describe("BoardMemberSession", () => {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("retries with an unstuck prompt after a repeated tool loop", async () => {
+    const session = new BoardMemberSession("customer-oracle", "Customer Oracle", "gpt-5.4-mini", undefined);
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
+    const scriptPath = path.join(tmpDir, "stuck-loop.js");
+    const attemptsPath = path.join(tmpDir, "attempts.json");
+    const originalArgv1 = process.argv[1];
+    const previousMinMs = process.env.BOARDROOM_UNSTICK_MIN_ELAPSED_MS;
+    const previousToolCount = process.env.BOARDROOM_UNSTICK_TOOL_COUNT;
+    const previousSameTool = process.env.BOARDROOM_UNSTICK_SAME_TOOL_COUNT;
+
+    await writeExecutableScript(scriptPath, [
+      "const fs = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      `const attemptsPath = ${JSON.stringify(attemptsPath)};`,
+      "const attempts = fs.existsSync(attemptsPath) ? JSON.parse(fs.readFileSync(attemptsPath, 'utf8')) : [];",
+      "attempts.push(args);",
+      "fs.writeFileSync(attemptsPath, JSON.stringify(attempts), 'utf8');",
+      "if (attempts.length === 1) {",
+      "  const emit = (obj) => process.stdout.write(JSON.stringify(obj) + '\\n');",
+      "  emit({ type: 'tool_execution_start', name: 'WebSearch' });",
+      "  emit({ type: 'tool_execution_end', name: 'WebSearch' });",
+      "  emit({ type: 'tool_execution_start', name: 'WebSearch' });",
+      "  emit({ type: 'tool_execution_end', name: 'WebSearch' });",
+      "  setInterval(() => {}, 1000);",
+      "} else {",
+      "  process.stdout.write(JSON.stringify({",
+      '    type: "message_end",',
+      "    message: {",
+      '      role: "assistant",',
+      "      usage: { input: 2, output: 3, cost: { total: 0.01 } },",
+      "      content: [{ type: 'text', text: 'unstuck answer' }],",
+      "    },",
+      '  }) + "\\n");',
+      "}",
+    ]);
+
+    process.argv[1] = scriptPath;
+    process.env.BOARDROOM_UNSTICK_MIN_ELAPSED_MS = "0";
+    process.env.BOARDROOM_UNSTICK_TOOL_COUNT = "2";
+    process.env.BOARDROOM_UNSTICK_SAME_TOOL_COUNT = "2";
+
+    try {
+      const result = await session.run(tmpDir, "", "test task");
+      expect(result.exitCode).toBe(0);
+      expect(result.content).toBe("unstuck answer");
+
+      const attempts = JSON.parse(await fs.readFile(attemptsPath, "utf8")) as string[][];
+      expect(attempts).toHaveLength(2);
+      expect(attempts[1].join(" ")).toContain("previous attempt got stuck in repeated tool use");
+    } finally {
+      process.argv[1] = originalArgv1;
+      if (previousMinMs === undefined) delete process.env.BOARDROOM_UNSTICK_MIN_ELAPSED_MS;
+      else process.env.BOARDROOM_UNSTICK_MIN_ELAPSED_MS = previousMinMs;
+      if (previousToolCount === undefined) delete process.env.BOARDROOM_UNSTICK_TOOL_COUNT;
+      else process.env.BOARDROOM_UNSTICK_TOOL_COUNT = previousToolCount;
+      if (previousSameTool === undefined) delete process.env.BOARDROOM_UNSTICK_SAME_TOOL_COUNT;
+      else process.env.BOARDROOM_UNSTICK_SAME_TOOL_COUNT = previousSameTool;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("SessionPool", () => {
@@ -197,6 +260,17 @@ describe("SessionPool", () => {
     expect(s1).not.toBe(s2);
     expect(s1.slug).toBe("cfo");
     expect(s2.slug).toBe("cto");
+  });
+
+  it("getOrCreate syncs updated agent model config onto existing sessions", () => {
+    const pool = new SessionPool();
+    const ceo = makeAgent("ceo", "CEO", "claude-opus-4-6:high");
+    const session = pool.getOrCreate(ceo);
+
+    ceo.model = "gpt-5.4:high";
+    pool.getOrCreate(ceo);
+
+    expect(session.snapshot().modelLabel).toBe("openai-codex/gpt-5.4:high");
   });
 
   it("get returns undefined for unknown slug", () => {
@@ -295,6 +369,50 @@ describe("SessionPool", () => {
     }
   });
 
+  it("emits thinking, tooling, and delegating updates from streamed events", async () => {
+    const updates: AgentRuntimeUpdate[] = [];
+    const pool = new SessionPool((u) => updates.push(u));
+    const agent = makeAgent("ceo", "CEO");
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
+    const scriptPath = path.join(tmpDir, "rich-events.js");
+    const originalArgv1 = process.argv[1];
+
+    await fs.writeFile(
+      scriptPath,
+      [
+        "const emit = (obj) => process.stdout.write(JSON.stringify(obj) + '\\n');",
+        "emit({ type: 'message_update', assistantMessageEvent: { type: 'thinking_start' } });",
+        "emit({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'hmm' } });",
+        "emit({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_end', toolCall: { name: 'Task' } } });",
+        "emit({ type: 'tool_execution_start', name: 'Task' });",
+        "emit({ type: 'tool_execution_end', name: 'Task' });",
+        "emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hello' } });",
+        "emit({",
+        "  type: 'message_end',",
+        "  message: {",
+        "    role: 'assistant',",
+        "    usage: { input: 1, output: 1, cost: { total: 0.01 } },",
+        "    content: [{ type: 'text', text: 'hello' }],",
+        "  },",
+        "});",
+      ].join("\n"),
+    );
+
+    process.argv[1] = scriptPath;
+
+    try {
+      const result = await pool.runOne(tmpDir, agent, "", "test task", "Framing the decision");
+      expect(result.exitCode).toBe(0);
+      expect(updates.some((update) => update.status === "thinking")).toBe(true);
+      expect(updates.some((update) => update.status === "delegating")).toBe(true);
+      expect(updates.some((update) => update.status === "streaming")).toBe(true);
+      expect(updates.some((update) => update.activity === "delegating - Task")).toBe(true);
+    } finally {
+      process.argv[1] = originalArgv1;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("emits aborted updates when runParallel is aborted", async () => {
     const updates: AgentRuntimeUpdate[] = [];
     const pool = new SessionPool((u) => updates.push(u));
@@ -334,6 +452,52 @@ describe("SessionPool", () => {
       await expect(runPromise).rejects.toThrow("Subagent was aborted");
       expect(updates.map(update => update.status)).toEqual(["queued", "running", "aborted"]);
       expect(updates.at(-1)?.error).toBe("Subagent was aborted");
+    } finally {
+      process.argv[1] = originalArgv1;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns partial aborted results on force-close so the CEO can finish the meeting", async () => {
+    const pool = new SessionPool();
+    const agents = [makeAgent("cfo", "CFO"), makeAgent("cto", "CTO")];
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
+    const scriptPath = path.join(tmpDir, "force-close.js");
+    const controller = new AbortController();
+    const originalArgv1 = process.argv[1];
+
+    await fs.writeFile(
+      scriptPath,
+      [
+        "process.stdout.write(JSON.stringify({",
+        '  type: "message_end",',
+        "  message: {",
+        '    role: "assistant",',
+        "    usage: { input: 3, output: 2, cost: { total: 0.1 } },",
+        '    content: [{ type: "text", text: "partial" }],',
+        "  },",
+        '}) + "\\n");',
+        "setInterval(() => {}, 1000);",
+      ].join("\n"),
+    );
+
+    process.argv[1] = scriptPath;
+
+    try {
+      const runPromise = pool.runParallel(
+        tmpDir,
+        agents.map((agent) => ({ agent, systemPrompt: "", task: "test task", activity: "Testing force-close" })),
+        controller.signal,
+        2,
+      );
+      await new Promise(resolve => setTimeout(resolve, 100));
+      controller.abort("force-close");
+
+      const results = await runPromise;
+      expect(results).toHaveLength(2);
+      expect(results.every((result) => result.exitCode === 130)).toBe(true);
+      expect(results.every((result) => result.error === "Subagent was aborted")).toBe(true);
+      expect(results.every((result) => result.content === "" || result.content === "partial")).toBe(true);
     } finally {
       process.argv[1] = originalArgv1;
       await fs.rm(tmpDir, { recursive: true, force: true });
