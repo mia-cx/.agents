@@ -1,0 +1,16 @@
+{
+  "name": "boardroom",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "devDependencies": {
+    "vitest": "^4.1.1"
+  }
+}
