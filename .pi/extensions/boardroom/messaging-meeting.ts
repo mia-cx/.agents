@@ -1,4 +1,3 @@
-[RTK compacted output: source:minimal, smart-truncate]
 /**
  * Freeform meeting runner using the explicit messaging model.
  *
@@ -108,192 +107,71 @@ function buildMessagingAgentSnapshots(
       .filter((msg): msg is NonNullable<typeof msg> => !!msg);
     const totalTokens = sentMessages.reduce((sum, msg) => sum + msg.token_count, 0);
     const totalCost = sentMessages.reduce((sum, msg) => sum + msg.cost, 0);
-    const status = agent.slug === activeSlug
-      ? "running"
-      : (info?.inbox_unread ?? 0) > 0
-        ? "queued"
-        : (info?.active_threads ?? 0) > 0
-          ? "thinking"
-          : sentMessages.length > 0
-            ? "completed"
-            : "idle";
-    const activityParts = [
-      `inbox ${(info?.inbox_unread ?? 0)}`,
-      `outbox ${sentMessages.length}`,
-      `threads ${info?.active_threads ?? 0}`,
-    ];
-    if (info && info.thread_names.length > 0) {
-      activityParts.push(info.thread_names.slice(0, 2).join(", "));
+    // ... 149 lines omitted
     }
-
-    return {
-      slug: agent.slug,
-      name: agent.name,
-      status,
-      modelLabel: agent.model,
-      modelAltLabel: agent.modelAlt,
-      activity: activityParts.join(" · "),
-      turns: sentMessages.length,
-      totalTokens,
-      totalCost,
-    };
-  });
+    // ... 148 lines omitted
 }
-
+    // ... 147 lines omitted
 function emitMessagingSnapshot(
-  meetingId: string,
-  brief: ParsedBrief,
-  mode: MeetingMode,
-  constraintsName: string,
-  constraintValues: ConstraintSet,
-  tracker: ConstraintTracker,
-  startedAt: Date,
-  threadState: ThreadState,
-  allAgents: AgentConfig[],
-  rosterAgents: AgentConfig[],
-  phase: number,
-  phaseLabel: string,
-  presidentNote: string,
-  callbacks: MessagingMeetingCallbacks,
-  activeSlug?: string,
-): void {
-  if (!callbacks.onSnapshot) return;
-
-  const graph = buildThreadGraph(threadState);
-  const allMessages = getAllMessages(threadState);
-  callbacks.onSnapshot({
-    meetingId,
-    briefTitle: brief.title,
-    mode,
-    constraints: constraintsName,
-    phase,
-    phaseLabel,
-    round: tracker.currentRound,
-    startedAt: startedAt.toISOString(),
-    budgetUsed: tracker.totalCost,
-    budgetLimit: constraintValues.budget,
-    elapsedMinutes: tracker.elapsedMinutes,
-    timeLimitMinutes: constraintValues.time_limit_minutes,
-    roundsUsed: tracker.currentRound,
-    maxRounds: constraintValues.max_debate_rounds,
-    roster: rosterAgents.map((agent) => agent.slug),
-    agents: buildMessagingAgentSnapshots(allAgents, rosterAgents, threadState, activeSlug),
-    presidentNote,
-    transcript: allMessages.slice(-5).map((msg) => `[${msg.from}] ${msg.content.slice(0, 200)}`),
-    threadGraphLines: renderThreadGraph(graph, threadState, "compact").split("\n"),
-    disposition: "in-progress",
-  });
+    // ... 146 lines omitted
 }
-
+    // ... 145 lines omitted
 function processScratchpadOutput(cwd: string, agentSlug: string, output: string): string {
-  const update = extractScratchpadUpdate(output);
-  if (update) {
-    saveScratchpad(cwd, agentSlug, update);
+    // ... 144 lines omitted
   }
-  return stripScratchpadBlock(output);
+    // ... 143 lines omitted
 }
-
+    // ... 142 lines omitted
 async function runCeoWithRetry(
-  cwd: string,
-  ceo: AgentConfig,
-  systemPrompt: string,
-  task: string,
-  callbacks: MessagingMeetingCallbacks,
-  signal?: AbortSignal,
-): Promise<{ content: string; tokenCount: number; cost: number }> {
-  const result = await runAgent(cwd, ceo.slug, ceo.model, systemPrompt, task, signal);
-
-  if (result.exitCode === 0 && result.content) {
-    return { content: result.content, tokenCount: result.tokenCount, cost: result.cost };
+    // ... 141 lines omitted
   }
-
-  callbacks.onStatus(`CEO failed (${result.error ?? "no output"}). Retrying with simplified context...`);
-
-    // ... 657 lines omitted
+    // ... 140 lines omitted
   }
-    // ... 656 lines omitted
 }
-    // ... 655 lines omitted
 export async function runFreeformMessagingMeeting(
-    // ... 654 lines omitted
     }
-    // ... 653 lines omitted
     }
-    // ... 652 lines omitted
     }
-    // ... 651 lines omitted
       }
-    // ... 650 lines omitted
       }
-    // ... 649 lines omitted
       }
-    // ... 648 lines omitted
       }
-    // ... 647 lines omitted
         }
-    // ... 646 lines omitted
         }
-    // ... 645 lines omitted
       }
     }
-    // ... 643 lines omitted
     }
-    // ... 642 lines omitted
       }
     }
-    // ... 640 lines omitted
     }
-    // ... 639 lines omitted
       }
     }
-    // ... 637 lines omitted
     }
-    // ... 636 lines omitted
     }
-    // ... 635 lines omitted
       }
     }
-    // ... 633 lines omitted
   }
 }
-    // ... 631 lines omitted
 export async function runStructuredMessagingMeeting(
-    // ... 630 lines omitted
     }
-    // ... 629 lines omitted
     }
-    // ... 628 lines omitted
     }
-    // ... 627 lines omitted
       }
-    // ... 626 lines omitted
       }
-    // ... 625 lines omitted
       }
-    // ... 624 lines omitted
-      }
-    // ... 623 lines omitted
-    }
-    // ... 622 lines omitted
-    }
-    // ... 621 lines omitted
       }
     }
-    // ... 619 lines omitted
     }
-    // ... 618 lines omitted
       }
     }
-    // ... 616 lines omitted
     }
-    // ... 615 lines omitted
-    }
-    // ... 614 lines omitted
       }
     }
-    // ... 612 lines omitted
     }
-    // ... 611 lines omitted
+    }
+      }
+    }
+    }
   }
 }
-// ... 609 more lines (total: 767)
+// ... 92 more lines (total: 259)
