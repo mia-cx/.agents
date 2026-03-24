@@ -430,9 +430,9 @@ async function summarizeMemoWithLlm(
       timeoutTimer = setTimeout(() => {
         timedOut = true;
         finalError = finalError || `LLM narration summary timed out after ${Math.round(getNarrationSummaryTimeoutMs() / 1000)}s`;
-        if (!proc.killed) proc.kill("SIGTERM");
+        if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGTERM");
         completionForcedKillTimer = setTimeout(() => {
-          if (!proc.killed) proc.kill("SIGKILL");
+          if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
         }, 2000);
       }, getNarrationSummaryTimeoutMs());
       proc.on("close", (code) => {
