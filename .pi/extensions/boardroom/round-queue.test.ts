@@ -44,9 +44,12 @@ vi.mock("./messaging-prompts.js", () => ({
 }));
 
 import { parseRoutingHeaders } from "./messaging-prompts.js";
+import { extractScratchpadUpdate, stripScratchpadBlock } from "./scratchpad.js";
 
 const mockRunOne = vi.fn();
 const mockParseRouting = vi.mocked(parseRoutingHeaders);
+const mockExtractScratchpadUpdate = vi.mocked(extractScratchpadUpdate);
+const mockStripScratchpadBlock = vi.mocked(stripScratchpadBlock);
 
 const makePool = () => ({
   runOne: mockRunOne,
@@ -94,6 +97,14 @@ describe("round-queue", () => {
     resetCounters();
     vi.clearAllMocks();
     state = createThreadState();
+    mockExtractScratchpadUpdate.mockReturnValue(null);
+    mockStripScratchpadBlock.mockImplementation((content: string) => content);
+    mockParseRouting.mockImplementation((content: string) => ({
+      to: [],
+      replyTo: null,
+      type: "broadcast",
+      content,
+    }));
   });
 
   describe("runSemiLiveRound", () => {
@@ -418,6 +429,83 @@ describe("round-queue", () => {
       expect(callbacks.onMessagePosted).toHaveBeenCalledWith(
         expect.objectContaining({ type: "direct", to: ["cto"] }),
       );
+    });
+
+    it("defaults headerless responses to the unread thread", async () => {
+      const revenue = createThread(state, "Revenue", "ceo", null, ["ceo", "cfo"]);
+      const tech = createThread(state, "Tech", "ceo", null, ["ceo", "cfo"]);
+      postMessage(state, "broadcast", "ceo", [], revenue.id, "Revenue framing", 1, 0, 100, 0.05);
+      const techMsg = postMessage(state, "broadcast", "ceo", [], tech.id, "Tech framing", 1, 0, 100, 0.05);
+      state.agent_inboxes.set("cfo", [techMsg.id]);
+
+      const agents = [makeAgent("cfo", "CFO")];
+      const allAgents = [makeAgent("ceo", "CEO"), ...agents];
+      const tracker = new ConstraintTracker(makeConstraintValues());
+      const callbacks = makeCallbacks();
+
+      mockRunOne.mockResolvedValue({
+        agent: "cfo",
+        content: "Headerless response",
+        exitCode: 0,
+        tokenCount: 80,
+        cost: 0.03,
+      });
+
+      await runSemiLiveRound(
+        cwd, state, agents, allAgents, makeBrief(), "CEO framing",
+        1, 2, tracker, makeConstraintValues(),
+        { budget_hard_stop: false, time_hard_stop: false },
+        DEFAULT_ROUND_CONFIG, callbacks, makePool(),
+      );
+
+      expect(callbacks.onMessagePosted).toHaveBeenCalledWith(
+        expect.objectContaining({ thread_id: tech.id, content: "Headerless response" }),
+      );
+    });
+
+    it("re-queues the same agent when another thread remains unread", async () => {
+      const revenue = createThread(state, "Revenue", "ceo", null, ["ceo", "cfo"]);
+      const tech = createThread(state, "Tech", "ceo", null, ["ceo", "cfo"]);
+      postMessage(state, "broadcast", "ceo", [], revenue.id, "Revenue framing", 1, 0, 100, 0.05);
+      postMessage(state, "broadcast", "ceo", [], tech.id, "Tech framing", 1, 0, 100, 0.05);
+
+      const agents = [makeAgent("cfo", "CFO")];
+      const allAgents = [makeAgent("ceo", "CEO"), ...agents];
+      const tracker = new ConstraintTracker(makeConstraintValues());
+      const callbacks = makeCallbacks();
+
+      mockRunOne
+        .mockResolvedValueOnce({
+          agent: "cfo",
+          content: "Revenue follow-up",
+          exitCode: 0,
+          tokenCount: 80,
+          cost: 0.03,
+        })
+        .mockResolvedValueOnce({
+          agent: "cfo",
+          content: "Tech follow-up",
+          exitCode: 0,
+          tokenCount: 85,
+          cost: 0.03,
+        });
+
+      await runSemiLiveRound(
+        cwd, state, agents, allAgents, makeBrief(), "CEO framing",
+        1, 2, tracker, makeConstraintValues(),
+        { budget_hard_stop: false, time_hard_stop: false },
+        { maxMessagesPerRound: 4, roundTimeoutSeconds: 180 }, callbacks, makePool(),
+      );
+
+      expect(mockRunOne).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(callbacks.onMessagePosted).mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+        thread_id: revenue.id,
+        content: "Revenue follow-up",
+      }));
+      expect(vi.mocked(callbacks.onMessagePosted).mock.calls[1]?.[0]).toEqual(expect.objectContaining({
+        thread_id: tech.id,
+        content: "Tech follow-up",
+      }));
     });
 
     it("returns quiet when queue empties naturally", async () => {

@@ -157,4 +157,54 @@ describe("messaging-meeting", () => {
     }));
     expect(fs.existsSync(result.debateJsonPath)).toBe(true);
   });
+
+  it("preserves partial CEO framing output during force-close", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO"),
+    ];
+    const controller = new AbortController();
+    controller.abort("force-close");
+
+    const partialError = Object.assign(new Error("Subagent was aborted"), {
+      partialResult: {
+        agent: "ceo",
+        content: makeFramingOutput(["cfo"]),
+        tokenCount: 90,
+        cost: 0.04,
+      },
+    });
+
+    runtimeMocks.runOne
+      .mockRejectedValueOnce(partialError)
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Final brief from force-close.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    const result = await runFreeformMessagingMeeting(
+      cwd,
+      makeBrief("force-close-partial"),
+      agents,
+      "freeform",
+      "standard",
+      makeConstraints(),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot: vi.fn(),
+        signal: controller.signal,
+      },
+    );
+
+    expect(result.disposition).toBe("force-closed");
+    expect(fs.readFileSync(result.memoPath, "utf-8")).toContain("Final brief from force-close.");
+    expect(fs.readFileSync(result.memoPath, "utf-8")).toContain("Boardroom force-closed");
+  });
 });

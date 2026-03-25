@@ -16,12 +16,14 @@ import {
   postMessage,
   createThread,
   projectAgentContext,
-  markInboxRead,
+  markInboxReadForThread,
   getActiveThreads,
   getQuietThreads,
   getAllThreads,
   buildRoomSummary,
   autoResolveConvergedThreads,
+  canAgentAccessThread,
+  resolveMessageRecipients,
 } from "./thread-manager.js";
 import {
   composeMessagingAssessmentPrompt,
@@ -69,6 +71,34 @@ export interface RoundResult {
 /** Get threads that can receive new messages (active or quiet). */
 function getPostableThreads(threadState: ThreadState): Thread[] {
   return getAllThreads(threadState).filter(t => t.status === "active" || t.status === "quiet");
+}
+
+function getFocusThread(threadState: ThreadState, agentSlug: string): Thread | undefined {
+  const postableThreads = getPostableThreads(threadState);
+  const inboxIds = threadState.agent_inboxes.get(agentSlug) ?? [];
+
+  for (const messageId of inboxIds) {
+    const message = threadState.messages.get(messageId);
+    if (!message) continue;
+    const thread = threadState.threads.get(message.thread_id);
+    if (thread && (thread.status === "active" || thread.status === "quiet")) {
+      return thread;
+    }
+  }
+
+  const pendingThread = postableThreads.find((thread) => thread.pending_replies.includes(agentSlug));
+  if (pendingThread) return pendingThread;
+
+  const visibleThreads = postableThreads.filter((thread) => canAgentAccessThread(thread, agentSlug));
+  if (visibleThreads.length === 1) return visibleThreads[0];
+  if (postableThreads.length === 1) return postableThreads[0];
+  return undefined;
+}
+
+function agentHasPendingWork(threadState: ThreadState, agentSlug: string): boolean {
+  const inbox = threadState.agent_inboxes.get(agentSlug);
+  if (inbox && inbox.length > 0) return true;
+  return getPostableThreads(threadState).some((thread) => thread.pending_replies.includes(agentSlug));
 }
 
 export async function runSemiLiveRound(
@@ -150,6 +180,7 @@ export async function runSemiLiveRound(
 
     const agent = rosterAgents.find(a => a.slug === nextSlug);
     if (!agent) continue;
+    const focusThread = getFocusThread(threadState, agent.slug);
 
     try {
       // Build context and run agent
@@ -172,12 +203,10 @@ export async function runSemiLiveRound(
       if (result.exitCode !== 0 || !result.content) {
         failedAgents++;
         callbacks.onStatus(`${agent.name} failed: ${result.error ?? "no output"}`);
-        // Post failure notice in first postable thread
-        const postableThreads = getPostableThreads(threadState);
-        if (postableThreads.length > 0) {
+        if (focusThread) {
           const failMsg = postMessage(
             threadState, "broadcast", agent.slug, [],
-            postableThreads[0].id,
+            focusThread.id,
             `[${agent.name} failed to respond: ${result.error ?? "process error"}]`,
             phase, round, result.tokenCount, result.cost,
           );
@@ -203,7 +232,7 @@ export async function runSemiLiveRound(
       const routing = parseRoutingHeaders(content);
 
       // Determine target thread (active or quiet threads can receive messages)
-      let targetThread = getPostableThreads(threadState)[0];
+      let targetThread = focusThread;
       if (routing.replyTo) {
         const replyMsg = threadState.messages.get(routing.replyTo);
         if (replyMsg) {
@@ -245,13 +274,12 @@ export async function runSemiLiveRound(
       callbacks.onMessagePosted(posted);
       messagesPosted++;
 
-      // Mark agent's inbox as read
-      markInboxRead(threadState, agent.slug);
+      if (focusThread) {
+        markInboxReadForThread(threadState, agent.slug, focusThread.id);
+      }
 
       // Re-queue agents that received this message (if they have unread inbox)
-      const recipients = msgType === "broadcast"
-        ? rosterAgents.filter(a => a.slug !== agent.slug).map(a => a.slug)
-        : to;
+      const recipients = resolveMessageRecipients(targetThread, posted.type, agent.slug, posted.to);
 
       for (const recipientSlug of recipients) {
         const recipientInbox = threadState.agent_inboxes.get(recipientSlug);
@@ -261,6 +289,10 @@ export async function runSemiLiveRound(
             agentQueue.add(recipientSlug);
           }
         }
+      }
+
+      if (agentHasPendingWork(threadState, agent.slug)) {
+        agentQueue.add(agent.slug);
       }
 
       // Auto-resolve converged threads

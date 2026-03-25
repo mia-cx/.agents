@@ -9,6 +9,7 @@ import {
   projectAgentContext,
   getAgentMessageCounts,
   markInboxRead,
+  markInboxReadForThread,
   getQuietThreads,
   getActiveThreads,
   getAllThreads,
@@ -41,15 +42,17 @@ describe("ThreadManager", () => {
       expect(thread.created_by).toBe("ceo");
       expect(thread.parent_id).toBeNull();
       expect(thread.status).toBe("active");
+      expect(thread.audience).toEqual(["ceo"]);
       expect(thread.participants).toEqual(["ceo"]);
       expect(thread.message_ids).toEqual([]);
     });
 
     it("creates a child thread", () => {
-      const parent = createThread(state, "Parent", "ceo");
+      const parent = createThread(state, "Parent", "ceo", null, ["ceo", "cto"]);
       const child = createThread(state, "Sub-topic", "cto", parent.id);
       expect(child.parent_id).toBe(parent.id);
       expect(child.id).toBe("thread-002");
+      expect(child.audience).toEqual(["ceo", "cto"]);
     });
 
     it("stores threads in state", () => {
@@ -102,17 +105,12 @@ describe("ThreadManager", () => {
       expect(state.agent_inboxes.get("cfo")).toHaveLength(1);
     });
 
-    it("delivers broadcast to all participants except sender", () => {
-      const thread = createThread(state, "Discussion", "ceo");
-      // CEO and CTO are participants
-      postMessage(state, "broadcast", "cto", [], thread.id, "Joined", 1, 0, 50, 0.01);
-      postMessage(state, "broadcast", "cfo", [], thread.id, "Also joined", 1, 0, 50, 0.01);
-
-      // CEO broadcasts
+    it("delivers broadcast to the full thread audience except sender", () => {
+      const thread = createThread(state, "Discussion", "ceo", null, ["ceo", "cto", "cfo"]);
       postMessage(state, "broadcast", "ceo", [], thread.id, "Update for all", 1, 1, 100, 0.05);
-      // CTO and CFO should have it in inbox, but not CEO
-      expect(state.agent_inboxes.get("cto")?.length).toBeGreaterThanOrEqual(1);
-      expect(state.agent_inboxes.get("cfo")?.length).toBeGreaterThanOrEqual(1);
+      expect(state.agent_inboxes.get("cto")).toHaveLength(1);
+      expect(state.agent_inboxes.get("cfo")).toHaveLength(1);
+      expect(state.agent_inboxes.get("ceo") ?? []).toHaveLength(0);
     });
 
     it("tracks outbox for sender", () => {
@@ -180,8 +178,8 @@ describe("ThreadManager", () => {
 
   describe("context projection", () => {
     it("projects relevant context for an agent", () => {
-      const t1 = createThread(state, "Revenue", "ceo");
-      const t2 = createThread(state, "Tech Debt", "ceo");
+      const t1 = createThread(state, "Revenue", "ceo", null, ["ceo", "cfo", "cto"]);
+      const t2 = createThread(state, "Tech Debt", "ceo", null, ["ceo", "cfo", "cto"]);
       postMessage(state, "broadcast", "ceo", [], t1.id, "Revenue topic", 1, 0, 100, 0.05);
       postMessage(state, "broadcast", "cfo", [], t1.id, "CFO on revenue", 1, 1, 80, 0.03);
       postMessage(state, "broadcast", "cto", [], t2.id, "CTO on tech", 1, 1, 80, 0.03);
@@ -206,6 +204,30 @@ describe("ThreadManager", () => {
       const cfoContext = projectAgentContext(state, "cfo");
       expect(cfoContext.inbox).toHaveLength(0);
     });
+
+    it("keeps private direct messages out of other agents' thread history", () => {
+      const thread = createThread(state, "Discussion", "ceo", null, ["ceo", "cfo", "cto"]);
+      postMessage(state, "broadcast", "ceo", [], thread.id, "Shared update", 1, 0, 100, 0.05);
+      postMessage(state, "direct", "ceo", ["cfo"], thread.id, "Private note", 1, 1, 80, 0.03);
+
+      const ctoContext = projectAgentContext(state, "cto");
+      expect(ctoContext.relevant_messages.map((msg) => msg.content)).toContain("Shared update");
+      expect(ctoContext.relevant_messages.map((msg) => msg.content)).not.toContain("Private note");
+      expect(ctoContext.inbox.map((msg) => msg.content)).toEqual(["Shared update"]);
+    });
+
+    it("marks only one thread worth of inbox messages as read", () => {
+      const revenue = createThread(state, "Revenue", "ceo", null, ["ceo", "cfo"]);
+      const tech = createThread(state, "Tech", "ceo", null, ["ceo", "cfo"]);
+      postMessage(state, "broadcast", "ceo", [], revenue.id, "Revenue update", 1, 0, 100, 0.05);
+      postMessage(state, "broadcast", "ceo", [], tech.id, "Tech update", 1, 0, 100, 0.05);
+
+      markInboxReadForThread(state, "cfo", revenue.id);
+      const remaining = state.agent_inboxes.get("cfo") ?? [];
+      expect(remaining).toHaveLength(1);
+      const remainingMessage = state.messages.get(remaining[0]);
+      expect(remainingMessage?.thread_id).toBe(tech.id);
+    });
   });
 
   describe("agent message counts", () => {
@@ -228,8 +250,8 @@ describe("ThreadManager", () => {
 
   describe("room summary", () => {
     it("builds summary excluding agent's own threads", () => {
-      const t1 = createThread(state, "Revenue", "ceo");
-      const t2 = createThread(state, "Tech Debt", "ceo");
+      const t1 = createThread(state, "Revenue", "ceo", null, ["ceo", "cfo", "cto"]);
+      const t2 = createThread(state, "Tech Debt", "ceo", null, ["ceo", "cfo", "cto"]);
       postMessage(state, "broadcast", "cfo", [], t1.id, "CFO on revenue", 1, 1, 80, 0.03);
       postMessage(state, "broadcast", "cto", [], t2.id, "CTO on tech", 1, 1, 80, 0.03);
 
@@ -237,6 +259,16 @@ describe("ThreadManager", () => {
       // but not revenue (they are a participant)
       const summary = buildRoomSummary(state, "cfo");
       expect(summary).toContain("Tech Debt");
+    });
+
+    it("does not leak private direct content into room summaries", () => {
+      const t1 = createThread(state, "Revenue", "ceo", null, ["ceo", "cfo", "cto"]);
+      postMessage(state, "broadcast", "ceo", [], t1.id, "Shared framing", 1, 0, 100, 0.05);
+      postMessage(state, "direct", "ceo", ["cfo"], t1.id, "Private note for CFO", 1, 1, 80, 0.03);
+
+      const summary = buildRoomSummary(state, "cto");
+      expect(summary).toContain("Shared framing");
+      expect(summary).not.toContain("Private note for CFO");
     });
   });
 

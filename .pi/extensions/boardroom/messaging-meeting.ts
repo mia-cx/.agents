@@ -215,6 +215,14 @@ function describeMessagingAbortReason(err: unknown, signal?: AbortSignal): strin
   return errorMessage;
 }
 
+function hasUsablePartialContent(content: string | undefined): boolean {
+  return typeof content === "string" && content.trim().length > 0;
+}
+
+function isForceCloseRequested(signal?: AbortSignal): boolean {
+  return signal?.aborted === true && signal.reason === "force-close";
+}
+
 function finalizeMessagingResult(
   memoPath: string,
   debateJsonPath: string,
@@ -252,7 +260,20 @@ async function runCeoWithRetry(
   callbacks: MessagingMeetingCallbacks,
   signal?: AbortSignal,
 ): Promise<{ content: string; tokenCount: number; cost: number }> {
-  const result = await pool.runOne(cwd, ceo, systemPrompt, task, activity, signal);
+  let result;
+  try {
+    result = await pool.runOne(cwd, ceo, systemPrompt, task, activity, signal);
+  } catch (err: any) {
+    if (signal?.reason === "force-close" && err?.message === "Subagent was aborted" && hasUsablePartialContent(err.partialResult?.content)) {
+      callbacks.onStatus("CEO was interrupted by force-close. Using partial output.");
+      return {
+        content: err.partialResult.content,
+        tokenCount: err.partialResult.tokenCount ?? 0,
+        cost: err.partialResult.cost ?? 0,
+      };
+    }
+    throw err;
+  }
 
   if (result.exitCode === 0 && result.content) {
     return { content: result.content, tokenCount: result.tokenCount, cost: result.cost };
@@ -266,7 +287,20 @@ async function runCeoWithRetry(
     "The previous attempt failed. Provide your best assessment with the information available.",
   ].join("\n");
 
-  const retry = await pool.runOne(cwd, ceo, simplifiedPrompt, task, `${activity} (retry)`, signal);
+  let retry;
+  try {
+    retry = await pool.runOne(cwd, ceo, simplifiedPrompt, task, `${activity} (retry)`, signal);
+  } catch (err: any) {
+    if (signal?.reason === "force-close" && err?.message === "Subagent was aborted" && hasUsablePartialContent(err.partialResult?.content)) {
+      callbacks.onStatus("CEO retry was interrupted by force-close. Using partial output.");
+      return {
+        content: err.partialResult.content,
+        tokenCount: result.tokenCount + (err.partialResult.tokenCount ?? 0),
+        cost: result.cost + (err.partialResult.cost ?? 0),
+      };
+    }
+    throw err;
+  }
   const totalCost = result.cost + retry.cost;
   const totalTokens = result.tokenCount + retry.tokenCount;
 
@@ -357,7 +391,7 @@ export async function runFreeformMessagingMeeting(
     // Create workstream threads from CEO output
     const workstreams = parsed?.workstreams ?? [{ title: "General Discussion", description: brief.title }];
     const createdThreads = workstreams.map(ws =>
-      createThread(threadState, ws.title, "ceo"),
+      createThread(threadState, ws.title, "ceo", null, rosterSlugs),
     );
 
     // Post CEO framing as broadcast in each thread.
@@ -467,8 +501,29 @@ export async function runFreeformMessagingMeeting(
     }
 
     // ── Final Synthesis ──
-    callbacks.onStatus("CEO synthesizing final decision...");
-    emitMessagingSnapshot(meetingId, brief, mode, constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 99, "CEO Synthesis", "CEO synthesizing final decision.", callbacks, pool);
+    const forceClosed = isForceCloseRequested(callbacks.signal);
+    callbacks.onStatus(
+      forceClosed
+        ? "Meeting force-closed. CEO synthesizing final decision with available data..."
+        : "CEO synthesizing final decision...",
+    );
+    emitMessagingSnapshot(
+      meetingId,
+      brief,
+      mode,
+      constraintsName,
+      constraintValues,
+      tracker,
+      startedAt,
+      threadState,
+      allAgents,
+      rosterAgents,
+      99,
+      "CEO Synthesis",
+      forceClosed ? "Meeting force-closed. CEO synthesizing final decision." : "CEO synthesizing final decision.",
+      callbacks,
+      pool,
+    );
 
     const synthExpertise = loadExpertise(cwd, ceo.slug);
     const ceoSynthScratchpad = loadScratchpad(cwd, ceo.slug);
@@ -480,8 +535,17 @@ export async function runFreeformMessagingMeeting(
       ceoSynthScratchpad,
     );
 
-    const earlyClose = !tracker.canContinue(config.budget_hard_stop, config.time_hard_stop);
-    const synthTask = earlyClose
+    const earlyClose = !forceClosed && !tracker.canContinue(config.budget_hard_stop, config.time_hard_stop);
+    const synthTask = forceClosed
+      ? [
+          "The operator force-closed the board meeting.",
+          "Produce your final Strategic Brief using only the information gathered so far.",
+          "Do not ask for another round of discussion.",
+          "Explicitly call out which questions, risks, or workstreams remain unresolved because the meeting was interrupted.",
+          "",
+          "If the decision involves data worth visualizing, include Mermaid diagrams.",
+        ].join("\n")
+      : earlyClose
       ? "Constraints reached. Produce your final Strategic Brief with available data. Note any gaps. Reference thread outcomes."
       : [
           "Synthesize all thread discussions into your final Strategic Brief.",
@@ -490,7 +554,8 @@ export async function runFreeformMessagingMeeting(
           "If the decision involves data worth visualizing, include Mermaid diagrams.",
         ].join("\n");
 
-    const synthRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, synthTask, "Synthesizing final decision", callbacks, callbacks.signal);
+    const synthSignal = forceClosed ? undefined : callbacks.signal;
+    const synthRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, synthTask, "Synthesizing final decision", callbacks, synthSignal);
     synthRes.content = processScratchpadOutput(cwd, ceo.slug, synthRes.content);
     tracker.addCost(synthRes.cost);
 
@@ -505,10 +570,16 @@ export async function runFreeformMessagingMeeting(
     }
 
     // Resolve all active threads
-    const resolveReason = earlyClose ? "constraints-exceeded" as const : "ceo-checkpoint" as const;
-    const resolveSummary = earlyClose
-      ? "Meeting concluded early due to constraint limits."
-      : "Meeting concluded by CEO synthesis.";
+    const resolveReason = forceClosed
+      ? "meeting-force-closed" as const
+      : earlyClose
+        ? "constraints-exceeded" as const
+        : "ceo-checkpoint" as const;
+    const resolveSummary = forceClosed
+      ? "Meeting force-closed after CEO final synthesis."
+      : earlyClose
+        ? "Meeting concluded early due to constraint limits."
+        : "Meeting concluded by CEO synthesis.";
     resolveAllActiveThreads(threadState, resolveReason, resolveSummary);
 
     // ── Collect Visuals ──
@@ -523,16 +594,26 @@ export async function runFreeformMessagingMeeting(
     let visualPaths: string[] = [];
 
     // ── Write Artifacts ──
-    const disposition = earlyClose
-      ? (tracker.budgetState === "exceeded" ? "budget-exceeded" : "completed")
-      : "completed";
+    const disposition = forceClosed
+      ? "force-closed"
+      : earlyClose
+        ? (tracker.budgetState === "exceeded" ? "budget-exceeded" : "completed")
+        : "completed";
+    const abortReason = forceClosed ? "Meeting was force-closed by operator." : undefined;
 
     const messagingLog = serializeToMessagingLog(
       threadState, meetingId, brief.filePath, mode, constraintsName,
       rosterSlugs, startedAt.toISOString(), disposition,
     );
-    const memoPath = writeMemo(cwd, brief.slug, synthRes.content, startedAt);
-    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog, startedAt);
+    const memoPath = writeMemo(
+      cwd,
+      brief.slug,
+      forceClosed
+        ? `${synthRes.content}\n\n[Boardroom force-closed. Reason: ${abortReason}]`
+        : synthRes.content,
+      startedAt,
+    );
+    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog);
 
     if (allMermaid.length > 0) {
       visualPaths = writeVisuals(cwd, meetingId, allMermaid);
@@ -548,7 +629,7 @@ export async function runFreeformMessagingMeeting(
 
     callbacks.onStatus(`Meeting complete (${disposition}). ${tracker.summary}`);
     pool.destroyAll();
-    return finalizeMessagingResult(memoPath, debateJsonPath, debateMarkdownPath, visualPaths, disposition, brief, mode, tracker, rosterSlugs);
+    return finalizeMessagingResult(memoPath, debateJsonPath, debateMarkdownPath, visualPaths, disposition, brief, mode, tracker, rosterSlugs, abortReason);
 
   } catch (err: any) {
     const disposition = callbacks.signal?.aborted ? getAbortDisposition(callbacks.signal) : "aborted";
@@ -589,7 +670,7 @@ export async function runFreeformMessagingMeeting(
     const memoContent = lastCeoMsg?.content ?? "[Meeting aborted. No CEO synthesis available.]";
 
     const memoPath = writeMemo(cwd, brief.slug, memoContent, startedAt);
-    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog, startedAt);
+    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog);
 
     const allMermaid: { label: string; code: string }[] = [];
     for (const msg of getAllMessages(threadState)) {
@@ -687,7 +768,7 @@ export async function runStructuredMessagingMeeting(
     // Create workstream threads
     const workstreams = parsed?.workstreams ?? [{ title: "General Discussion", description: brief.title }];
     const createdThreads = workstreams.map(ws =>
-      createThread(threadState, ws.title, "ceo"),
+      createThread(threadState, ws.title, "ceo", null, rosterSlugs),
     );
 
     // Post CEO framing in each thread.
@@ -816,8 +897,29 @@ export async function runStructuredMessagingMeeting(
     }
 
     // ── Phase 5: Final Decision ──
-    callbacks.onStatus("Phase 5: CEO final decision...");
-    emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 5, "CEO Final Decision", "CEO synthesizing the final decision.", callbacks, pool);
+    const forceClosed = isForceCloseRequested(callbacks.signal);
+    callbacks.onStatus(
+      forceClosed
+        ? "Structured meeting force-closed. CEO synthesizing final decision with available data..."
+        : "Phase 5: CEO final decision...",
+    );
+    emitMessagingSnapshot(
+      meetingId,
+      brief,
+      "structured",
+      constraintsName,
+      constraintValues,
+      tracker,
+      startedAt,
+      threadState,
+      allAgents,
+      rosterAgents,
+      5,
+      "CEO Final Decision",
+      forceClosed ? "Meeting force-closed. CEO synthesizing final decision." : "CEO synthesizing the final decision.",
+      callbacks,
+      pool,
+    );
 
     const synthExpertise = loadExpertise(cwd, ceo.slug);
     const ceoSynthScratchpad = loadScratchpad(cwd, ceo.slug);
@@ -829,8 +931,17 @@ export async function runStructuredMessagingMeeting(
       ceoSynthScratchpad,
     );
 
-    const earlyClose = !tracker.canContinue(config.budget_hard_stop, config.time_hard_stop);
-    const synthTask = earlyClose
+    const earlyClose = !forceClosed && !tracker.canContinue(config.budget_hard_stop, config.time_hard_stop);
+    const synthTask = forceClosed
+      ? [
+          "The operator force-closed the board meeting.",
+          "Produce your final Strategic Brief using only the information gathered so far.",
+          "Do not ask for another round of discussion.",
+          "Explicitly call out which questions, risks, or workstreams remain unresolved because the meeting was interrupted.",
+          "",
+          "If the decision involves data worth visualizing, include Mermaid diagrams.",
+        ].join("\n")
+      : earlyClose
       ? "Constraints reached. Produce your final Strategic Brief with available data. Note any gaps. Reference thread outcomes."
       : [
           "Synthesize all thread discussions into your final Strategic Brief.",
@@ -839,7 +950,8 @@ export async function runStructuredMessagingMeeting(
           "If the decision involves data worth visualizing, include Mermaid diagrams.",
         ].join("\n");
 
-    const synthRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, synthTask, "Synthesizing final decision", callbacks, callbacks.signal);
+    const synthSignal = forceClosed ? undefined : callbacks.signal;
+    const synthRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, synthTask, "Synthesizing final decision", callbacks, synthSignal);
     synthRes.content = processScratchpadOutput(cwd, ceo.slug, synthRes.content);
     tracker.addCost(synthRes.cost);
 
@@ -854,10 +966,16 @@ export async function runStructuredMessagingMeeting(
     }
 
     // Resolve all active threads
-    const sResolveReason = earlyClose ? "constraints-exceeded" as const : "ceo-checkpoint" as const;
-    const sResolveSummary = earlyClose
-      ? "Meeting concluded early due to constraint limits."
-      : "Meeting concluded by CEO synthesis.";
+    const sResolveReason = forceClosed
+      ? "meeting-force-closed" as const
+      : earlyClose
+        ? "constraints-exceeded" as const
+        : "ceo-checkpoint" as const;
+    const sResolveSummary = forceClosed
+      ? "Meeting force-closed after CEO final synthesis."
+      : earlyClose
+        ? "Meeting concluded early due to constraint limits."
+        : "Meeting concluded by CEO synthesis.";
     resolveAllActiveThreads(threadState, sResolveReason, sResolveSummary);
 
     // ── Collect Visuals & Write Artifacts ──
@@ -870,16 +988,26 @@ export async function runStructuredMessagingMeeting(
     }
     let visualPaths: string[] = [];
 
-    const disposition = earlyClose
-      ? (tracker.budgetState === "exceeded" ? "budget-exceeded" : "completed")
-      : "completed";
+    const disposition = forceClosed
+      ? "force-closed"
+      : earlyClose
+        ? (tracker.budgetState === "exceeded" ? "budget-exceeded" : "completed")
+        : "completed";
+    const abortReason = forceClosed ? "Meeting was force-closed by operator." : undefined;
 
     const messagingLog = serializeToMessagingLog(
       threadState, meetingId, brief.filePath, "structured", constraintsName,
       rosterSlugs, startedAt.toISOString(), disposition,
     );
-    const memoPath = writeMemo(cwd, brief.slug, synthRes.content, startedAt);
-    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog, startedAt);
+    const memoPath = writeMemo(
+      cwd,
+      brief.slug,
+      forceClosed
+        ? `${synthRes.content}\n\n[Boardroom force-closed. Reason: ${abortReason}]`
+        : synthRes.content,
+      startedAt,
+    );
+    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog);
 
     if (allMermaid.length > 0) {
       visualPaths = writeVisuals(cwd, meetingId, allMermaid);
@@ -894,7 +1022,7 @@ export async function runStructuredMessagingMeeting(
 
     callbacks.onStatus(`Structured meeting complete (${disposition}). ${tracker.summary}`);
     pool.destroyAll();
-    return finalizeMessagingResult(memoPath, debateJsonPath, debateMarkdownPath, visualPaths, disposition, brief, "structured", tracker, rosterSlugs);
+    return finalizeMessagingResult(memoPath, debateJsonPath, debateMarkdownPath, visualPaths, disposition, brief, "structured", tracker, rosterSlugs, abortReason);
 
   } catch (err: any) {
     const disposition = callbacks.signal?.aborted ? getAbortDisposition(callbacks.signal) : "aborted";
@@ -934,7 +1062,7 @@ export async function runStructuredMessagingMeeting(
     const memoContent = lastCeoMsg?.content ?? "[Meeting aborted. No CEO synthesis available.]";
 
     const memoPath = writeMemo(cwd, brief.slug, memoContent, startedAt);
-    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog, startedAt);
+    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog);
 
     const allMermaid: { label: string; code: string }[] = [];
     for (const msg of getAllMessages(threadState)) {

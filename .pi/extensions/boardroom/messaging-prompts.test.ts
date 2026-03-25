@@ -213,6 +213,7 @@ describe("composeMessagingSynthesisPrompt", () => {
       created_by: "ceo",
       created_at: new Date().toISOString(),
       status: "active" as const,
+      audience: ["ceo", "cfo"],
       participants: ["ceo", "cfo"],
       pending_replies: [],
       message_ids: ["msg-0001"],

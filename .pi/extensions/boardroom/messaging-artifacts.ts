@@ -18,7 +18,6 @@ function ensureDir(dir: string): void {
 export function writeMessagingLog(
   cwd: string,
   log: MessagingLog,
-  date: Date,
 ): { jsonPath: string; mdPath: string } {
   const dir = path.join(cwd, "boardroom", "debates");
   ensureDir(dir);

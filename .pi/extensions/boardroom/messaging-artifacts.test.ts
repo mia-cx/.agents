@@ -37,6 +37,7 @@ describe("writeMessagingLog", () => {
         status: "resolved",
         resolution_reason: "ceo-checkpoint",
         resolved_at: new Date().toISOString(),
+        audience: ["ceo", "cto"],
         participants: ["ceo", "cto"],
         pending_replies: [],
         message_ids: ["msg-0001", "msg-0002"],
@@ -76,7 +77,7 @@ describe("writeMessagingLog", () => {
       ],
     };
 
-    const { jsonPath, mdPath } = writeMessagingLog(tmpDir, log, new Date());
+    const { jsonPath, mdPath } = writeMessagingLog(tmpDir, log);
 
     expect(fs.existsSync(jsonPath)).toBe(true);
     expect(fs.existsSync(mdPath)).toBe(true);

@@ -21,6 +21,52 @@ import type {
 let messageCounter = 0;
 let threadCounter = 0;
 
+function dedupeSlugs(slugs: string[]): string[] {
+  return Array.from(new Set(slugs.filter(Boolean)));
+}
+
+export function canAgentAccessThread(thread: Thread, agentSlug: string): boolean {
+  return thread.audience.includes(agentSlug)
+    || thread.participants.includes(agentSlug)
+    || thread.pending_replies.includes(agentSlug);
+}
+
+export function resolveMessageRecipients(thread: Thread, type: MessageType, from: string, to: string[]): string[] {
+  if (type === "broadcast") {
+    return thread.audience.filter((agent) => agent !== from);
+  }
+  if (type === "moderation") {
+    return to.length > 0
+      ? dedupeSlugs(to).filter((agent) => agent !== from)
+      : thread.audience.filter((agent) => agent !== from);
+  }
+  return dedupeSlugs(to).filter((agent) => agent !== from);
+}
+
+export function isMessageVisibleToAgent(
+  thread: Thread,
+  message: RoutedMessage,
+  agentSlug: string,
+): boolean {
+  if (message.from === agentSlug) return true;
+
+  switch (message.type) {
+    case "direct":
+    case "ceo-only":
+      return message.to.includes(agentSlug);
+    case "broadcast":
+    case "request-reply":
+    case "reply":
+      return canAgentAccessThread(thread, agentSlug);
+    case "moderation":
+      return message.to.length > 0
+        ? message.to.includes(agentSlug)
+        : canAgentAccessThread(thread, agentSlug);
+    default:
+      return false;
+  }
+}
+
 function nextMessageId(): string {
   messageCounter++;
   return `msg-${String(messageCounter).padStart(4, "0")}`;
@@ -54,7 +100,13 @@ export function createThread(
   title: string,
   createdBy: string,
   parentId: string | null = null,
+  audience?: string[],
 ): Thread {
+  const parent = parentId ? state.threads.get(parentId) : undefined;
+  const resolvedAudience = dedupeSlugs([
+    ...(audience ?? parent?.audience ?? []),
+    createdBy,
+  ]);
   const thread: Thread = {
     id: nextThreadId(),
     title,
@@ -62,6 +114,7 @@ export function createThread(
     created_by: createdBy,
     created_at: new Date().toISOString(),
     status: "active",
+    audience: resolvedAudience.length > 0 ? resolvedAudience : [createdBy],
     participants: [createdBy],
     pending_replies: [],
     message_ids: [],
@@ -135,6 +188,12 @@ export function postMessage(
   const thread = state.threads.get(threadId);
   if (!thread) throw new Error(`Thread ${threadId} not found`);
 
+  for (const recipient of to) {
+    if (!thread.audience.includes(recipient)) {
+      thread.audience.push(recipient);
+    }
+  }
+
   const message: RoutedMessage = {
     id: nextMessageId(),
     type,
@@ -166,9 +225,7 @@ export function postMessage(
   state.agent_outboxes.set(from, outbox);
 
   // Deliver to inboxes
-  const recipients = type === "broadcast"
-    ? [...thread.participants.filter(p => p !== from)]
-    : to;
+  const recipients = resolveMessageRecipients(thread, type, from, to);
 
   for (const recipient of recipients) {
     const inbox = state.agent_inboxes.get(recipient) ?? [];
@@ -210,14 +267,13 @@ export function projectAgentContext(
 
   // Find threads this agent participates in
   for (const [, thread] of state.threads) {
-    if (
-      thread.participants.includes(agentSlug) ||
-      thread.pending_replies.includes(agentSlug)
-    ) {
+    if (canAgentAccessThread(thread, agentSlug)) {
       relevantThreads.push(thread);
       for (const msgId of thread.message_ids) {
         const msg = state.messages.get(msgId);
-        if (msg) relevantMessages.push(msg);
+        if (msg && isMessageVisibleToAgent(thread, msg, agentSlug)) {
+          relevantMessages.push(msg);
+        }
       }
     }
   }
@@ -248,7 +304,7 @@ export function getAgentMessageCounts(
 
   const threadIds = new Set<string>();
   for (const [, thread] of state.threads) {
-    if (thread.participants.includes(agentSlug) && (thread.status === "active" || thread.status === "quiet")) {
+    if (canAgentAccessThread(thread, agentSlug) && (thread.status === "active" || thread.status === "quiet")) {
       threadIds.add(thread.id);
     }
   }
@@ -267,6 +323,21 @@ export function getAgentMessageCounts(
 
 export function markInboxRead(state: ThreadState, agentSlug: string): void {
   state.agent_inboxes.set(agentSlug, []);
+}
+
+export function markInboxReadForThread(
+  state: ThreadState,
+  agentSlug: string,
+  threadId: string,
+): void {
+  const inboxIds = state.agent_inboxes.get(agentSlug) ?? [];
+  if (inboxIds.length === 0) return;
+
+  const remaining = inboxIds.filter((msgId) => {
+    const msg = state.messages.get(msgId);
+    return !msg || msg.thread_id !== threadId;
+  });
+  state.agent_inboxes.set(agentSlug, remaining);
 }
 
 // --- Quiet Thread Detection ---
@@ -504,6 +575,7 @@ export function buildRoomSummary(
   const parts: string[] = [];
 
   for (const [, thread] of state.threads) {
+    if (!canAgentAccessThread(thread, excludeAgent)) continue;
     if (thread.participants.includes(excludeAgent)) continue;
     if (thread.status === "closed" || thread.status === "resolved") {
       parts.push(`- [${thread.status}] "${thread.title}": ${thread.summary ?? "resolved"}`);
@@ -511,9 +583,14 @@ export function buildRoomSummary(
     }
 
     const msgCount = thread.message_ids.length;
-    const lastMsg = thread.message_ids.length > 0
-      ? state.messages.get(thread.message_ids[thread.message_ids.length - 1])
-      : null;
+    let lastMsg: RoutedMessage | null = null;
+    for (let i = thread.message_ids.length - 1; i >= 0; i--) {
+      const msg = state.messages.get(thread.message_ids[i]);
+      if (msg && isMessageVisibleToAgent(thread, msg, excludeAgent)) {
+        lastMsg = msg;
+        break;
+      }
+    }
     const preview = lastMsg
       ? lastMsg.content.slice(0, 150) + (lastMsg.content.length > 150 ? "..." : "")
       : "";

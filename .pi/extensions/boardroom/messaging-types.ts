@@ -65,6 +65,7 @@ export interface Thread {
   status: ThreadStatus;
   resolution_reason?: ThreadResolutionReason;
   resolved_at?: string;
+  audience: string[];               // agent slugs allowed to view shared thread content
   participants: string[];           // agent slugs that have posted
   pending_replies: string[];        // agent slugs expected to reply
   message_ids: string[];            // ordered message ids in this thread
