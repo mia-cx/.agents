@@ -16,10 +16,8 @@ import {
   type QueueCallbacks,
 } from "./round-queue.js";
 
-// Mock the runner module
-vi.mock("./runner.js", () => ({
-  runAgent: vi.fn(),
-}));
+// We pass a mock pool object directly to runSemiLiveRound instead
+// of mocking the module — simpler and more explicit.
 
 // Mock prompt-composer (loadExpertise)
 vi.mock("./prompt-composer.js", () => ({
@@ -45,11 +43,19 @@ vi.mock("./messaging-prompts.js", () => ({
   })),
 }));
 
-import { runAgent } from "./runner.js";
 import { parseRoutingHeaders } from "./messaging-prompts.js";
 
-const mockRunAgent = vi.mocked(runAgent);
+const mockRunOne = vi.fn();
 const mockParseRouting = vi.mocked(parseRoutingHeaders);
+
+const makePool = () => ({
+  runOne: mockRunOne,
+  ensureAgents: vi.fn(),
+  snapshot: vi.fn(() => []),
+  destroyAll: vi.fn(),
+  getOrCreate: vi.fn(),
+  get: vi.fn(),
+}) as any;
 
 const makeBrief = (): ParsedBrief => ({
   title: "Test Decision",
@@ -101,7 +107,7 @@ describe("round-queue", () => {
       const tracker = new ConstraintTracker(makeConstraintValues());
       const callbacks = makeCallbacks();
 
-      mockRunAgent.mockResolvedValue({
+      mockRunOne.mockResolvedValue({
         agent: "",
         content: "My assessment of the situation.",
         exitCode: 0,
@@ -115,13 +121,13 @@ describe("round-queue", () => {
         cwd, state, agents, allAgents, makeBrief(), "CEO framing",
         1, 1, tracker, makeConstraintValues(),
         { budget_hard_stop: false, time_hard_stop: false },
-        config, callbacks,
+        config, callbacks, makePool(),
       );
 
       // Both agents should have been called at least once
       expect(result.messagesPosted).toBeGreaterThanOrEqual(2);
       // Agent runs may exceed messages posted due to auto-convergence resolving threads
-      expect(mockRunAgent.mock.calls.length).toBeGreaterThanOrEqual(result.messagesPosted);
+      expect(mockRunOne.mock.calls.length).toBeGreaterThanOrEqual(result.messagesPosted);
     });
 
     it("only queues agents with unread inbox on round > 1", async () => {
@@ -141,7 +147,7 @@ describe("round-queue", () => {
       const tracker = new ConstraintTracker(makeConstraintValues());
       const callbacks = makeCallbacks();
 
-      mockRunAgent.mockResolvedValue({
+      mockRunOne.mockResolvedValue({
         agent: "cto",
         content: "CTO response.",
         exitCode: 0,
@@ -153,11 +159,11 @@ describe("round-queue", () => {
         cwd, state, agents, allAgents, makeBrief(), "CEO framing",
         1, 2, tracker, makeConstraintValues(),
         { budget_hard_stop: false, time_hard_stop: false },
-        DEFAULT_ROUND_CONFIG, callbacks,
+        DEFAULT_ROUND_CONFIG, callbacks, makePool(),
       );
 
       // Only CTO should have been called (CFO has empty inbox)
-      expect(mockRunAgent).toHaveBeenCalledTimes(1);
+      expect(mockRunOne).toHaveBeenCalledTimes(1);
       expect(result.messagesPosted).toBe(1);
     });
 
@@ -171,7 +177,7 @@ describe("round-queue", () => {
       const callbacks = makeCallbacks();
 
       let callCount = 0;
-      mockRunAgent.mockImplementation(async () => {
+      mockRunOne.mockImplementation(async () => {
         callCount++;
         return {
           agent: "",
@@ -187,7 +193,7 @@ describe("round-queue", () => {
         cwd, state, agents, allAgents, makeBrief(), "CEO framing",
         1, 1, tracker, makeConstraintValues(),
         { budget_hard_stop: false, time_hard_stop: false },
-        config, callbacks,
+        config, callbacks, makePool(),
       );
 
       expect(result.messagesPosted).toBe(2);
@@ -203,7 +209,7 @@ describe("round-queue", () => {
       const tracker = new ConstraintTracker(makeConstraintValues());
       const callbacks = makeCallbacks();
 
-      mockRunAgent.mockResolvedValue({
+      mockRunOne.mockResolvedValue({
         agent: "cfo",
         content: "",
         exitCode: 1,
@@ -216,7 +222,7 @@ describe("round-queue", () => {
         cwd, state, agents, allAgents, makeBrief(), "CEO framing",
         1, 1, tracker, makeConstraintValues(),
         { budget_hard_stop: false, time_hard_stop: false },
-        DEFAULT_ROUND_CONFIG, callbacks,
+        DEFAULT_ROUND_CONFIG, callbacks, makePool(),
       );
 
       // Failure notice posted as a message
@@ -240,7 +246,7 @@ describe("round-queue", () => {
       // Third call: CFO re-queued by CTO's broadcast, responds
       // This would continue unless threads go quiet
       let callIdx = 0;
-      mockRunAgent.mockImplementation(async () => {
+      mockRunOne.mockImplementation(async () => {
         callIdx++;
         return {
           agent: "",
@@ -257,13 +263,13 @@ describe("round-queue", () => {
         cwd, state, agents, allAgents, makeBrief(), "CEO framing",
         1, 1, tracker, makeConstraintValues(),
         { budget_hard_stop: false, time_hard_stop: false },
-        config, callbacks,
+        config, callbacks, makePool(),
       );
 
       // Should have posted more than 2 messages due to re-queuing
       expect(result.messagesPosted).toBeGreaterThanOrEqual(2);
       // Agent runs may exceed messages posted due to auto-convergence resolving threads
-      expect(mockRunAgent.mock.calls.length).toBeGreaterThanOrEqual(result.messagesPosted);
+      expect(mockRunOne.mock.calls.length).toBeGreaterThanOrEqual(result.messagesPosted);
     });
 
     it("tracks cost and tokens", async () => {
@@ -275,7 +281,7 @@ describe("round-queue", () => {
       const tracker = new ConstraintTracker(makeConstraintValues());
       const callbacks = makeCallbacks();
 
-      mockRunAgent.mockResolvedValue({
+      mockRunOne.mockResolvedValue({
         agent: "cfo",
         content: "My analysis.",
         exitCode: 0,
@@ -287,7 +293,7 @@ describe("round-queue", () => {
         cwd, state, agents, allAgents, makeBrief(), "CEO framing",
         1, 1, tracker, makeConstraintValues(),
         { budget_hard_stop: false, time_hard_stop: false },
-        DEFAULT_ROUND_CONFIG, callbacks,
+        DEFAULT_ROUND_CONFIG, callbacks, makePool(),
       );
 
       expect(result.totalCost).toBeCloseTo(0.10);
@@ -314,7 +320,7 @@ describe("round-queue", () => {
         cwd, state, agents, allAgents, makeBrief(), "CEO framing",
         1, 1, tracker, makeConstraintValues(),
         { budget_hard_stop: false, time_hard_stop: false },
-        DEFAULT_ROUND_CONFIG, callbacks,
+        DEFAULT_ROUND_CONFIG, callbacks, makePool(),
       );
 
       expect(result.endReason).toBe("aborted");
@@ -336,7 +342,7 @@ describe("round-queue", () => {
         cwd, state, agents, allAgents, makeBrief(), "CEO framing",
         1, 1, tracker, { max_debate_rounds: 5, budget: 0.01, time_limit_minutes: 30 },
         { budget_hard_stop: true, time_hard_stop: false },
-        DEFAULT_ROUND_CONFIG, callbacks,
+        DEFAULT_ROUND_CONFIG, callbacks, makePool(),
       );
 
       expect(result.endReason).toBe("constraints");
@@ -357,7 +363,7 @@ describe("round-queue", () => {
       vi.mocked(extractScratchpadUpdate).mockReturnValue("Updated notes");
       vi.mocked(stripScratchpadBlock).mockReturnValue("Clean content");
 
-      mockRunAgent.mockResolvedValue({
+      mockRunOne.mockResolvedValue({
         agent: "cfo",
         content: "<!-- SCRATCHPAD -->Updated notes<!-- /SCRATCHPAD -->Clean content",
         exitCode: 0,
@@ -369,7 +375,7 @@ describe("round-queue", () => {
         cwd, state, agents, allAgents, makeBrief(), "CEO framing",
         1, 1, tracker, makeConstraintValues(),
         { budget_hard_stop: false, time_hard_stop: false },
-        DEFAULT_ROUND_CONFIG, callbacks,
+        DEFAULT_ROUND_CONFIG, callbacks, makePool(),
       );
 
       expect(result.messagesPosted).toBe(1);
@@ -386,7 +392,7 @@ describe("round-queue", () => {
       const tracker = new ConstraintTracker(makeConstraintValues());
       const callbacks = makeCallbacks();
 
-      mockRunAgent.mockResolvedValue({
+      mockRunOne.mockResolvedValue({
         agent: "cfo",
         content: "TO: cto\nTYPE: direct\nHey CTO, what about costs?",
         exitCode: 0,
@@ -405,7 +411,7 @@ describe("round-queue", () => {
         cwd, state, agents, allAgents, makeBrief(), "CEO framing",
         1, 1, tracker, makeConstraintValues(),
         { budget_hard_stop: false, time_hard_stop: false },
-        DEFAULT_ROUND_CONFIG, callbacks,
+        DEFAULT_ROUND_CONFIG, callbacks, makePool(),
       );
 
       expect(result.messagesPosted).toBe(1);
@@ -423,7 +429,7 @@ describe("round-queue", () => {
       const tracker = new ConstraintTracker(makeConstraintValues());
       const callbacks = makeCallbacks();
 
-      mockRunAgent.mockResolvedValue({
+      mockRunOne.mockResolvedValue({
         agent: "cfo",
         content: "My final thoughts.",
         exitCode: 0,
@@ -435,7 +441,7 @@ describe("round-queue", () => {
         cwd, state, agents, allAgents, makeBrief(), "CEO framing",
         1, 1, tracker, makeConstraintValues(),
         { budget_hard_stop: false, time_hard_stop: false },
-        DEFAULT_ROUND_CONFIG, callbacks,
+        DEFAULT_ROUND_CONFIG, callbacks, makePool(),
       );
 
       expect(result.endReason).toBe("quiet");

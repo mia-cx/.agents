@@ -29,7 +29,7 @@ import {
 } from "./messaging-prompts.js";
 import { loadExpertise } from "./prompt-composer.js";
 import { loadScratchpad, saveScratchpad, extractScratchpadUpdate, stripScratchpadBlock } from "./scratchpad.js";
-import { runAgent } from "./runner.js";
+import { SessionPool } from "./runtime.js";
 import { ConstraintTracker } from "./constraints.js";
 
 export interface QueueCallbacks {
@@ -85,6 +85,7 @@ export async function runSemiLiveRound(
   config: { budget_hard_stop: boolean; time_hard_stop: boolean },
   roundConfig: RoundConfig,
   callbacks: QueueCallbacks,
+  pool: SessionPool,
 ): Promise<RoundResult> {
   const roundStart = Date.now();
   let messagesPosted = 0;
@@ -163,7 +164,7 @@ export async function runSemiLiveRound(
 
       callbacks.onStatus(`${agent.name} responding...`);
 
-      const result = await runAgent(cwd, agent.slug, agent.model, prompt, task, callbacks.signal);
+      const result = await pool.runOne(cwd, agent, prompt, task, `${agent.name} responding`, callbacks.signal);
       tracker.addCost(result.cost);
       totalCost += result.cost;
       totalTokens += result.tokenCount;
