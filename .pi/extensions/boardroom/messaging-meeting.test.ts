@@ -36,6 +36,13 @@ vi.mock("./runtime.js", () => ({
       return runtimeMocks.destroyAll(...args);
     }
   },
+  preferLocalProviderModel: (model: string | undefined) => {
+    if (!model) return undefined;
+    if (model.includes("/")) return model;
+    if (/^(claude|sonnet|opus|haiku)\b/i.test(model)) return `anthropic/${model}`;
+    if (/^(gpt|o[1-9]|codex)\b/i.test(model)) return `openai-codex/${model}`;
+    return model;
+  },
 }));
 
 vi.mock("./round-queue.js", () => ({
@@ -440,5 +447,103 @@ describe("messaging-meeting", () => {
     const debate = JSON.parse(fs.readFileSync(result.debateJsonPath, "utf-8")) as { threads: Array<{ title: string }> };
     expect(debate.threads).toHaveLength(1);
     expect(debate.threads[0]?.title).toBe("General Discussion");
+  });
+
+  it("counts the stress-test phase against structured round usage", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO"),
+      { ...makeAgent("red-team", "Red Team"), tags: ["stress-test"] },
+    ];
+    const onSnapshot = vi.fn();
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo", "red-team"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Strategic brief.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    await runStructuredMessagingMeeting(
+      cwd,
+      makeBrief("structured-stress-rounds"),
+      agents,
+      "standard",
+      makeConstraints({ max_debate_rounds: 3 }),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot,
+      },
+    );
+
+    expect(roundQueueMocks.runSemiLiveRound).toHaveBeenCalledTimes(2);
+    expect(onSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      phaseLabel: "Stress Test",
+      roundsUsed: 2,
+      round: 2,
+    }));
+  });
+
+  it("uses provider-prefixed model labels in fallback agent snapshots", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO"),
+    ];
+    const onSnapshot = vi.fn();
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Final brief.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    await runFreeformMessagingMeeting(
+      cwd,
+      makeBrief("fallback-model-labels"),
+      agents,
+      "freeform",
+      "standard",
+      makeConstraints(),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot,
+      },
+    );
+
+    expect(onSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      agents: expect.arrayContaining([
+        expect.objectContaining({
+          slug: "cfo",
+          modelLabel: "anthropic/claude-sonnet-4-6",
+        }),
+      ]),
+    }));
   });
 });

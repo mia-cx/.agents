@@ -118,19 +118,26 @@ function resolveReplyRecipients(
 
 function resolveRoutingRecipients(
   threadState: ThreadState,
+  targetThread: Thread | undefined,
   agentSlug: string,
   msgType: MessageType,
   explicitRecipients: string[],
   replyTo: string | null,
 ): string[] {
   if (explicitRecipients.length > 0) {
-    return dedupeRecipients(explicitRecipients).filter((slug) => slug !== agentSlug);
+    const recipients = dedupeRecipients(explicitRecipients).filter((slug) => slug !== agentSlug);
+    if (recipients.length > 0 || msgType !== "request-reply") {
+      return recipients;
+    }
   }
   if (msgType === "ceo-only") {
     return agentSlug === "ceo" ? [] : ["ceo"];
   }
   if (msgType === "reply") {
     return resolveReplyRecipients(threadState, agentSlug, replyTo);
+  }
+  if (msgType === "request-reply") {
+    return targetThread?.audience.filter((slug) => slug !== agentSlug) ?? [];
   }
   return [];
 }
@@ -283,7 +290,6 @@ export async function runSemiLiveRound(
       if (routing.type === "direct" || routing.type === "request-reply" || routing.type === "reply" || routing.type === "ceo-only") {
         msgType = routing.type as MessageType;
       }
-      const to = resolveRoutingRecipients(threadState, agent.slug, msgType, routing.to, routing.replyTo);
 
       // Determine target thread (active or quiet threads can receive messages)
       let targetThread = focusThread;
@@ -297,6 +303,7 @@ export async function runSemiLiveRound(
           // If reply-to references a resolved/closed thread, fall through to default
         }
       }
+      const to = resolveRoutingRecipients(threadState, targetThread, agent.slug, msgType, routing.to, routing.replyTo);
 
       // Handle child thread creation
       if (routing.newThread && targetThread) {

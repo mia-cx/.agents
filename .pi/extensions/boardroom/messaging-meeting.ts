@@ -39,6 +39,7 @@ import { buildThreadGraph, renderThreadGraph } from "./thread-graph.js";
 import { extractMermaidBlocks } from "./visuals.js";
 import { loadExpertise } from "./prompt-composer.js";
 import { findAgentsByTag } from "./agents.js";
+import { preferLocalProviderModel } from "./runtime.js";
 
 export interface MessagingMeetingCallbacks extends Pick<MeetingCallbacks, "onStatus" | "onAgentUpdate" | "onConfirmRoster" | "onSnapshot" | "signal"> {}
 
@@ -440,8 +441,8 @@ function buildMessagingAgentSnapshots(
       slug: agent.slug,
       name: agent.name,
       status: "idle" as const,
-      modelLabel: agent.model,
-      modelAltLabel: agent.modelAlt,
+      modelLabel: preferLocalProviderModel(agent.model) ?? "default",
+      modelAltLabel: preferLocalProviderModel(agent.modelAlt),
       activity: threadActivity,
       turns: 0,
       totalTokens: 0,
@@ -956,6 +957,7 @@ export async function runStructuredMessagingMeeting(
       const stressAgents = findAgentsByTag(rosterAgents, "stress-test");
 
       if (stressAgents.length > 0) {
+        tracker.incrementRound();
         callbacks.onStatus("Phase 3: Stress test via semi-live queue...");
         emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 3, "Stress Test", "Running adversarial stress test.", callbacks, pool);
 

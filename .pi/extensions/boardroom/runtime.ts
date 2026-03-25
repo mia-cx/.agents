@@ -61,7 +61,7 @@ async function writeSystemPromptFile(
 
 export type RuntimeEventHandler = (update: AgentRuntimeUpdate) => void;
 
-function preferLocalProviderModel(model: string | undefined): string | undefined {
+export function preferLocalProviderModel(model: string | undefined): string | undefined {
   if (!model) return undefined;
   if (model.includes("/")) return model;
 

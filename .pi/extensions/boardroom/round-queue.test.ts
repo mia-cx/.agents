@@ -515,6 +515,50 @@ describe("round-queue", () => {
       expect(state.agent_inboxes.get("ceo")).toHaveLength(1);
     });
 
+    it("falls back to the thread audience for request-reply without TO recipients", async () => {
+      const thread = createThread(state, "Revenue", "ceo", null, ["ceo", "cfo", "cto"]);
+      const framing = postMessage(state, "broadcast", "ceo", [], thread.id, "CEO framing", 1, 0, 100, 0.05);
+      state.agent_inboxes.set("cfo", [framing.id]);
+
+      const agents = [makeAgent("cfo", "CFO"), makeAgent("cto", "CTO")];
+      const allAgents = [makeAgent("ceo", "CEO"), ...agents];
+      const tracker = new ConstraintTracker(makeConstraintValues());
+      const callbacks = makeCallbacks();
+
+      mockRunOne.mockResolvedValue({
+        agent: "cfo",
+        content: "Can someone validate this forecast?",
+        exitCode: 0,
+        tokenCount: 80,
+        cost: 0.03,
+      });
+
+      mockParseRouting.mockReturnValue({
+        to: [],
+        replyTo: null,
+        type: "request-reply",
+        newThread: null,
+        content: "Can someone validate this forecast?",
+      });
+
+      const result = await runSemiLiveRound(
+        cwd, state, agents, allAgents, makeBrief(), "CEO framing",
+        1, 2, tracker, makeConstraintValues(),
+        { budget_hard_stop: false, time_hard_stop: false },
+        { maxMessagesPerRound: 1, roundTimeoutSeconds: 180 }, callbacks, makePool(),
+      );
+
+      const posted = vi.mocked(callbacks.onMessagePosted).mock.calls[0]?.[0];
+      expect(result.messagesPosted).toBe(1);
+      expect(callbacks.onMessagePosted).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "request-reply", to: ["ceo", "cto"] }),
+      );
+      expect(posted?.id).toBeDefined();
+      expect(state.agent_inboxes.get("ceo")).toContain(posted?.id);
+      expect(state.agent_inboxes.get("cto")).toContain(posted?.id);
+      expect(thread.pending_replies).toEqual(expect.arrayContaining(["ceo", "cto"]));
+    });
+
     it("limits private child threads to the sender and intended recipients", async () => {
       const parent = createThread(state, "Revenue", "ceo", null, ["ceo", "cfo", "cto"]);
       const framing = postMessage(state, "broadcast", "ceo", [], parent.id, "CEO framing", 1, 0, 100, 0.05);
