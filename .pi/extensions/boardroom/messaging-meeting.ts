@@ -19,8 +19,6 @@ import {
   getAllThreads,
   getAllMessages,
   serializeToMessagingLog,
-  resolveThread,
-  getActiveThreads,
   resetCounters,
   resolveAllActiveThreads,
   markUndeliverableMessages,
@@ -323,7 +321,7 @@ export async function runFreeformMessagingMeeting(
     // Parse workstreams and roster from CEO output
     const parsed = parseWorkstreamsFromCeoOutput(framingRes.content);
     const rosterNames = parsed?.roster.map(r => r.name) ?? [];
-    const rosterAgents = resolveRoster(allAgents, rosterNames);
+    let rosterAgents = resolveRoster(allAgents, rosterNames);
     const rosterRationale = parsed?.rationale ?? "Full board (CEO workstream selection could not be parsed)";
 
     // Confirm roster
@@ -339,12 +337,10 @@ export async function runFreeformMessagingMeeting(
       throw new Error("Meeting cancelled during roster review.");
     }
     if (rosterDecision.action === "reject") {
-      rosterAgents.length = 0;
-      rosterAgents.push(...nonCeo);
+      rosterAgents = [...nonCeo];
     } else if (rosterDecision.action === "edit") {
       const editedRoster = resolveRosterSelection(allAgents, rosterDecision.roster);
-      rosterAgents.length = 0;
-      rosterAgents.push(...(editedRoster.length > 0 ? editedRoster : nonCeo));
+      rosterAgents = editedRoster.length > 0 ? editedRoster : [...nonCeo];
     }
 
     rosterSlugs = ["ceo", ...rosterAgents.map(a => a.slug)];
@@ -355,12 +351,15 @@ export async function runFreeformMessagingMeeting(
       createThread(threadState, ws.title, "ceo"),
     );
 
-    // Post CEO framing as broadcast in each thread
-    for (const thread of createdThreads) {
+    // Post CEO framing as broadcast in each thread.
+    // Only the first thread carries the real cost/tokens to avoid
+    // inflating serializeToMessagingLog's total_cost.
+    for (let i = 0; i < createdThreads.length; i++) {
       postMessage(
         threadState, "broadcast", "ceo", [],
-        thread.id, framingRes.content, 1, 0,
-        framingRes.tokenCount, framingRes.cost,
+        createdThreads[i].id, framingRes.content, 1, 0,
+        i === 0 ? framingRes.tokenCount : 0,
+        i === 0 ? framingRes.cost : 0,
       );
     }
 
@@ -648,7 +647,7 @@ export async function runStructuredMessagingMeeting(
 
     const parsed = parseWorkstreamsFromCeoOutput(framingRes.content);
     const rosterNames = parsed?.roster.map(r => r.name) ?? [];
-    const rosterAgents = resolveRoster(allAgents, rosterNames);
+    let rosterAgents = resolveRoster(allAgents, rosterNames);
     const rosterRationale = parsed?.rationale ?? "Full board (CEO workstream selection could not be parsed)";
 
     tracker.pause();
@@ -663,12 +662,10 @@ export async function runStructuredMessagingMeeting(
       throw new Error("Meeting cancelled during roster review.");
     }
     if (rosterDecision.action === "reject") {
-      rosterAgents.length = 0;
-      rosterAgents.push(...nonCeo);
+      rosterAgents = [...nonCeo];
     } else if (rosterDecision.action === "edit") {
       const editedRoster = resolveRosterSelection(allAgents, rosterDecision.roster);
-      rosterAgents.length = 0;
-      rosterAgents.push(...(editedRoster.length > 0 ? editedRoster : nonCeo));
+      rosterAgents = editedRoster.length > 0 ? editedRoster : [...nonCeo];
     }
 
     rosterSlugs = ["ceo", ...rosterAgents.map(a => a.slug)];
@@ -679,12 +676,14 @@ export async function runStructuredMessagingMeeting(
       createThread(threadState, ws.title, "ceo"),
     );
 
-    // Post CEO framing in each thread
-    for (const thread of createdThreads) {
+    // Post CEO framing in each thread.
+    // Only the first thread carries cost/tokens — see freeform path.
+    for (let i = 0; i < createdThreads.length; i++) {
       postMessage(
         threadState, "broadcast", "ceo", [],
-        thread.id, framingRes.content, 1, 0,
-        framingRes.tokenCount, framingRes.cost,
+        createdThreads[i].id, framingRes.content, 1, 0,
+        i === 0 ? framingRes.tokenCount : 0,
+        i === 0 ? framingRes.cost : 0,
       );
     }
 
