@@ -101,6 +101,52 @@ function agentHasPendingWork(threadState: ThreadState, agentSlug: string): boole
   return getPostableThreads(threadState).some((thread) => thread.pending_replies.includes(agentSlug));
 }
 
+function dedupeRecipients(slugs: string[]): string[] {
+  return Array.from(new Set(slugs.filter(Boolean)));
+}
+
+function resolveReplyRecipients(
+  threadState: ThreadState,
+  agentSlug: string,
+  replyTo: string | null,
+): string[] {
+  if (!replyTo) return [];
+  const replyMsg = threadState.messages.get(replyTo);
+  if (!replyMsg || replyMsg.from === agentSlug) return [];
+  return [replyMsg.from];
+}
+
+function resolveRoutingRecipients(
+  threadState: ThreadState,
+  agentSlug: string,
+  msgType: MessageType,
+  explicitRecipients: string[],
+  replyTo: string | null,
+): string[] {
+  if (explicitRecipients.length > 0) {
+    return dedupeRecipients(explicitRecipients).filter((slug) => slug !== agentSlug);
+  }
+  if (msgType === "ceo-only") {
+    return agentSlug === "ceo" ? [] : ["ceo"];
+  }
+  if (msgType === "reply") {
+    return resolveReplyRecipients(threadState, agentSlug, replyTo);
+  }
+  return [];
+}
+
+function resolveChildThreadAudience(
+  parentThread: Thread,
+  agentSlug: string,
+  msgType: MessageType,
+  recipients: string[],
+): string[] {
+  if (msgType === "broadcast" || msgType === "moderation") {
+    return parentThread.audience;
+  }
+  return dedupeRecipients([agentSlug, ...recipients]);
+}
+
 export async function runSemiLiveRound(
   cwd: string,
   threadState: ThreadState,
@@ -231,6 +277,14 @@ export async function runSemiLiveRound(
       // Parse routing headers
       const routing = parseRoutingHeaders(content);
 
+      // Determine message type and recipients before creating child threads so
+      // private child-thread metadata inherits the right audience from the start.
+      let msgType: MessageType = "broadcast";
+      if (routing.type === "direct" || routing.type === "request-reply" || routing.type === "reply" || routing.type === "ceo-only") {
+        msgType = routing.type as MessageType;
+      }
+      const to = resolveRoutingRecipients(threadState, agent.slug, msgType, routing.to, routing.replyTo);
+
       // Determine target thread (active or quiet threads can receive messages)
       let targetThread = focusThread;
       if (routing.replyTo) {
@@ -246,7 +300,13 @@ export async function runSemiLiveRound(
 
       // Handle child thread creation
       if (routing.newThread && targetThread) {
-        const childThread = createThread(threadState, routing.newThread, agent.slug, targetThread.id);
+        const childThread = createThread(
+          threadState,
+          routing.newThread,
+          agent.slug,
+          targetThread.id,
+          resolveChildThreadAudience(targetThread, agent.slug, msgType, to),
+        );
         callbacks.onStatus(`${agent.name} created child thread: "${routing.newThread}"`);
         targetThread = childThread;
       }
@@ -256,13 +316,6 @@ export async function runSemiLiveRound(
         callbacks.onStatus(`${agent.name}: no active thread to post in. Message dropped.`);
         continue;
       }
-
-      // Determine message type
-      let msgType: MessageType = "broadcast";
-      if (routing.type === "direct" || routing.type === "request-reply" || routing.type === "reply" || routing.type === "ceo-only") {
-        msgType = routing.type as MessageType;
-      }
-      const to = routing.to.length > 0 ? routing.to : (msgType === "ceo-only" ? ["ceo"] : []);
 
       const posted = postMessage(
         threadState, msgType, agent.slug, to,

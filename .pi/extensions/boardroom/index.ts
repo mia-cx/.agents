@@ -10,6 +10,7 @@ import { parseBrief, listBriefs } from "./brief-parser.js";
 import { loadConfig, resolveConstraints } from "./config.js";
 import { runFreeformMeeting, runStructuredMeeting } from "./meeting.js";
 import { runFreeformMessagingMeeting, runStructuredMessagingMeeting } from "./messaging-meeting.js";
+import { getBoardroomExecutiveWritePolicy, isMutatingBashCommand } from "./runtime.js";
 import type { MeetingCallbacks, MeetingResult, RosterConfirmation } from "./meeting.js";
 import type { AgentConfig, AgentRuntimeUpdate, MeetingMode, MeetingProgressSnapshot, MessagingMode } from "./types.js";
 import { listPastMeetings } from "./artifacts.js";
@@ -113,25 +114,6 @@ function resolveModelLabel(model: string | undefined): string {
   return model;
 }
 
-function getBoardroomExecutiveWritePolicy(): {
-  slug: string | undefined;
-  allowedWritePath: string | undefined;
-  briefsDir: string | undefined;
-} | null {
-  if (process.env.BOARDROOM_EXECUTIVE_SESSION !== "1") return null;
-  const expectedParentPid = Number(process.env.BOARDROOM_EXECUTIVE_PARENT_PID ?? "");
-  // Only enforce the boardroom write fence inside the direct Pi subprocesses
-  // launched by the meeting runtime, not in any nested Pi children they spawn.
-  if (!Number.isInteger(expectedParentPid) || expectedParentPid <= 0 || process.ppid !== expectedParentPid) {
-    return null;
-  }
-  return {
-    slug: process.env.BOARDROOM_EXECUTIVE_SLUG?.trim() || undefined,
-    allowedWritePath: process.env.BOARDROOM_ALLOWED_WRITE_PATH?.trim() || undefined,
-    briefsDir: process.env.BOARDROOM_BRIEFS_DIR?.trim() || undefined,
-  };
-}
-
 function resolveToolPath(cwd: string, maybePath: string | undefined): string | undefined {
   if (!maybePath?.trim()) return undefined;
   return path.isAbsolute(maybePath) ? path.normalize(maybePath) : path.resolve(cwd, maybePath);
@@ -141,20 +123,6 @@ function isPathWithin(targetPath: string | undefined, parentPath: string | undef
   if (!targetPath || !parentPath) return false;
   const relative = path.relative(parentPath, targetPath);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-function isMutatingBashCommand(command: string): boolean {
-  const patterns = [
-    /(^|[;&|])\s*(rm|mv|cp|touch|install|truncate)\b/i,
-    /(^|[;&|])\s*sed\b[^\n]*\s-i\b/i,
-    /(^|[;&|])\s*perl\b[^\n]*-pi\b/i,
-    /(^|[;&|])\s*(python[23]?|node|ruby|php|lua)\b/i,
-    /(^|[;&|])\s*(curl|wget)\b[^\n]*(-o|--output)\b/i,
-    /(^|[;&|])\s*dd\b/i,
-    /\|\s*tee\b/i,
-    /(^|[^<])>>?/,
-  ];
-  return patterns.some((pattern) => pattern.test(command));
 }
 
 function parseModelSpec(model: string | undefined): { base: string | undefined; effort: ReasoningEffort } {

@@ -172,7 +172,9 @@ async function runMessagingFramingPhase(
   const rosterSlugs = ["ceo", ...rosterAgents.map(a => a.slug)];
   pool.ensureAgents(rosterAgents, "Awaiting first round");
 
-  const workstreams = parsed?.workstreams ?? [{ title: "General Discussion", description: brief.title }];
+  const workstreams = parsed?.workstreams && parsed.workstreams.length > 0
+    ? parsed.workstreams
+    : [{ title: "General Discussion", description: brief.title }];
   const createdThreads = workstreams.map(ws =>
     createThread(threadState, ws.title, "ceo", null, rosterSlugs),
   );

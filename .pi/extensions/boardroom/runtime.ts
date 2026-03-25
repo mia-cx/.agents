@@ -72,6 +72,34 @@ function preferLocalProviderModel(model: string | undefined): string | undefined
   return model;
 }
 
+export function getBoardroomExecutiveWritePolicy(): {
+  slug: string | undefined;
+  allowedWritePath: string | undefined;
+  briefsDir: string | undefined;
+} | null {
+  if (process.env.BOARDROOM_EXECUTIVE_SESSION !== "1") return null;
+  return {
+    slug: process.env.BOARDROOM_EXECUTIVE_SLUG?.trim() || undefined,
+    allowedWritePath: process.env.BOARDROOM_ALLOWED_WRITE_PATH?.trim() || undefined,
+    briefsDir: process.env.BOARDROOM_BRIEFS_DIR?.trim() || undefined,
+  };
+}
+
+export function isMutatingBashCommand(command: string): boolean {
+  const patterns = [
+    /(^|[;&|])\s*(rm|mv|cp|touch|install|truncate)\b/i,
+    /(^|[;&|])\s*sed\b[^\n]*\s-i\b/i,
+    /(^|[;&|])\s*perl\b[^\n]*-pi\b/i,
+    /(^|[;&|])\s*(python[23]?|node|ruby|php|lua)\b/i,
+    /(^|[;&|])\s*(env\b[^\n]*\s+)?(pi|bash|sh|zsh|fish)\b/i,
+    /(^|[;&|])\s*(curl|wget)\b[^\n]*(-o|--output)\b/i,
+    /(^|[;&|])\s*dd\b/i,
+    /\|\s*tee\b/i,
+    /(^|[^<])>>?/,
+  ];
+  return patterns.some((pattern) => pattern.test(command));
+}
+
 function stringifyRuntimeError(value: unknown): string | undefined {
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -278,7 +306,6 @@ export class BoardMemberSession {
           env: {
             ...process.env,
             BOARDROOM_EXECUTIVE_SESSION: "1",
-            BOARDROOM_EXECUTIVE_PARENT_PID: String(process.pid),
             BOARDROOM_EXECUTIVE_SLUG: this.slug,
             BOARDROOM_ALLOWED_WRITE_PATH: path.join(cwd, "boardroom", "scratchpads", `${this.slug}.md`),
             BOARDROOM_BRIEFS_DIR: path.join(cwd, "boardroom", "briefs"),

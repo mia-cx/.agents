@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { BoardMemberSession, SessionPool } from "./runtime.js";
+import { BoardMemberSession, SessionPool, getBoardroomExecutiveWritePolicy, isMutatingBashCommand } from "./runtime.js";
 import type { AgentConfig, AgentRuntimeUpdate } from "./types.js";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -369,6 +369,44 @@ describe("BoardMemberSession", () => {
       else process.env.BOARDROOM_UNSTICK_SAME_TOOL_COUNT = previousSameTool;
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("executive write policy helpers", () => {
+  it("keeps the write fence active for nested executive sessions", () => {
+    const previousSession = process.env.BOARDROOM_EXECUTIVE_SESSION;
+    const previousSlug = process.env.BOARDROOM_EXECUTIVE_SLUG;
+    const previousWritePath = process.env.BOARDROOM_ALLOWED_WRITE_PATH;
+    const previousBriefsDir = process.env.BOARDROOM_BRIEFS_DIR;
+
+    process.env.BOARDROOM_EXECUTIVE_SESSION = "1";
+    process.env.BOARDROOM_EXECUTIVE_SLUG = "cfo";
+    process.env.BOARDROOM_ALLOWED_WRITE_PATH = "/tmp/cfo.md";
+    process.env.BOARDROOM_BRIEFS_DIR = "/tmp/briefs";
+
+    try {
+      expect(getBoardroomExecutiveWritePolicy()).toEqual({
+        slug: "cfo",
+        allowedWritePath: "/tmp/cfo.md",
+        briefsDir: "/tmp/briefs",
+      });
+    } finally {
+      if (previousSession === undefined) delete process.env.BOARDROOM_EXECUTIVE_SESSION;
+      else process.env.BOARDROOM_EXECUTIVE_SESSION = previousSession;
+      if (previousSlug === undefined) delete process.env.BOARDROOM_EXECUTIVE_SLUG;
+      else process.env.BOARDROOM_EXECUTIVE_SLUG = previousSlug;
+      if (previousWritePath === undefined) delete process.env.BOARDROOM_ALLOWED_WRITE_PATH;
+      else process.env.BOARDROOM_ALLOWED_WRITE_PATH = previousWritePath;
+      if (previousBriefsDir === undefined) delete process.env.BOARDROOM_BRIEFS_DIR;
+      else process.env.BOARDROOM_BRIEFS_DIR = previousBriefsDir;
+    }
+  });
+
+  it("treats nested shells and pi launches as mutating bash commands", () => {
+    expect(isMutatingBashCommand("pi -p \"hello\"")).toBe(true);
+    expect(isMutatingBashCommand("env -u BOARDROOM_EXECUTIVE_SESSION pi -p \"hello\"")).toBe(true);
+    expect(isMutatingBashCommand("bash -lc 'ls'")).toBe(true);
+    expect(isMutatingBashCommand("rg TODO .")).toBe(false);
   });
 });
 

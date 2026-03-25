@@ -387,4 +387,58 @@ describe("messaging-meeting", () => {
 
     expect(result.roster).toEqual(["ceo", "cto"]);
   });
+
+  it("falls back to a default thread when CEO emits no workstreams", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO"),
+    ];
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: [
+          "CEO framing",
+          "",
+          "```json",
+          JSON.stringify({
+            workstreams: [],
+            roster: [{ name: "cfo", reason: "Finance coverage" }],
+            rationale: "Keep the room small.",
+          }, null, 2),
+          "```",
+        ].join("\n"),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Final brief.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    const result = await runFreeformMessagingMeeting(
+      cwd,
+      makeBrief("default-thread-fallback"),
+      agents,
+      "freeform",
+      "standard",
+      makeConstraints(),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot: vi.fn(),
+      },
+    );
+
+    const debate = JSON.parse(fs.readFileSync(result.debateJsonPath, "utf-8")) as { threads: Array<{ title: string }> };
+    expect(debate.threads).toHaveLength(1);
+    expect(debate.threads[0]?.title).toBe("General Discussion");
+  });
 });
