@@ -31,7 +31,7 @@ import {
 } from "./messaging-prompts.js";
 import { writeMessagingLog } from "./messaging-artifacts.js";
 import { buildRosterInfo } from "./messaging-ui.js";
-import { runAgent } from "./runner.js";
+import { SessionPool } from "./runtime.js";
 import { runSemiLiveRound, DEFAULT_ROUND_CONFIG, type QueueCallbacks } from "./round-queue.js";
 import { writeMemo, writeExpertise, writeVisuals } from "./artifacts.js";
 import { loadScratchpad, saveScratchpad, extractScratchpadUpdate, stripScratchpadBlock } from "./scratchpad.js";
@@ -41,7 +41,7 @@ import { extractMermaidBlocks } from "./visuals.js";
 import { loadExpertise } from "./prompt-composer.js";
 import { findAgentsByTag } from "./agents.js";
 
-export interface MessagingMeetingCallbacks extends Pick<MeetingCallbacks, "onStatus" | "onConfirmRoster" | "onSnapshot" | "signal"> {}
+export interface MessagingMeetingCallbacks extends Pick<MeetingCallbacks, "onStatus" | "onAgentUpdate" | "onConfirmRoster" | "onSnapshot" | "signal"> {}
 
 export interface MessagingMeetingResult extends MeetingResult {}
 
@@ -89,8 +89,13 @@ function buildMessagingAgentSnapshots(
   allAgents: AgentConfig[],
   rosterAgents: AgentConfig[],
   threadState: ThreadState,
-  activeSlug?: string,
+  pool: SessionPool,
 ): AgentRuntimeUpdate[] {
+  // Merge real SessionPool snapshots (live streaming/thinking/cost) with
+  // thread-state counts (inbox/outbox/thread participation). Pool snapshots
+  // are authoritative for status, cost, and tokens; thread state adds
+  // messaging-specific activity context.
+  const poolSnapshots = new Map(pool.snapshot().map((s) => [s.slug, s]));
   const visibleAgents = dedupeAgentsBySlug([
     ...allAgents.filter((agent) => agent.slug === "ceo"),
     ...rosterAgents,
@@ -98,41 +103,40 @@ function buildMessagingAgentSnapshots(
   const rosterInfo = buildRosterInfo(threadState, visibleAgents.map((agent) => ({ slug: agent.slug, name: agent.name })));
 
   return visibleAgents.map((agent) => {
+    const poolSnap = poolSnapshots.get(agent.slug);
     const info = rosterInfo.find((entry) => entry.slug === agent.slug);
-    const sentIds = threadState.agent_outboxes.get(agent.slug) ?? [];
-    const sentMessages = sentIds
-      .map((id) => threadState.messages.get(id))
-      .filter((msg): msg is NonNullable<typeof msg> => !!msg);
-    const totalTokens = sentMessages.reduce((sum, msg) => sum + msg.token_count, 0);
-    const totalCost = sentMessages.reduce((sum, msg) => sum + msg.cost, 0);
-    const status = agent.slug === activeSlug
-      ? "running"
-      : (info?.inbox_unread ?? 0) > 0
-        ? "queued"
-        : (info?.active_threads ?? 0) > 0
-          ? "thinking"
-          : sentMessages.length > 0
-            ? "completed"
-            : "idle";
     const activityParts = [
       `inbox ${(info?.inbox_unread ?? 0)}`,
-      `outbox ${sentMessages.length}`,
+      `outbox ${(info?.outbox_total ?? 0)}`,
       `threads ${info?.active_threads ?? 0}`,
     ];
     if (info && info.thread_names.length > 0) {
       activityParts.push(info.thread_names.slice(0, 2).join(", "));
     }
+    const threadActivity = activityParts.join(" \u00b7 ");
 
+    // If pool has a live snapshot, use its status/cost/tokens and append
+    // thread context to its activity string.
+    if (poolSnap) {
+      return {
+        ...poolSnap,
+        activity: poolSnap.status === "idle" || poolSnap.status === "completed"
+          ? threadActivity
+          : `${poolSnap.activity} \u00b7 ${threadActivity}`,
+      };
+    }
+
+    // Fallback for agents not yet in the pool
     return {
       slug: agent.slug,
       name: agent.name,
-      status,
+      status: "idle" as const,
       modelLabel: agent.model,
       modelAltLabel: agent.modelAlt,
-      activity: activityParts.join(" · "),
-      turns: sentMessages.length,
-      totalTokens,
-      totalCost,
+      activity: threadActivity,
+      turns: 0,
+      totalTokens: 0,
+      totalCost: 0,
     };
   });
 }
@@ -152,7 +156,7 @@ function emitMessagingSnapshot(
   phaseLabel: string,
   presidentNote: string,
   callbacks: MessagingMeetingCallbacks,
-  activeSlug?: string,
+  pool: SessionPool,
 ): void {
   if (!callbacks.onSnapshot) return;
 
@@ -174,7 +178,7 @@ function emitMessagingSnapshot(
     roundsUsed: tracker.currentRound,
     maxRounds: constraintValues.max_debate_rounds,
     roster: rosterAgents.map((agent) => agent.slug),
-    agents: buildMessagingAgentSnapshots(allAgents, rosterAgents, threadState, activeSlug),
+    agents: buildMessagingAgentSnapshots(allAgents, rosterAgents, threadState, pool),
     presidentNote,
     transcript: allMessages.slice(-5).map((msg) => `[${msg.from}] ${msg.content.slice(0, 200)}`),
     threadGraphLines: renderThreadGraph(graph, threadState, "compact").split("\n"),
@@ -240,13 +244,15 @@ function finalizeMessagingResult(
 
 async function runCeoWithRetry(
   cwd: string,
+  pool: SessionPool,
   ceo: AgentConfig,
   systemPrompt: string,
   task: string,
+  activity: string,
   callbacks: MessagingMeetingCallbacks,
   signal?: AbortSignal,
 ): Promise<{ content: string; tokenCount: number; cost: number }> {
-  const result = await runAgent(cwd, ceo.slug, ceo.model, systemPrompt, task, signal);
+  const result = await pool.runOne(cwd, ceo, systemPrompt, task, activity, signal);
 
   if (result.exitCode === 0 && result.content) {
     return { content: result.content, tokenCount: result.tokenCount, cost: result.cost };
@@ -254,13 +260,13 @@ async function runCeoWithRetry(
 
   callbacks.onStatus(`CEO failed (${result.error ?? "no output"}). Retrying with simplified context...`);
   const simplifiedPrompt = [
-    ceo.systemPrompt,
+    systemPrompt,
     "",
     "--- SIMPLIFIED CONTEXT (retry after failure) ---",
     "The previous attempt failed. Provide your best assessment with the information available.",
   ].join("\n");
 
-  const retry = await runAgent(cwd, ceo.slug, ceo.model, simplifiedPrompt, task, signal);
+  const retry = await pool.runOne(cwd, ceo, simplifiedPrompt, task, `${activity} (retry)`, signal);
   const totalCost = result.cost + retry.cost;
   const totalTokens = result.tokenCount + retry.tokenCount;
 
@@ -297,6 +303,8 @@ export async function runFreeformMessagingMeeting(
   const startedAt = new Date();
   const nonCeo = getNonCeoAgents(allAgents);
   let rosterSlugs = ["ceo"];
+  const pool = new SessionPool(callbacks.onAgentUpdate);
+  pool.ensureAgents([ceo], "Preparing framing");
 
   try {
     // ── Phase 1: CEO Framing ──
@@ -314,7 +322,7 @@ export async function runFreeformMessagingMeeting(
       "4. Provide your initial framing and key questions for the board to address.",
     ].join("\n");
 
-    const framingRes = await runCeoWithRetry(cwd, ceo, framingPrompt, framingTask, callbacks, callbacks.signal);
+    const framingRes = await runCeoWithRetry(cwd, pool, ceo, framingPrompt, framingTask, "Framing the decision", callbacks, callbacks.signal);
     framingRes.content = processScratchpadOutput(cwd, ceo.slug, framingRes.content);
     tracker.addCost(framingRes.cost);
 
@@ -344,6 +352,7 @@ export async function runFreeformMessagingMeeting(
     }
 
     rosterSlugs = ["ceo", ...rosterAgents.map(a => a.slug)];
+    pool.ensureAgents(rosterAgents, "Awaiting first round");
 
     // Create workstream threads from CEO output
     const workstreams = parsed?.workstreams ?? [{ title: "General Discussion", description: brief.title }];
@@ -364,7 +373,7 @@ export async function runFreeformMessagingMeeting(
     }
 
     callbacks.onStatus(`Phase 1 complete. Created ${createdThreads.length} workstream(s). ${tracker.summary}`);
-    emitMessagingSnapshot(meetingId, brief, mode, constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 1, "CEO Framing", "Framing complete. Roster confirmed.", callbacks);
+    emitMessagingSnapshot(meetingId, brief, mode, constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 1, "CEO Framing", "Framing complete. Roster confirmed.", callbacks, pool);
 
     // ── Debate Rounds (Semi-Live Queue) ──
     let debateRound = 0;
@@ -385,7 +394,7 @@ export async function runFreeformMessagingMeeting(
       const roundResult = await runSemiLiveRound(
         cwd, threadState, rosterAgents, allAgents, brief, framingRes.content,
         1 + debateRound, debateRound, tracker, constraintValues, config,
-        DEFAULT_ROUND_CONFIG, queueCallbacks,
+        DEFAULT_ROUND_CONFIG, queueCallbacks, pool,
       );
 
       // Constraint warnings
@@ -433,7 +442,7 @@ export async function runFreeformMessagingMeeting(
           "Otherwise, proceed with your Strategic Brief.",
         ].join("\n");
 
-        const reviewRes = await runCeoWithRetry(cwd, ceo, reviewPrompt, reviewTask, callbacks, callbacks.signal);
+        const reviewRes = await runCeoWithRetry(cwd, pool, ceo, reviewPrompt, reviewTask, "Reviewing discussions", callbacks, callbacks.signal);
         reviewRes.content = processScratchpadOutput(cwd, ceo.slug, reviewRes.content);
         tracker.addCost(reviewRes.cost);
 
@@ -459,7 +468,7 @@ export async function runFreeformMessagingMeeting(
 
     // ── Final Synthesis ──
     callbacks.onStatus("CEO synthesizing final decision...");
-    emitMessagingSnapshot(meetingId, brief, mode, constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 99, "CEO Synthesis", "CEO synthesizing final decision.", callbacks, "ceo");
+    emitMessagingSnapshot(meetingId, brief, mode, constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 99, "CEO Synthesis", "CEO synthesizing final decision.", callbacks, pool);
 
     const synthExpertise = loadExpertise(cwd, ceo.slug);
     const ceoSynthScratchpad = loadScratchpad(cwd, ceo.slug);
@@ -481,7 +490,7 @@ export async function runFreeformMessagingMeeting(
           "If the decision involves data worth visualizing, include Mermaid diagrams.",
         ].join("\n");
 
-    const synthRes = await runCeoWithRetry(cwd, ceo, synthPrompt, synthTask, callbacks, callbacks.signal);
+    const synthRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, synthTask, "Synthesizing final decision", callbacks, callbacks.signal);
     synthRes.content = processScratchpadOutput(cwd, ceo.slug, synthRes.content);
     tracker.addCost(synthRes.cost);
 
@@ -538,6 +547,7 @@ export async function runFreeformMessagingMeeting(
     }
 
     callbacks.onStatus(`Meeting complete (${disposition}). ${tracker.summary}`);
+    pool.destroyAll();
     return finalizeMessagingResult(memoPath, debateJsonPath, debateMarkdownPath, visualPaths, disposition, brief, mode, tracker, rosterSlugs);
 
   } catch (err: any) {
@@ -589,6 +599,7 @@ export async function runFreeformMessagingMeeting(
     }
     const visualPaths = allMermaid.length > 0 ? writeVisuals(cwd, meetingId, allMermaid) : [];
 
+    pool.destroyAll();
     return finalizeMessagingResult(memoPath, debateJsonPath, debateMarkdownPath, visualPaths, disposition, brief, mode, tracker, rosterSlugs, abortReason);
   }
 }
@@ -624,6 +635,8 @@ export async function runStructuredMessagingMeeting(
   const startedAt = new Date();
   const nonCeo = getNonCeoAgents(allAgents);
   let rosterSlugs = ["ceo"];
+  const pool = new SessionPool(callbacks.onAgentUpdate);
+  pool.ensureAgents([ceo], "Preparing framing");
 
   try {
     // ── Phase 1: CEO Framing (same as freeform) ──
@@ -641,7 +654,7 @@ export async function runStructuredMessagingMeeting(
       "4. Provide your initial framing and key questions for the board to address.",
     ].join("\n");
 
-    const framingRes = await runCeoWithRetry(cwd, ceo, framingPrompt, framingTask, callbacks, callbacks.signal);
+    const framingRes = await runCeoWithRetry(cwd, pool, ceo, framingPrompt, framingTask, "Framing the decision", callbacks, callbacks.signal);
     framingRes.content = processScratchpadOutput(cwd, ceo.slug, framingRes.content);
     tracker.addCost(framingRes.cost);
 
@@ -669,6 +682,7 @@ export async function runStructuredMessagingMeeting(
     }
 
     rosterSlugs = ["ceo", ...rosterAgents.map(a => a.slug)];
+    pool.ensureAgents(rosterAgents, "Awaiting first round");
 
     // Create workstream threads
     const workstreams = parsed?.workstreams ?? [{ title: "General Discussion", description: brief.title }];
@@ -688,7 +702,7 @@ export async function runStructuredMessagingMeeting(
     }
 
     callbacks.onStatus(`Phase 1 complete. Created ${createdThreads.length} workstream(s). ${tracker.summary}`);
-    emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 1, "CEO Framing", "Framing complete. Roster confirmed.", callbacks);
+    emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 1, "CEO Framing", "Framing complete. Roster confirmed.", callbacks, pool);
 
     let reEngagementCount = 0;
     const MAX_RE_ENGAGEMENTS = 2;
@@ -708,19 +722,19 @@ export async function runStructuredMessagingMeeting(
       // ── Phase 2: Parallel Evaluation (semi-live round) ──
       tracker.incrementRound();
       callbacks.onStatus(`Phase 2: Parallel evaluation (attempt ${reEngagementCount + 1}) via semi-live queue...`);
-      emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 2, `Parallel Evaluation (attempt ${reEngagementCount + 1})`, "Board members evaluating in semi-live queue.", callbacks);
+      emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 2, `Parallel Evaluation (attempt ${reEngagementCount + 1})`, "Board members evaluating in semi-live queue.", callbacks, pool);
 
       const evalResult = await runSemiLiveRound(
         cwd, threadState, rosterAgents, allAgents, brief, framingRes.content,
         2, reEngagementCount + 1, tracker, constraintValues, config,
-        DEFAULT_ROUND_CONFIG, queueCallbacks,
+        DEFAULT_ROUND_CONFIG, queueCallbacks, pool,
       );
 
       const evalFailInfo = evalResult.failedAgents > 0 || evalResult.droppedMessages > 0
         ? ` (${evalResult.failedAgents} failed, ${evalResult.droppedMessages} dropped)`
         : "";
       callbacks.onStatus(`Phase 2 complete (${evalResult.endReason}): ${evalResult.messagesPosted} messages${evalFailInfo}. ${tracker.summary}`);
-      emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 2, `Parallel Evaluation (attempt ${reEngagementCount + 1})`, "Parallel evaluation complete.", callbacks);
+      emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 2, `Parallel Evaluation (attempt ${reEngagementCount + 1})`, "Parallel evaluation complete.", callbacks, pool);
 
       if (evalResult.endReason === "aborted") break;
       if (!tracker.canContinue(config.budget_hard_stop, config.time_hard_stop)) break;
@@ -730,7 +744,7 @@ export async function runStructuredMessagingMeeting(
 
       if (stressAgents.length > 0) {
         callbacks.onStatus("Phase 3: Stress test via semi-live queue...");
-        emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 3, "Stress Test", "Running adversarial stress test.", callbacks);
+        emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 3, "Stress Test", "Running adversarial stress test.", callbacks, pool);
 
         // Create a stress-test thread
         const stressThread = createThread(threadState, "Stress Test", "ceo");
@@ -745,7 +759,7 @@ export async function runStructuredMessagingMeeting(
           cwd, threadState, stressAgents, allAgents, brief, framingRes.content,
           3, reEngagementCount + 1, tracker, constraintValues, config,
           { maxMessagesPerRound: 10, roundTimeoutSeconds: 120 },
-          queueCallbacks,
+          queueCallbacks, pool,
         );
 
         const stressFailInfo = stressResult.failedAgents > 0 || stressResult.droppedMessages > 0
@@ -758,7 +772,7 @@ export async function runStructuredMessagingMeeting(
 
       // ── Phase 4: CEO Conflict Synthesis / Checkpoint ──
       callbacks.onStatus("Phase 4: CEO conflict synthesis...");
-      emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 4, "CEO Conflict Synthesis", "CEO reviewing conflicts and open questions.", callbacks, "ceo");
+      emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 4, "CEO Conflict Synthesis", "CEO reviewing conflicts and open questions.", callbacks, pool);
 
       const canReEngage = reEngagementCount < MAX_RE_ENGAGEMENTS && tracker.canContinue(config.budget_hard_stop, config.time_hard_stop);
       const ceoConflictScratchpad = loadScratchpad(cwd, ceo.slug);
@@ -778,7 +792,7 @@ export async function runStructuredMessagingMeeting(
           ].join("\n")
         : "Final round. Produce your Strategic Brief now.";
 
-      const reviewRes = await runCeoWithRetry(cwd, ceo, conflictPrompt, reviewTask, callbacks, callbacks.signal);
+      const reviewRes = await runCeoWithRetry(cwd, pool, ceo, conflictPrompt, reviewTask, "Conflict synthesis", callbacks, callbacks.signal);
       reviewRes.content = processScratchpadOutput(cwd, ceo.slug, reviewRes.content);
       tracker.addCost(reviewRes.cost);
 
@@ -803,7 +817,7 @@ export async function runStructuredMessagingMeeting(
 
     // ── Phase 5: Final Decision ──
     callbacks.onStatus("Phase 5: CEO final decision...");
-    emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 5, "CEO Final Decision", "CEO synthesizing the final decision.", callbacks, "ceo");
+    emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 5, "CEO Final Decision", "CEO synthesizing the final decision.", callbacks, pool);
 
     const synthExpertise = loadExpertise(cwd, ceo.slug);
     const ceoSynthScratchpad = loadScratchpad(cwd, ceo.slug);
@@ -825,7 +839,7 @@ export async function runStructuredMessagingMeeting(
           "If the decision involves data worth visualizing, include Mermaid diagrams.",
         ].join("\n");
 
-    const synthRes = await runCeoWithRetry(cwd, ceo, synthPrompt, synthTask, callbacks, callbacks.signal);
+    const synthRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, synthTask, "Synthesizing final decision", callbacks, callbacks.signal);
     synthRes.content = processScratchpadOutput(cwd, ceo.slug, synthRes.content);
     tracker.addCost(synthRes.cost);
 
@@ -879,6 +893,7 @@ export async function runStructuredMessagingMeeting(
     }
 
     callbacks.onStatus(`Structured meeting complete (${disposition}). ${tracker.summary}`);
+    pool.destroyAll();
     return finalizeMessagingResult(memoPath, debateJsonPath, debateMarkdownPath, visualPaths, disposition, brief, "structured", tracker, rosterSlugs);
 
   } catch (err: any) {
@@ -929,6 +944,7 @@ export async function runStructuredMessagingMeeting(
     }
     const visualPaths = allMermaid.length > 0 ? writeVisuals(cwd, meetingId, allMermaid) : [];
 
+    pool.destroyAll();
     return finalizeMessagingResult(memoPath, debateJsonPath, debateMarkdownPath, visualPaths, disposition, brief, "structured", tracker, rosterSlugs, abortReason);
   }
 }
