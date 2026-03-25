@@ -19,7 +19,6 @@ import {
   getAllThreads,
   getAllMessages,
   serializeToMessagingLog,
-  resetCounters,
   resolveAllActiveThreads,
   markUndeliverableMessages,
   formatRecoveryCheckpoint,
@@ -83,6 +82,11 @@ function resolveRosterSelection(allAgents: AgentConfig[], slugs: string[]): Agen
       .map((slug) => allAgents.find((agent) => agent.slug === slug))
       .filter((agent): agent is AgentConfig => !!agent && agent.slug !== "ceo" && agent.slug !== "executive-board-orchestrator"),
   );
+}
+
+function applyRosterLimit(roster: AgentConfig[], constraints: ConstraintSet): AgentConfig[] {
+  if (!constraints.max_roster_size || constraints.max_roster_size <= 0) return roster;
+  return roster.slice(0, constraints.max_roster_size);
 }
 
 function buildMessagingAgentSnapshots(
@@ -287,7 +291,6 @@ export async function runFreeformMessagingMeeting(
   config: { budget_hard_stop: boolean; time_hard_stop: boolean },
   callbacks: MessagingMeetingCallbacks,
 ): Promise<MessagingMeetingResult> {
-  resetCounters();
   const ceo = allAgents.find(a => a.slug === "ceo");
   if (!ceo) throw new Error("CEO agent not found in agents/executive-board/");
 
@@ -321,7 +324,7 @@ export async function runFreeformMessagingMeeting(
     // Parse workstreams and roster from CEO output
     const parsed = parseWorkstreamsFromCeoOutput(framingRes.content);
     const rosterNames = parsed?.roster.map(r => r.name) ?? [];
-    let rosterAgents = resolveRoster(allAgents, rosterNames);
+    let rosterAgents = applyRosterLimit(resolveRoster(allAgents, rosterNames), constraintValues);
     const rosterRationale = parsed?.rationale ?? "Full board (CEO workstream selection could not be parsed)";
 
     // Confirm roster
@@ -337,10 +340,13 @@ export async function runFreeformMessagingMeeting(
       throw new Error("Meeting cancelled during roster review.");
     }
     if (rosterDecision.action === "reject") {
-      rosterAgents = [...nonCeo];
+      rosterAgents = applyRosterLimit([...nonCeo], constraintValues);
     } else if (rosterDecision.action === "edit") {
       const editedRoster = resolveRosterSelection(allAgents, rosterDecision.roster);
-      rosterAgents = editedRoster.length > 0 ? editedRoster : [...nonCeo];
+      rosterAgents = applyRosterLimit(
+        editedRoster.length > 0 ? editedRoster : [...nonCeo],
+        constraintValues,
+      );
     }
 
     rosterSlugs = ["ceo", ...rosterAgents.map(a => a.slug)];
@@ -614,7 +620,6 @@ export async function runStructuredMessagingMeeting(
   config: { budget_hard_stop: boolean; time_hard_stop: boolean },
   callbacks: MessagingMeetingCallbacks,
 ): Promise<MessagingMeetingResult> {
-  resetCounters();
   const ceo = allAgents.find(a => a.slug === "ceo");
   if (!ceo) throw new Error("CEO agent not found in agents/executive-board/");
 
@@ -647,7 +652,7 @@ export async function runStructuredMessagingMeeting(
 
     const parsed = parseWorkstreamsFromCeoOutput(framingRes.content);
     const rosterNames = parsed?.roster.map(r => r.name) ?? [];
-    let rosterAgents = resolveRoster(allAgents, rosterNames);
+    let rosterAgents = applyRosterLimit(resolveRoster(allAgents, rosterNames), constraintValues);
     const rosterRationale = parsed?.rationale ?? "Full board (CEO workstream selection could not be parsed)";
 
     tracker.pause();
@@ -662,10 +667,13 @@ export async function runStructuredMessagingMeeting(
       throw new Error("Meeting cancelled during roster review.");
     }
     if (rosterDecision.action === "reject") {
-      rosterAgents = [...nonCeo];
+      rosterAgents = applyRosterLimit([...nonCeo], constraintValues);
     } else if (rosterDecision.action === "edit") {
       const editedRoster = resolveRosterSelection(allAgents, rosterDecision.roster);
-      rosterAgents = editedRoster.length > 0 ? editedRoster : [...nonCeo];
+      rosterAgents = applyRosterLimit(
+        editedRoster.length > 0 ? editedRoster : [...nonCeo],
+        constraintValues,
+      );
     }
 
     rosterSlugs = ["ceo", ...rosterAgents.map(a => a.slug)];
