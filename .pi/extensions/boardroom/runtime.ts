@@ -20,9 +20,17 @@ function getBoardroomExtensionEntry(cwd: string): string | undefined {
   return undefined;
 }
 
+function shouldForceBoardroomExtensionEntry(): boolean {
+  // Let first-level boardroom Pi sessions use normal project/global extension
+  // discovery so the extension source tree is not treated as an explicitly
+  // loaded protected path. Only nested Pi children spawned from inside an
+  // executive session should inherit the explicit -e entrypoint.
+  return process.env.BOARDROOM_EXECUTIVE_SESSION === "1";
+}
+
 function getPiInvocation(args: string[], cwd: string): { command: string; args: string[] } {
   const extensionEntry = getBoardroomExtensionEntry(cwd);
-  if (extensionEntry) {
+  if (extensionEntry && shouldForceBoardroomExtensionEntry()) {
     return { command: "pi", args: ["-e", extensionEntry, ...args] };
   }
 

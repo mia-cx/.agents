@@ -177,6 +177,56 @@ describe("BoardMemberSession", () => {
     }
   });
 
+  it("does not force-load the boardroom extension in first-level executive sessions", async () => {
+    const session = new BoardMemberSession("ceo", "CEO", "gpt-5.4-mini", undefined);
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
+    const scriptPath = path.join(tmpDir, "capture-invocation.js");
+    const extensionPath = path.join(tmpDir, "fake-boardroom-extension.ts");
+    const originalArgv1 = process.argv[1];
+    const previousExtensionEntry = process.env.BOARDROOM_EXTENSION_ENTRY;
+    const previousExecutiveSession = process.env.BOARDROOM_EXECUTIVE_SESSION;
+
+    await fs.writeFile(extensionPath, "// fake boardroom extension\n");
+    await writeExecutableScript(scriptPath, [
+      "const payload = {",
+      "  args: process.argv.slice(2),",
+      "  extensionEntry: process.env.BOARDROOM_EXTENSION_ENTRY ?? null,",
+      "  executiveSession: process.env.BOARDROOM_EXECUTIVE_SESSION ?? null,",
+      "};",
+      "process.stdout.write(JSON.stringify({",
+      '  type: "message_end",',
+      "  message: {",
+      '    role: "assistant",',
+      "    usage: { input: 1, output: 1, cost: { total: 0 } },",
+      "    content: [{ type: 'text', text: JSON.stringify(payload) }],",
+      "  },",
+      '}) + "\\n");',
+    ]);
+
+    process.argv[1] = scriptPath;
+    process.env.BOARDROOM_EXTENSION_ENTRY = extensionPath;
+    delete process.env.BOARDROOM_EXECUTIVE_SESSION;
+
+    try {
+      const result = await session.run(tmpDir, "", "test task");
+      const payload = JSON.parse(result.content) as {
+        args: string[];
+        extensionEntry: string | null;
+        executiveSession: string | null;
+      };
+      expect(payload.args).not.toContain("-e");
+      expect(payload.extensionEntry).toBe(extensionPath);
+      expect(payload.executiveSession).toBe("1");
+    } finally {
+      process.argv[1] = originalArgv1;
+      if (previousExtensionEntry === undefined) delete process.env.BOARDROOM_EXTENSION_ENTRY;
+      else process.env.BOARDROOM_EXTENSION_ENTRY = previousExtensionEntry;
+      if (previousExecutiveSession === undefined) delete process.env.BOARDROOM_EXECUTIVE_SESSION;
+      else process.env.BOARDROOM_EXECUTIVE_SESSION = previousExecutiveSession;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("uses a full system prompt instead of appending to Pi's default prompt", async () => {
     const session = new BoardMemberSession("cfo", "CFO", "gpt-5.4-mini", undefined);
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boardroom-runtime-test-"));
