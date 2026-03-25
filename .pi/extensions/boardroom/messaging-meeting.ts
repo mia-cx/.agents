@@ -389,7 +389,7 @@ export async function runFreeformMessagingMeeting(
       tracker.incrementRound();
 
       callbacks.onStatus(`Round ${debateRound}/${constraintValues.max_debate_rounds}: ${rosterAgents.length} board members in semi-live queue...`);
-      emitMessagingSnapshot(meetingId, brief, mode, constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 1 + debateRound, `Debate Round ${debateRound}`, `Round ${debateRound}: semi-live discussion in progress.`, callbacks);
+      emitMessagingSnapshot(meetingId, brief, mode, constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 1 + debateRound, `Debate Round ${debateRound}`, `Round ${debateRound}: semi-live discussion in progress.`, callbacks, pool);
 
       const roundResult = await runSemiLiveRound(
         cwd, threadState, rosterAgents, allAgents, brief, framingRes.content,
@@ -409,7 +409,7 @@ export async function runFreeformMessagingMeeting(
         ? ` (${roundResult.failedAgents} failed, ${roundResult.droppedMessages} dropped)`
         : "";
       callbacks.onStatus(`Round ${debateRound} complete (${roundResult.endReason}): ${roundResult.messagesPosted} messages${failInfo}. ${tracker.summary}`);
-      emitMessagingSnapshot(meetingId, brief, mode, constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 1 + debateRound, `Debate Round ${debateRound}`, `Round ${debateRound} complete.`, callbacks);
+      emitMessagingSnapshot(meetingId, brief, mode, constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 1 + debateRound, `Debate Round ${debateRound}`, `Round ${debateRound} complete.`, callbacks, pool);
 
       if (roundResult.endReason === "aborted") break;
       if (roundResult.endReason === "constraints") {
