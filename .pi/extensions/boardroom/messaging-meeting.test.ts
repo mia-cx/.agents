@@ -368,6 +368,13 @@ describe("messaging-meeting", () => {
         exitCode: 0,
         tokenCount: 120,
         cost: 0.06,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Structured final decision.",
+        exitCode: 0,
+        tokenCount: 110,
+        cost: 0.05,
       });
 
     const result = await runStructuredMessagingMeeting(

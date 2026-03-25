@@ -6,7 +6,6 @@ import {
   createThread,
   postMessage,
   resetCounters,
-  getActiveThreads,
 } from "./thread-manager.js";
 import { ConstraintTracker } from "./constraints.js";
 import {
@@ -40,6 +39,7 @@ vi.mock("./messaging-prompts.js", () => ({
     replyTo: null,
     type: "broadcast",
     content,
+    newThread: null,
   })),
 }));
 
@@ -104,6 +104,7 @@ describe("round-queue", () => {
       replyTo: null,
       type: "broadcast",
       content,
+      newThread: null,
     }));
   });
 
@@ -416,6 +417,7 @@ describe("round-queue", () => {
         replyTo: null,
         type: "direct",
         content: "Hey CTO, what about costs?",
+        newThread: null,
       });
 
       const result = await runSemiLiveRound(
@@ -428,6 +430,57 @@ describe("round-queue", () => {
       expect(result.messagesPosted).toBe(1);
       expect(callbacks.onMessagePosted).toHaveBeenCalledWith(
         expect.objectContaining({ type: "direct", to: ["cto"] }),
+      );
+    });
+
+    it("creates a child thread when routing requests a new thread", async () => {
+      const parent = createThread(state, "Revenue", "ceo", null, ["ceo", "cfo"]);
+      postMessage(state, "broadcast", "ceo", [], parent.id, "CEO framing", 1, 0, 100, 0.05);
+
+      const agents = [makeAgent("cfo", "CFO")];
+      const allAgents = [makeAgent("ceo", "CEO"), ...agents];
+      const tracker = new ConstraintTracker(makeConstraintValues());
+      const callbacks = makeCallbacks();
+
+      mockRunOne.mockResolvedValue({
+        agent: "cfo",
+        content: "NEW-THREAD: Unit Economics\nSplit out the margin analysis.",
+        exitCode: 0,
+        tokenCount: 80,
+        cost: 0.03,
+      });
+
+      mockParseRouting.mockReturnValue({
+        to: [],
+        replyTo: null,
+        type: "broadcast",
+        content: "Split out the margin analysis.",
+        newThread: "Unit Economics",
+      });
+
+      const result = await runSemiLiveRound(
+        cwd, state, agents, allAgents, makeBrief(), "CEO framing",
+        1, 1, tracker, makeConstraintValues(),
+        { budget_hard_stop: false, time_hard_stop: false },
+        DEFAULT_ROUND_CONFIG, callbacks, makePool(),
+      );
+
+      expect(result.messagesPosted).toBe(1);
+      expect(callbacks.onStatus).toHaveBeenCalledWith('CFO created child thread: "Unit Economics"');
+      expect(callbacks.onMessagePosted).toHaveBeenCalledWith(
+        expect.objectContaining({ content: "Split out the margin analysis." }),
+      );
+
+      const allThreads = Array.from(state.threads.values());
+      expect(allThreads).toHaveLength(2);
+      const childThread = allThreads.find((thread) => thread.parent_id === parent.id);
+      expect(childThread).toEqual(expect.objectContaining({
+        title: "Unit Economics",
+        created_by: "cfo",
+        parent_id: parent.id,
+      }));
+      expect(vi.mocked(callbacks.onMessagePosted).mock.calls[0]?.[0]).toEqual(
+        expect.objectContaining({ thread_id: childThread?.id }),
       );
     });
 
