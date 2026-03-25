@@ -46,6 +46,17 @@ export type ThreadStatus =
   | "resolved"        // Explicitly or automatically resolved
   | "closed";         // CEO closed it
 
+const THREAD_STATUS_ICONS: Record<ThreadStatus, string> = {
+  active: "●",
+  quiet: "○",
+  resolved: "✓",
+  closed: "✗",
+};
+
+export function getThreadStatusIcon(status: ThreadStatus): string {
+  return THREAD_STATUS_ICONS[status];
+}
+
 export type ThreadResolutionReason =
   | "no-pending-replies"
   | "explicit-close"

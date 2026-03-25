@@ -5,6 +5,7 @@
  * and thread list formatting for the roster and dashboard.
  */
 
+import { getThreadStatusIcon } from "./messaging-types.js";
 import type { ThreadState, Thread, RoutedMessage } from "./messaging-types.js";
 import { getAgentMessageCounts, getAllThreads, getAllMessages } from "./thread-manager.js";
 
@@ -74,10 +75,7 @@ export function buildThreadList(state: ThreadState): ThreadListEntry[] {
     id: thread.id,
     title: thread.title,
     status: thread.status,
-    statusIcon: thread.status === "active" ? "●"
-      : thread.status === "quiet" ? "○"
-      : thread.status === "resolved" ? "✓"
-      : "✗",
+    statusIcon: getThreadStatusIcon(thread.status),
     messageCount: thread.message_ids.length,
     participantCount: thread.participants.length,
     participants: thread.participants,

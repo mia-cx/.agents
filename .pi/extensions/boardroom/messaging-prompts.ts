@@ -6,6 +6,7 @@
  */
 
 import type { AgentConfig, ParsedBrief } from "./types.js";
+import { getThreadStatusIcon } from "./messaging-types.js";
 import type { AgentContextProjection, RoutedMessage, Thread } from "./messaging-types.js";
 import { composeScratchpadInstructions } from "./scratchpad.js";
 
@@ -174,7 +175,7 @@ export function composeMessagingSynthesisPrompt(
   ];
 
   for (const thread of threads) {
-    const statusIcon = thread.status === "resolved" ? "✓" : thread.status === "active" ? "●" : thread.status === "closed" ? "✗" : "○";
+    const statusIcon = getThreadStatusIcon(thread.status);
     const parentNote = thread.parent_id ? ` (child of ${thread.parent_id})` : "";
     parts.push(`### ${statusIcon} ${thread.title} [${thread.id}]${parentNote}`);
     parts.push(`Status: ${thread.status}${thread.resolution_reason ? ` (${thread.resolution_reason})` : ""} | Participants: ${thread.participants.join(", ")}`);

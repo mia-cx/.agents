@@ -7,6 +7,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { getThreadStatusIcon } from "./messaging-types.js";
 import type { MessagingLog, Thread, RoutedMessage } from "./messaging-types.js";
 
 function ensureDir(dir: string): void {
@@ -51,7 +52,7 @@ function renderMessagingLogAsMarkdown(log: MessagingLog): string {
   // Render thread summaries
   lines.push("## Thread Overview", "");
   for (const thread of log.threads) {
-    const statusIcon = thread.status === "resolved" ? "✓" : thread.status === "closed" ? "✗" : "●";
+    const statusIcon = getThreadStatusIcon(thread.status);
     lines.push(
       `### ${statusIcon} ${thread.title}`,
       `- **ID**: ${thread.id}${thread.parent_id ? ` (child of ${thread.parent_id})` : ""}`,

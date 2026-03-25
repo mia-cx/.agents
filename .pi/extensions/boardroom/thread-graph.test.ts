@@ -53,19 +53,23 @@ describe("thread-graph", () => {
 
     it("computes status icons correctly", () => {
       createThread(state, "Active", "ceo");
-      const t2 = createThread(state, "Resolved", "ceo");
-      resolveThread(state, t2.id, "no-pending-replies");
-      const t3 = createThread(state, "Closed", "ceo");
-      closeThread(state, t3.id);
+      const quiet = createThread(state, "Quiet", "ceo");
+      postMessage(state, "broadcast", "ceo", [], quiet.id, "Checkpoint", 1, 0, 100, 0.05);
+      const resolved = createThread(state, "Resolved", "ceo");
+      resolveThread(state, resolved.id, "no-pending-replies");
+      const closed = createThread(state, "Closed", "ceo");
+      closeThread(state, closed.id);
 
       const graph = buildThreadGraph(state);
       const active = graph.roots.find(n => n.title === "Active")!;
-      const resolved = graph.roots.find(n => n.title === "Resolved")!;
-      const closed = graph.roots.find(n => n.title === "Closed")!;
+      const quietNode = graph.roots.find(n => n.title === "Quiet")!;
+      const resolvedNode = graph.roots.find(n => n.title === "Resolved")!;
+      const closedNode = graph.roots.find(n => n.title === "Closed")!;
 
       expect(active.statusIcon).toBe("●");
-      expect(resolved.statusIcon).toBe("✓");
-      expect(closed.statusIcon).toBe("✗");
+      expect(quietNode.statusIcon).toBe("○");
+      expect(resolvedNode.statusIcon).toBe("✓");
+      expect(closedNode.statusIcon).toBe("✗");
     });
 
     it("marks converged threads", () => {

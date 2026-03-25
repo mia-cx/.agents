@@ -28,21 +28,35 @@ describe("writeMessagingLog", () => {
       ended_at: new Date().toISOString(),
       disposition: "completed",
       total_cost: 0.15,
-      threads: [{
-        id: "thread-001",
-        title: "Revenue Analysis",
-        parent_id: null,
-        created_by: "ceo",
-        created_at: new Date().toISOString(),
-        status: "resolved",
-        resolution_reason: "ceo-checkpoint",
-        resolved_at: new Date().toISOString(),
-        audience: ["ceo", "cto"],
-        participants: ["ceo", "cto"],
-        pending_replies: [],
-        message_ids: ["msg-0001", "msg-0002"],
-        summary: "Revenue looks promising",
-      }],
+      threads: [
+        {
+          id: "thread-001",
+          title: "Revenue Analysis",
+          parent_id: null,
+          created_by: "ceo",
+          created_at: new Date().toISOString(),
+          status: "resolved",
+          resolution_reason: "ceo-checkpoint",
+          resolved_at: new Date().toISOString(),
+          audience: ["ceo", "cto"],
+          participants: ["ceo", "cto"],
+          pending_replies: [],
+          message_ids: ["msg-0001", "msg-0002"],
+          summary: "Revenue looks promising",
+        },
+        {
+          id: "thread-002",
+          title: "Operating Review",
+          parent_id: null,
+          created_by: "ceo",
+          created_at: new Date().toISOString(),
+          status: "quiet",
+          audience: ["ceo", "cto"],
+          participants: ["ceo", "cto"],
+          pending_replies: [],
+          message_ids: [],
+        },
+      ],
       messages: [
         {
           id: "msg-0001",
@@ -83,14 +97,16 @@ describe("writeMessagingLog", () => {
     expect(fs.existsSync(mdPath)).toBe(true);
 
     const jsonContent = JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
-    expect(jsonContent.threads).toHaveLength(1);
+    expect(jsonContent.threads).toHaveLength(2);
     expect(jsonContent.messages).toHaveLength(2);
 
     const mdContent = fs.readFileSync(mdPath, "utf-8");
     expect(mdContent).toContain("Thread Overview");
     expect(mdContent).toContain("Revenue Analysis");
+    expect(mdContent).toContain("Operating Review");
     expect(mdContent).toContain("[broadcast]");
     expect(mdContent).toContain("[direct]");
     expect(mdContent).toContain("✓"); // resolved thread
+    expect(mdContent).toContain("○"); // quiet thread
   });
 });

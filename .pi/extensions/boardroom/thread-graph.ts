@@ -33,6 +33,7 @@
  *      └ ↳ Approved 3 eng + 1 design
  */
 
+import { getThreadStatusIcon } from "./messaging-types.js";
 import type { ThreadState, Thread, RoutedMessage } from "./messaging-types.js";
 import { getAllThreads, getAllMessages } from "./thread-manager.js";
 
@@ -86,7 +87,7 @@ export function buildThreadGraph(state: ThreadState): ThreadGraph {
       id: thread.id,
       title: thread.title,
       status: thread.status,
-      statusIcon: getStatusIcon(thread.status),
+      statusIcon: getThreadStatusIcon(thread.status),
       depth: 0,
       messageCount: thread.message_ids.length,
       participantCount: thread.participants.length,
@@ -153,16 +154,6 @@ export function buildThreadGraph(state: ThreadState): ThreadGraph {
       totalParticipants: uniqueParticipants.size,
     },
   };
-}
-
-function getStatusIcon(status: string): string {
-  switch (status) {
-    case "active": return "●";
-    case "quiet": return "○";
-    case "resolved": return "✓";
-    case "closed": return "✗";
-    default: return "?";
-  }
 }
 
 // --- Tree Text Renderer ---
@@ -424,7 +415,7 @@ export function renderMessageFlow(state: ThreadState, threadId: string): string 
   if (!thread) return `Thread ${threadId} not found.`;
 
   const lines: string[] = [];
-  const icon = getStatusIcon(thread.status);
+  const icon = getThreadStatusIcon(thread.status);
   lines.push(`${icon} ${thread.title} [${thread.id}]  ${thread.status} · ${thread.message_ids.length} msgs`);
   lines.push("│");
 
