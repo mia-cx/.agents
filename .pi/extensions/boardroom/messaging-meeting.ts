@@ -34,7 +34,7 @@ import { SessionPool } from "./runtime.js";
 import { runSemiLiveRound, DEFAULT_ROUND_CONFIG, type QueueCallbacks } from "./round-queue.js";
 import { writeMemo, writeExpertise, writeVisuals } from "./artifacts.js";
 import { loadScratchpad, saveScratchpad, extractScratchpadUpdate, stripScratchpadBlock } from "./scratchpad.js";
-import type { ThreadState } from "./messaging-types.js";
+import type { RoutedMessage, Thread, ThreadState } from "./messaging-types.js";
 import { buildThreadGraph, renderThreadGraph } from "./thread-graph.js";
 import { extractMermaidBlocks } from "./visuals.js";
 import { loadExpertise } from "./prompt-composer.js";
@@ -87,6 +87,309 @@ function resolveRosterSelection(allAgents: AgentConfig[], slugs: string[]): Agen
 function applyRosterLimit(roster: AgentConfig[], constraints: ConstraintSet): AgentConfig[] {
   if (!constraints.max_roster_size || constraints.max_roster_size <= 0) return roster;
   return roster.slice(0, constraints.max_roster_size);
+}
+
+interface MessagingFramingPhaseResult {
+  framingRes: { content: string; tokenCount: number; cost: number };
+  rosterAgents: AgentConfig[];
+  rosterSlugs: string[];
+  createdThreads: Thread[];
+}
+
+interface PersistedMessagingArtifacts {
+  memoPath: string;
+  debateJsonPath: string;
+  debateMarkdownPath: string;
+  visualPaths: string[];
+}
+
+function buildMessagingFramingTask(
+  nonCeo: AgentConfig[],
+  constraintValues: ConstraintSet,
+  intro: string,
+): string {
+  return [
+    intro,
+    "1. Restate the strategic question in one sentence.",
+    "2. Define workstream threads for the key aspects of this decision.",
+    `3. Select which board members should be consulted${constraintValues.max_roster_size ? ` (up to ${constraintValues.max_roster_size})` : ""}.`,
+    "Output the structured JSON block as specified in the protocol.",
+    `Available board members: ${nonCeo.map(a => `${a.slug} (${a.name}: ${a.description.slice(0, 80)})`).join("; ")}`,
+    "4. Provide your initial framing and key questions for the board to address.",
+  ].join("\n");
+}
+
+async function runMessagingFramingPhase(
+  cwd: string,
+  brief: ParsedBrief,
+  allAgents: AgentConfig[],
+  ceo: AgentConfig,
+  nonCeo: AgentConfig[],
+  constraintValues: ConstraintSet,
+  callbacks: MessagingMeetingCallbacks,
+  pool: SessionPool,
+  tracker: ConstraintTracker,
+  threadState: ThreadState,
+  framingIntro: string,
+): Promise<MessagingFramingPhaseResult> {
+  callbacks.onStatus("Phase 1: CEO framing the decision...");
+
+  const ceoScratchpad = loadScratchpad(cwd, ceo.slug);
+  const framingPrompt = composeMessagingFramingPrompt(ceo, brief, ceoScratchpad);
+  const framingTask = buildMessagingFramingTask(nonCeo, constraintValues, framingIntro);
+
+  const framingRes = await runCeoWithRetry(cwd, pool, ceo, framingPrompt, framingTask, "Framing the decision", callbacks, callbacks.signal);
+  framingRes.content = processScratchpadOutput(cwd, ceo.slug, framingRes.content);
+  tracker.addCost(framingRes.cost);
+
+  const parsed = parseWorkstreamsFromCeoOutput(framingRes.content);
+  const rosterNames = parsed?.roster.map(r => r.name) ?? [];
+  let rosterAgents = applyRosterLimit(resolveRoster(allAgents, rosterNames), constraintValues);
+  const rosterRationale = parsed?.rationale ?? "Full board (CEO workstream selection could not be parsed)";
+
+  tracker.pause();
+  let rosterDecision;
+  try {
+    rosterDecision = await callbacks.onConfirmRoster(rosterAgents, nonCeo, rosterRationale);
+  } finally {
+    tracker.resume();
+  }
+
+  if (rosterDecision.action === "cancel") {
+    callbacks.onStatus("Meeting cancelled during roster review.");
+    throw new Error("Meeting cancelled during roster review.");
+  }
+  if (rosterDecision.action === "reject") {
+    rosterAgents = applyRosterLimit([...nonCeo], constraintValues);
+  } else if (rosterDecision.action === "edit") {
+    const editedRoster = resolveRosterSelection(allAgents, rosterDecision.roster);
+    rosterAgents = applyRosterLimit(
+      editedRoster.length > 0 ? editedRoster : [...nonCeo],
+      constraintValues,
+    );
+  }
+
+  const rosterSlugs = ["ceo", ...rosterAgents.map(a => a.slug)];
+  pool.ensureAgents(rosterAgents, "Awaiting first round");
+
+  const workstreams = parsed?.workstreams ?? [{ title: "General Discussion", description: brief.title }];
+  const createdThreads = workstreams.map(ws =>
+    createThread(threadState, ws.title, "ceo", null, rosterSlugs),
+  );
+
+  for (let i = 0; i < createdThreads.length; i++) {
+    postMessage(
+      threadState, "broadcast", "ceo", [],
+      createdThreads[i].id, framingRes.content, 1, 0,
+      i === 0 ? framingRes.tokenCount : 0,
+      i === 0 ? framingRes.cost : 0,
+    );
+  }
+
+  callbacks.onStatus(`Phase 1 complete. Created ${createdThreads.length} workstream(s). ${tracker.summary}`);
+
+  return { framingRes, rosterAgents, rosterSlugs, createdThreads };
+}
+
+function collectMessageVisuals(messages: RoutedMessage[]): { label: string; code: string }[] {
+  const visuals: { label: string; code: string }[] = [];
+  for (const msg of messages) {
+    for (const block of extractMermaidBlocks(msg.content)) {
+      visuals.push({ label: `${msg.from}-${msg.type}`, code: block });
+    }
+  }
+  return visuals;
+}
+
+function persistMessagingArtifacts(
+  cwd: string,
+  meetingId: string,
+  brief: ParsedBrief,
+  mode: MeetingMode,
+  constraintsName: string,
+  startedAt: Date,
+  rosterSlugs: string[],
+  disposition: MessagingMeetingResult["disposition"],
+  abortReason: string | undefined,
+  memoContent: string,
+  threadState: ThreadState,
+  writeExpertiseEntries: boolean,
+): PersistedMessagingArtifacts {
+  const messages = getAllMessages(threadState);
+  const messagingLog = serializeToMessagingLog(
+    threadState, meetingId, brief.filePath, mode, constraintsName,
+    rosterSlugs, startedAt.toISOString(), disposition,
+  );
+  const memoPath = writeMemo(cwd, brief.slug, memoContent, startedAt);
+  const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog);
+  const allMermaid = collectMessageVisuals(messages);
+  const visualPaths = allMermaid.length > 0 ? writeVisuals(cwd, meetingId, allMermaid) : [];
+
+  if (writeExpertiseEntries) {
+    for (const msg of messages) {
+      if (msg.content && msg.content.length > 100 && !msg.content.startsWith("[")) {
+        writeExpertise(cwd, msg.from, meetingId, msg.content.slice(0, 500));
+      }
+    }
+  }
+
+  return { memoPath, debateJsonPath, debateMarkdownPath, visualPaths };
+}
+
+function completeMessagingMeeting(
+  cwd: string,
+  meetingId: string,
+  brief: ParsedBrief,
+  mode: MeetingMode,
+  constraintsName: string,
+  startedAt: Date,
+  rosterSlugs: string[],
+  tracker: ConstraintTracker,
+  callbacks: MessagingMeetingCallbacks,
+  pool: SessionPool,
+  threadState: ThreadState,
+  createdThreads: Thread[],
+  synthRes: { content: string; tokenCount: number; cost: number },
+  earlyClose: boolean,
+  statusLabel: string,
+): MessagingMeetingResult {
+  const forceClosed = isForceCloseRequested(callbacks.signal);
+
+  if (createdThreads.length > 0) {
+    postMessage(
+      threadState, "broadcast", "ceo", [],
+      createdThreads[0].id, synthRes.content,
+      99, 0,
+      synthRes.tokenCount, synthRes.cost,
+    );
+  }
+
+  const disposition = forceClosed
+    ? "force-closed"
+    : earlyClose
+      ? (tracker.budgetState === "exceeded" ? "budget-exceeded" : "completed")
+      : "completed";
+  const abortReason = forceClosed ? "Meeting was force-closed by operator." : undefined;
+
+  const resolveReason = forceClosed
+    ? "meeting-force-closed" as const
+    : earlyClose
+      ? "constraints-exceeded" as const
+      : "ceo-checkpoint" as const;
+  const resolveSummary = forceClosed
+    ? "Meeting force-closed after CEO final synthesis."
+    : earlyClose
+      ? "Meeting concluded early due to constraint limits."
+      : "Meeting concluded by CEO synthesis.";
+  resolveAllActiveThreads(threadState, resolveReason, resolveSummary);
+
+  const artifacts = persistMessagingArtifacts(
+    cwd,
+    meetingId,
+    brief,
+    mode,
+    constraintsName,
+    startedAt,
+    rosterSlugs,
+    disposition,
+    abortReason,
+    forceClosed ? `${synthRes.content}\n\n[Boardroom force-closed. Reason: ${abortReason}]` : synthRes.content,
+    threadState,
+    true,
+  );
+
+  if (artifacts.visualPaths.length > 0) {
+    callbacks.onStatus(`Generated ${artifacts.visualPaths.length} visual(s).`);
+  }
+
+  callbacks.onStatus(`${statusLabel} (${disposition}). ${tracker.summary}`);
+  pool.destroyAll();
+  return finalizeMessagingResult(
+    artifacts.memoPath,
+    artifacts.debateJsonPath,
+    artifacts.debateMarkdownPath,
+    artifacts.visualPaths,
+    disposition,
+    brief,
+    mode,
+    tracker,
+    rosterSlugs,
+    abortReason,
+  );
+}
+
+function savePartialMessagingMeeting(
+  cwd: string,
+  meetingId: string,
+  brief: ParsedBrief,
+  mode: MeetingMode,
+  constraintsName: string,
+  startedAt: Date,
+  rosterSlugs: string[],
+  tracker: ConstraintTracker,
+  callbacks: MessagingMeetingCallbacks,
+  pool: SessionPool,
+  threadState: ThreadState,
+  disposition: "force-closed" | "aborted",
+  abortReason: string,
+  forceClosedStatus: string,
+  abortedStatus: string,
+  errorStatusPrefix: string,
+): MessagingMeetingResult {
+  if (abortReason === "Meeting cancelled during roster review.") {
+    callbacks.onStatus(abortReason);
+  } else if (disposition === "force-closed") {
+    callbacks.onStatus(forceClosedStatus);
+  } else if (callbacks.signal?.aborted) {
+    callbacks.onStatus(abortedStatus);
+  } else {
+    callbacks.onStatus(`${errorStatusPrefix}: ${abortReason}. Saving partial state...`);
+  }
+
+  const reason = disposition === "force-closed" ? "meeting-force-closed" as const : "meeting-aborted" as const;
+  const resolvedCount = resolveAllActiveThreads(
+    threadState,
+    reason,
+    `Meeting ${disposition === "force-closed" ? "force-closed" : "aborted"}: ${abortReason}`,
+  );
+  const droppedCount = markUndeliverableMessages(threadState);
+
+  if (resolvedCount > 0 || droppedCount > 0) {
+    callbacks.onStatus(`Cleaned up: ${resolvedCount} thread(s) resolved, ${droppedCount} message(s) marked dropped.`);
+  }
+
+  callbacks.onStatus(formatRecoveryCheckpoint(threadState));
+
+  const lastCeoMsg = getAllMessages(threadState).findLast(m => m.from === "ceo");
+  const memoContent = lastCeoMsg?.content ?? "[Meeting aborted. No CEO synthesis available.]";
+  const artifacts = persistMessagingArtifacts(
+    cwd,
+    meetingId,
+    brief,
+    mode,
+    constraintsName,
+    startedAt,
+    rosterSlugs,
+    disposition,
+    abortReason,
+    memoContent,
+    threadState,
+    false,
+  );
+
+  pool.destroyAll();
+  return finalizeMessagingResult(
+    artifacts.memoPath,
+    artifacts.debateJsonPath,
+    artifacts.debateMarkdownPath,
+    artifacts.visualPaths,
+    disposition,
+    brief,
+    mode,
+    tracker,
+    rosterSlugs,
+    abortReason,
+  );
 }
 
 function buildMessagingAgentSnapshots(
@@ -344,75 +647,25 @@ export async function runFreeformMessagingMeeting(
   pool.ensureAgents([ceo], "Preparing framing");
 
   try {
-    // ── Phase 1: CEO Framing ──
-    callbacks.onStatus("Phase 1: CEO framing the decision...");
-
-    const ceoScratchpad = loadScratchpad(cwd, ceo.slug);
-    const framingPrompt = composeMessagingFramingPrompt(ceo, brief, ceoScratchpad);
-    const framingTask = [
+    const {
+      framingRes,
+      rosterAgents,
+      rosterSlugs: resolvedRosterSlugs,
+      createdThreads,
+    } = await runMessagingFramingPhase(
+      cwd,
+      brief,
+      allAgents,
+      ceo,
+      nonCeo,
+      constraintValues,
+      callbacks,
+      pool,
+      tracker,
+      threadState,
       "Frame this decision for the executive board using the messaging model.",
-      "1. Restate the strategic question in one sentence.",
-      "2. Define workstream threads for the key aspects of this decision.",
-      `3. Select which board members should be consulted${constraintValues.max_roster_size ? ` (up to ${constraintValues.max_roster_size})` : ""}.`,
-      "Output the structured JSON block as specified in the protocol.",
-      `Available board members: ${nonCeo.map(a => `${a.slug} (${a.name}: ${a.description.slice(0, 80)})`).join("; ")}`,
-      "4. Provide your initial framing and key questions for the board to address.",
-    ].join("\n");
-
-    const framingRes = await runCeoWithRetry(cwd, pool, ceo, framingPrompt, framingTask, "Framing the decision", callbacks, callbacks.signal);
-    framingRes.content = processScratchpadOutput(cwd, ceo.slug, framingRes.content);
-    tracker.addCost(framingRes.cost);
-
-    // Parse workstreams and roster from CEO output
-    const parsed = parseWorkstreamsFromCeoOutput(framingRes.content);
-    const rosterNames = parsed?.roster.map(r => r.name) ?? [];
-    let rosterAgents = applyRosterLimit(resolveRoster(allAgents, rosterNames), constraintValues);
-    const rosterRationale = parsed?.rationale ?? "Full board (CEO workstream selection could not be parsed)";
-
-    // Confirm roster
-    tracker.pause();
-    let rosterDecision;
-    try {
-      rosterDecision = await callbacks.onConfirmRoster(rosterAgents, nonCeo, rosterRationale);
-    } finally {
-      tracker.resume();
-    }
-    if (rosterDecision.action === "cancel") {
-      callbacks.onStatus("Meeting cancelled during roster review.");
-      throw new Error("Meeting cancelled during roster review.");
-    }
-    if (rosterDecision.action === "reject") {
-      rosterAgents = applyRosterLimit([...nonCeo], constraintValues);
-    } else if (rosterDecision.action === "edit") {
-      const editedRoster = resolveRosterSelection(allAgents, rosterDecision.roster);
-      rosterAgents = applyRosterLimit(
-        editedRoster.length > 0 ? editedRoster : [...nonCeo],
-        constraintValues,
-      );
-    }
-
-    rosterSlugs = ["ceo", ...rosterAgents.map(a => a.slug)];
-    pool.ensureAgents(rosterAgents, "Awaiting first round");
-
-    // Create workstream threads from CEO output
-    const workstreams = parsed?.workstreams ?? [{ title: "General Discussion", description: brief.title }];
-    const createdThreads = workstreams.map(ws =>
-      createThread(threadState, ws.title, "ceo", null, rosterSlugs),
     );
-
-    // Post CEO framing as broadcast in each thread.
-    // Only the first thread carries the real cost/tokens to avoid
-    // inflating serializeToMessagingLog's total_cost.
-    for (let i = 0; i < createdThreads.length; i++) {
-      postMessage(
-        threadState, "broadcast", "ceo", [],
-        createdThreads[i].id, framingRes.content, 1, 0,
-        i === 0 ? framingRes.tokenCount : 0,
-        i === 0 ? framingRes.cost : 0,
-      );
-    }
-
-    callbacks.onStatus(`Phase 1 complete. Created ${createdThreads.length} workstream(s). ${tracker.summary}`);
+    rosterSlugs = resolvedRosterSlugs;
     emitMessagingSnapshot(meetingId, brief, mode, constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 1, "CEO Framing", "Framing complete. Roster confirmed.", callbacks, pool);
 
     // ── Debate Rounds (Semi-Live Queue) ──
@@ -565,129 +818,45 @@ export async function runFreeformMessagingMeeting(
     synthRes.content = processScratchpadOutput(cwd, ceo.slug, synthRes.content);
     tracker.addCost(synthRes.cost);
 
-    // Post synthesis in first thread
-    if (createdThreads.length > 0) {
-      postMessage(
-        threadState, "broadcast", "ceo", [],
-        createdThreads[0].id, synthRes.content,
-        99, 0,  // synthesis phase
-        synthRes.tokenCount, synthRes.cost,
-      );
-    }
-
-    // Resolve all active threads
-    const resolveReason = forceClosed
-      ? "meeting-force-closed" as const
-      : earlyClose
-        ? "constraints-exceeded" as const
-        : "ceo-checkpoint" as const;
-    const resolveSummary = forceClosed
-      ? "Meeting force-closed after CEO final synthesis."
-      : earlyClose
-        ? "Meeting concluded early due to constraint limits."
-        : "Meeting concluded by CEO synthesis.";
-    resolveAllActiveThreads(threadState, resolveReason, resolveSummary);
-
-    // ── Collect Visuals ──
-    const allMessages = getAllMessages(threadState);
-    const allMermaid: { label: string; code: string }[] = [];
-    for (const msg of allMessages) {
-      const blocks = extractMermaidBlocks(msg.content);
-      for (const block of blocks) {
-        allMermaid.push({ label: `${msg.from}-${msg.type}`, code: block });
-      }
-    }
-    let visualPaths: string[] = [];
-
-    // ── Write Artifacts ──
-    const disposition = forceClosed
-      ? "force-closed"
-      : earlyClose
-        ? (tracker.budgetState === "exceeded" ? "budget-exceeded" : "completed")
-        : "completed";
-    const abortReason = forceClosed ? "Meeting was force-closed by operator." : undefined;
-
-    const messagingLog = serializeToMessagingLog(
-      threadState, meetingId, brief.filePath, mode, constraintsName,
-      rosterSlugs, startedAt.toISOString(), disposition,
-    );
-    const memoPath = writeMemo(
+    return completeMessagingMeeting(
       cwd,
-      brief.slug,
-      forceClosed
-        ? `${synthRes.content}\n\n[Boardroom force-closed. Reason: ${abortReason}]`
-        : synthRes.content,
+      meetingId,
+      brief,
+      mode,
+      constraintsName,
       startedAt,
+      rosterSlugs,
+      tracker,
+      callbacks,
+      pool,
+      threadState,
+      createdThreads,
+      synthRes,
+      earlyClose,
+      "Meeting complete",
     );
-    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog);
-
-    if (allMermaid.length > 0) {
-      visualPaths = writeVisuals(cwd, meetingId, allMermaid);
-      callbacks.onStatus(`Generated ${visualPaths.length} visual(s).`);
-    }
-
-    // Write expertise
-    for (const msg of allMessages) {
-      if (msg.content && msg.content.length > 100 && !msg.content.startsWith("[")) {
-        writeExpertise(cwd, msg.from, meetingId, msg.content.slice(0, 500));
-      }
-    }
-
-    callbacks.onStatus(`Meeting complete (${disposition}). ${tracker.summary}`);
-    pool.destroyAll();
-    return finalizeMessagingResult(memoPath, debateJsonPath, debateMarkdownPath, visualPaths, disposition, brief, mode, tracker, rosterSlugs, abortReason);
 
   } catch (err: any) {
     const disposition = callbacks.signal?.aborted ? getAbortDisposition(callbacks.signal) : "aborted";
     const abortReason = describeMessagingAbortReason(err, callbacks.signal);
-    if (abortReason === "Meeting cancelled during roster review.") {
-      callbacks.onStatus(abortReason);
-    } else if (disposition === "force-closed") {
-      callbacks.onStatus("Meeting force-closed. Saving partial state...");
-    } else if (callbacks.signal?.aborted) {
-      callbacks.onStatus("Meeting aborted. Saving partial state...");
-    } else {
-      callbacks.onStatus(`Meeting error: ${abortReason}. Saving partial state...`);
-    }
-
-    // Resolve all active threads so artifacts reflect final state
-    const reason = disposition === "force-closed" ? "meeting-force-closed" as const : "meeting-aborted" as const;
-    const resolvedCount = resolveAllActiveThreads(
+    return savePartialMessagingMeeting(
+      cwd,
+      meetingId,
+      brief,
+      mode,
+      constraintsName,
+      startedAt,
+      rosterSlugs,
+      tracker,
+      callbacks,
+      pool,
       threadState,
-      reason,
-      `Meeting ${disposition === "force-closed" ? "force-closed" : "aborted"}: ${abortReason}`,
+      disposition,
+      abortReason,
+      "Meeting force-closed. Saving partial state...",
+      "Meeting aborted. Saving partial state...",
+      "Meeting error",
     );
-    const droppedCount = markUndeliverableMessages(threadState);
-
-    if (resolvedCount > 0 || droppedCount > 0) {
-      callbacks.onStatus(`Cleaned up: ${resolvedCount} thread(s) resolved, ${droppedCount} message(s) marked dropped.`);
-    }
-
-    // Show recovery checkpoint
-    callbacks.onStatus(formatRecoveryCheckpoint(threadState));
-
-    // Save partial artifacts
-    const messagingLog = serializeToMessagingLog(
-      threadState, meetingId, brief.filePath, mode, constraintsName,
-      rosterSlugs, startedAt.toISOString(), disposition,
-    );
-
-    const lastCeoMsg = getAllMessages(threadState).findLast(m => m.from === "ceo");
-    const memoContent = lastCeoMsg?.content ?? "[Meeting aborted. No CEO synthesis available.]";
-
-    const memoPath = writeMemo(cwd, brief.slug, memoContent, startedAt);
-    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog);
-
-    const allMermaid: { label: string; code: string }[] = [];
-    for (const msg of getAllMessages(threadState)) {
-      for (const block of extractMermaidBlocks(msg.content)) {
-        allMermaid.push({ label: `${msg.from}-${msg.type}`, code: block });
-      }
-    }
-    const visualPaths = allMermaid.length > 0 ? writeVisuals(cwd, meetingId, allMermaid) : [];
-
-    pool.destroyAll();
-    return finalizeMessagingResult(memoPath, debateJsonPath, debateMarkdownPath, visualPaths, disposition, brief, mode, tracker, rosterSlugs, abortReason);
   }
 }
 
@@ -725,72 +894,25 @@ export async function runStructuredMessagingMeeting(
   pool.ensureAgents([ceo], "Preparing framing");
 
   try {
-    // ── Phase 1: CEO Framing (same as freeform) ──
-    callbacks.onStatus("Phase 1: CEO framing the decision...");
-
-    const ceoScratchpad = loadScratchpad(cwd, ceo.slug);
-    const framingPrompt = composeMessagingFramingPrompt(ceo, brief, ceoScratchpad);
-    const framingTask = [
+    const {
+      framingRes,
+      rosterAgents,
+      rosterSlugs: resolvedRosterSlugs,
+      createdThreads,
+    } = await runMessagingFramingPhase(
+      cwd,
+      brief,
+      allAgents,
+      ceo,
+      nonCeo,
+      constraintValues,
+      callbacks,
+      pool,
+      tracker,
+      threadState,
       "Frame this decision for the executive board in structured meeting mode.",
-      "1. Restate the strategic question in one sentence.",
-      "2. Define workstream threads for the key aspects of this decision.",
-      `3. Select which board members should be consulted${constraintValues.max_roster_size ? ` (up to ${constraintValues.max_roster_size})` : ""}.`,
-      "Output the structured JSON block as specified in the protocol.",
-      `Available board members: ${nonCeo.map(a => `${a.slug} (${a.name}: ${a.description.slice(0, 80)})`).join("; ")}`,
-      "4. Provide your initial framing and key questions for the board to address.",
-    ].join("\n");
-
-    const framingRes = await runCeoWithRetry(cwd, pool, ceo, framingPrompt, framingTask, "Framing the decision", callbacks, callbacks.signal);
-    framingRes.content = processScratchpadOutput(cwd, ceo.slug, framingRes.content);
-    tracker.addCost(framingRes.cost);
-
-    const parsed = parseWorkstreamsFromCeoOutput(framingRes.content);
-    const rosterNames = parsed?.roster.map(r => r.name) ?? [];
-    let rosterAgents = applyRosterLimit(resolveRoster(allAgents, rosterNames), constraintValues);
-    const rosterRationale = parsed?.rationale ?? "Full board (CEO workstream selection could not be parsed)";
-
-    tracker.pause();
-    let rosterDecision;
-    try {
-      rosterDecision = await callbacks.onConfirmRoster(rosterAgents, nonCeo, rosterRationale);
-    } finally {
-      tracker.resume();
-    }
-    if (rosterDecision.action === "cancel") {
-      callbacks.onStatus("Meeting cancelled during roster review.");
-      throw new Error("Meeting cancelled during roster review.");
-    }
-    if (rosterDecision.action === "reject") {
-      rosterAgents = applyRosterLimit([...nonCeo], constraintValues);
-    } else if (rosterDecision.action === "edit") {
-      const editedRoster = resolveRosterSelection(allAgents, rosterDecision.roster);
-      rosterAgents = applyRosterLimit(
-        editedRoster.length > 0 ? editedRoster : [...nonCeo],
-        constraintValues,
-      );
-    }
-
-    rosterSlugs = ["ceo", ...rosterAgents.map(a => a.slug)];
-    pool.ensureAgents(rosterAgents, "Awaiting first round");
-
-    // Create workstream threads
-    const workstreams = parsed?.workstreams ?? [{ title: "General Discussion", description: brief.title }];
-    const createdThreads = workstreams.map(ws =>
-      createThread(threadState, ws.title, "ceo", null, rosterSlugs),
     );
-
-    // Post CEO framing in each thread.
-    // Only the first thread carries cost/tokens — see freeform path.
-    for (let i = 0; i < createdThreads.length; i++) {
-      postMessage(
-        threadState, "broadcast", "ceo", [],
-        createdThreads[i].id, framingRes.content, 1, 0,
-        i === 0 ? framingRes.tokenCount : 0,
-        i === 0 ? framingRes.cost : 0,
-      );
-    }
-
-    callbacks.onStatus(`Phase 1 complete. Created ${createdThreads.length} workstream(s). ${tracker.summary}`);
+    rosterSlugs = resolvedRosterSlugs;
     emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 1, "CEO Framing", "Framing complete. Roster confirmed.", callbacks, pool);
 
     let reEngagementCount = 0;
@@ -836,7 +958,7 @@ export async function runStructuredMessagingMeeting(
         emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 3, "Stress Test", "Running adversarial stress test.", callbacks, pool);
 
         // Create a stress-test thread
-        const stressThread = createThread(threadState, "Stress Test", "ceo");
+        const stressThread = createThread(threadState, "Stress Test", "ceo", null, ["ceo", ...stressAgents.map(a => a.slug)]);
         postMessage(
           threadState, "moderation", "ceo", stressAgents.map(a => a.slug),
           stressThread.id,
@@ -962,125 +1084,44 @@ export async function runStructuredMessagingMeeting(
     const synthRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, synthTask, "Synthesizing final decision", callbacks, synthSignal);
     synthRes.content = processScratchpadOutput(cwd, ceo.slug, synthRes.content);
     tracker.addCost(synthRes.cost);
-
-    // Post synthesis in first thread
-    if (createdThreads.length > 0) {
-      postMessage(
-        threadState, "broadcast", "ceo", [],
-        createdThreads[0].id, synthRes.content,
-        99, 0,
-        synthRes.tokenCount, synthRes.cost,
-      );
-    }
-
-    // Resolve all active threads
-    const sResolveReason = forceClosed
-      ? "meeting-force-closed" as const
-      : earlyClose
-        ? "constraints-exceeded" as const
-        : "ceo-checkpoint" as const;
-    const sResolveSummary = forceClosed
-      ? "Meeting force-closed after CEO final synthesis."
-      : earlyClose
-        ? "Meeting concluded early due to constraint limits."
-        : "Meeting concluded by CEO synthesis.";
-    resolveAllActiveThreads(threadState, sResolveReason, sResolveSummary);
-
-    // ── Collect Visuals & Write Artifacts ──
-    const allMessages = getAllMessages(threadState);
-    const allMermaid: { label: string; code: string }[] = [];
-    for (const msg of allMessages) {
-      for (const block of extractMermaidBlocks(msg.content)) {
-        allMermaid.push({ label: `${msg.from}-${msg.type}`, code: block });
-      }
-    }
-    let visualPaths: string[] = [];
-
-    const disposition = forceClosed
-      ? "force-closed"
-      : earlyClose
-        ? (tracker.budgetState === "exceeded" ? "budget-exceeded" : "completed")
-        : "completed";
-    const abortReason = forceClosed ? "Meeting was force-closed by operator." : undefined;
-
-    const messagingLog = serializeToMessagingLog(
-      threadState, meetingId, brief.filePath, "structured", constraintsName,
-      rosterSlugs, startedAt.toISOString(), disposition,
-    );
-    const memoPath = writeMemo(
+    return completeMessagingMeeting(
       cwd,
-      brief.slug,
-      forceClosed
-        ? `${synthRes.content}\n\n[Boardroom force-closed. Reason: ${abortReason}]`
-        : synthRes.content,
+      meetingId,
+      brief,
+      "structured",
+      constraintsName,
       startedAt,
+      rosterSlugs,
+      tracker,
+      callbacks,
+      pool,
+      threadState,
+      createdThreads,
+      synthRes,
+      earlyClose,
+      "Structured meeting complete",
     );
-    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog);
-
-    if (allMermaid.length > 0) {
-      visualPaths = writeVisuals(cwd, meetingId, allMermaid);
-      callbacks.onStatus(`Generated ${visualPaths.length} visual(s).`);
-    }
-
-    for (const msg of allMessages) {
-      if (msg.content && msg.content.length > 100 && !msg.content.startsWith("[")) {
-        writeExpertise(cwd, msg.from, meetingId, msg.content.slice(0, 500));
-      }
-    }
-
-    callbacks.onStatus(`Structured meeting complete (${disposition}). ${tracker.summary}`);
-    pool.destroyAll();
-    return finalizeMessagingResult(memoPath, debateJsonPath, debateMarkdownPath, visualPaths, disposition, brief, "structured", tracker, rosterSlugs, abortReason);
 
   } catch (err: any) {
     const disposition = callbacks.signal?.aborted ? getAbortDisposition(callbacks.signal) : "aborted";
     const abortReason = describeMessagingAbortReason(err, callbacks.signal);
-    if (abortReason === "Meeting cancelled during roster review.") {
-      callbacks.onStatus(abortReason);
-    } else if (disposition === "force-closed") {
-      callbacks.onStatus("Structured meeting force-closed. Saving partial state...");
-    } else if (callbacks.signal?.aborted) {
-      callbacks.onStatus("Structured meeting aborted. Saving partial state...");
-    } else {
-      callbacks.onStatus(`Structured meeting error: ${abortReason}. Saving partial state...`);
-    }
-
-    // Resolve all active threads so artifacts reflect final state
-    const reason = disposition === "force-closed" ? "meeting-force-closed" as const : "meeting-aborted" as const;
-    const resolvedCount = resolveAllActiveThreads(
+    return savePartialMessagingMeeting(
+      cwd,
+      meetingId,
+      brief,
+      "structured",
+      constraintsName,
+      startedAt,
+      rosterSlugs,
+      tracker,
+      callbacks,
+      pool,
       threadState,
-      reason,
-      `Meeting ${disposition === "force-closed" ? "force-closed" : "aborted"}: ${abortReason}`,
+      disposition,
+      abortReason,
+      "Structured meeting force-closed. Saving partial state...",
+      "Structured meeting aborted. Saving partial state...",
+      "Structured meeting error",
     );
-    const droppedCount = markUndeliverableMessages(threadState);
-
-    if (resolvedCount > 0 || droppedCount > 0) {
-      callbacks.onStatus(`Cleaned up: ${resolvedCount} thread(s) resolved, ${droppedCount} message(s) marked dropped.`);
-    }
-
-    // Show recovery checkpoint
-    callbacks.onStatus(formatRecoveryCheckpoint(threadState));
-
-    const messagingLog = serializeToMessagingLog(
-      threadState, meetingId, brief.filePath, "structured", constraintsName,
-      rosterSlugs, startedAt.toISOString(), disposition,
-    );
-
-    const lastCeoMsg = getAllMessages(threadState).findLast(m => m.from === "ceo");
-    const memoContent = lastCeoMsg?.content ?? "[Meeting aborted. No CEO synthesis available.]";
-
-    const memoPath = writeMemo(cwd, brief.slug, memoContent, startedAt);
-    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog);
-
-    const allMermaid: { label: string; code: string }[] = [];
-    for (const msg of getAllMessages(threadState)) {
-      for (const block of extractMermaidBlocks(msg.content)) {
-        allMermaid.push({ label: `${msg.from}-${msg.type}`, code: block });
-      }
-    }
-    const visualPaths = allMermaid.length > 0 ? writeVisuals(cwd, meetingId, allMermaid) : [];
-
-    pool.destroyAll();
-    return finalizeMessagingResult(memoPath, debateJsonPath, debateMarkdownPath, visualPaths, disposition, brief, "structured", tracker, rosterSlugs, abortReason);
   }
 }

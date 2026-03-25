@@ -39,6 +39,7 @@ vi.mock("./messaging-prompts.js", () => ({
     to: [],
     replyTo: null,
     type: "broadcast",
+    newThread: null,
     content,
   })),
 }));
@@ -103,6 +104,7 @@ describe("round-queue", () => {
       to: [],
       replyTo: null,
       type: "broadcast",
+      newThread: null,
       content,
     }));
   });
@@ -428,6 +430,48 @@ describe("round-queue", () => {
       expect(result.messagesPosted).toBe(1);
       expect(callbacks.onMessagePosted).toHaveBeenCalledWith(
         expect.objectContaining({ type: "direct", to: ["cto"] }),
+      );
+    });
+
+    it("creates a child thread when NEW-THREAD is requested", async () => {
+      const parent = createThread(state, "Revenue", "ceo", null, ["ceo", "cfo"]);
+      const framing = postMessage(state, "broadcast", "ceo", [], parent.id, "CEO framing", 1, 0, 100, 0.05);
+      state.agent_inboxes.set("cfo", [framing.id]);
+
+      const agents = [makeAgent("cfo", "CFO")];
+      const allAgents = [makeAgent("ceo", "CEO"), ...agents];
+      const tracker = new ConstraintTracker(makeConstraintValues());
+      const callbacks = makeCallbacks();
+
+      mockRunOne.mockResolvedValue({
+        agent: "cfo",
+        content: "Let's dig into pricing assumptions.",
+        exitCode: 0,
+        tokenCount: 80,
+        cost: 0.03,
+      });
+
+      mockParseRouting.mockReturnValue({
+        to: [],
+        replyTo: null,
+        type: "broadcast",
+        newThread: "Pricing Deep Dive",
+        content: "Let's dig into pricing assumptions.",
+      });
+
+      const result = await runSemiLiveRound(
+        cwd, state, agents, allAgents, makeBrief(), "CEO framing",
+        1, 2, tracker, makeConstraintValues(),
+        { budget_hard_stop: false, time_hard_stop: false },
+        DEFAULT_ROUND_CONFIG, callbacks, makePool(),
+      );
+
+      const childThreads = Array.from(state.threads.values()).filter((thread) => thread.parent_id === parent.id);
+      expect(result.messagesPosted).toBe(1);
+      expect(childThreads).toHaveLength(1);
+      expect(childThreads[0].title).toBe("Pricing Deep Dive");
+      expect(callbacks.onMessagePosted).toHaveBeenCalledWith(
+        expect.objectContaining({ thread_id: childThreads[0].id, content: "Let's dig into pricing assumptions." }),
       );
     });
 
