@@ -160,6 +160,12 @@ describe("composeMessagingFramingPrompt", () => {
     expect(prompt).toContain("broadcast");
     expect(prompt).toContain(mockBrief.title);
   });
+
+  it("always includes scratch pad instructions", () => {
+    const prompt = composeMessagingFramingPrompt(mockAgent, mockBrief, null);
+    expect(prompt).toContain("--- SCRATCH PAD ---");
+    expect(prompt).toContain("Your scratch pad is currently empty.");
+  });
 });
 
 describe("composeMessagingAssessmentPrompt", () => {

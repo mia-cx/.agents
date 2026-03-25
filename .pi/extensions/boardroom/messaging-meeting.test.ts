@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentConfig, ConstraintSet, ParsedBrief } from "./types.js";
+import { resetCounters } from "./thread-manager.js";
 
 const runtimeMocks = vi.hoisted(() => ({
   ensureAgents: vi.fn(),
@@ -42,7 +43,7 @@ vi.mock("./round-queue.js", () => ({
   DEFAULT_ROUND_CONFIG: { maxMessagesPerRound: 20, roundTimeoutSeconds: 180 },
 }));
 
-import { runFreeformMessagingMeeting } from "./messaging-meeting.js";
+import { runFreeformMessagingMeeting, runStructuredMessagingMeeting } from "./messaging-meeting.js";
 
 function makeAgent(slug: string, name: string): AgentConfig {
   return {
@@ -95,6 +96,7 @@ function makeFramingOutput(roster: string[]): string {
 
 describe("messaging-meeting", () => {
   beforeEach(() => {
+    resetCounters();
     vi.clearAllMocks();
     runtimeMocks.snapshot.mockReturnValue([]);
     roundQueueMocks.runSemiLiveRound.mockResolvedValue({
@@ -206,5 +208,183 @@ describe("messaging-meeting", () => {
     expect(result.disposition).toBe("force-closed");
     expect(fs.readFileSync(result.memoPath, "utf-8")).toContain("Final brief from force-close.");
     expect(fs.readFileSync(result.memoPath, "utf-8")).toContain("Boardroom force-closed");
+  });
+
+  it("keeps thread and message ids monotonic across meetings", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO"),
+      makeAgent("cto", "CTO"),
+    ];
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "First final brief.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cto"]),
+        exitCode: 0,
+        tokenCount: 110,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Second final brief.",
+        exitCode: 0,
+        tokenCount: 130,
+        cost: 0.07,
+      });
+
+    const first = await runFreeformMessagingMeeting(
+      cwd,
+      makeBrief("first-meeting"),
+      agents,
+      "freeform",
+      "standard",
+      makeConstraints(),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot: vi.fn(),
+      },
+    );
+    const second = await runFreeformMessagingMeeting(
+      cwd,
+      makeBrief("second-meeting"),
+      agents,
+      "freeform",
+      "standard",
+      makeConstraints(),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot: vi.fn(),
+      },
+    );
+
+    const firstLog = JSON.parse(fs.readFileSync(first.debateJsonPath, "utf-8")) as {
+      threads: Array<{ id: string }>;
+      messages: Array<{ id: string }>;
+    };
+    const secondLog = JSON.parse(fs.readFileSync(second.debateJsonPath, "utf-8")) as {
+      threads: Array<{ id: string }>;
+      messages: Array<{ id: string }>;
+    };
+
+    expect(firstLog.threads[0]?.id).toBe("thread-001");
+    expect(firstLog.messages[0]?.id).toBe("msg-0001");
+    expect(secondLog.threads[0]?.id).toBe("thread-002");
+    expect(secondLog.messages[0]?.id).toBe("msg-0003");
+  });
+
+  it("applies max roster size to parsed and rejected freeform rosters", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO"),
+      makeAgent("cto", "CTO"),
+      makeAgent("coo", "COO"),
+    ];
+    const onConfirmRoster = vi.fn(async (roster: AgentConfig[]) => {
+      expect(roster.map((agent) => agent.slug)).toEqual(["cfo"]);
+      return { action: "reject" as const };
+    });
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo", "cto", "coo"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Final brief after reject.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    const result = await runFreeformMessagingMeeting(
+      cwd,
+      makeBrief("freeform-roster-limit"),
+      agents,
+      "freeform",
+      "quick",
+      makeConstraints({ max_roster_size: 1 }),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster,
+        onSnapshot: vi.fn(),
+      },
+    );
+
+    expect(result.roster).toEqual(["ceo", "cfo"]);
+  });
+
+  it("applies max roster size after structured roster edits", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO"),
+      makeAgent("cto", "CTO"),
+    ];
+    const onConfirmRoster = vi.fn(async (roster: AgentConfig[]) => {
+      expect(roster.map((agent) => agent.slug)).toEqual(["cfo"]);
+      return { action: "edit" as const, roster: ["cto", "cfo"] };
+    });
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo", "cto"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Structured final brief.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    const result = await runStructuredMessagingMeeting(
+      cwd,
+      makeBrief("structured-roster-limit"),
+      agents,
+      "quick",
+      makeConstraints({ max_roster_size: 1 }),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster,
+        onSnapshot: vi.fn(),
+      },
+    );
+
+    expect(result.roster).toEqual(["ceo", "cto"]);
   });
 });

@@ -44,9 +44,7 @@ export function composeMessagingFramingPrompt(
     "--- END PROTOCOL ---",
   ];
 
-  if (scratchpad !== undefined) {
-    parts.push(composeScratchpadInstructions(scratchpad));
-  }
+  parts.push(composeScratchpadInstructions(scratchpad));
 
   return parts.join("\n");
 }
