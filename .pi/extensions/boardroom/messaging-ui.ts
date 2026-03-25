@@ -6,7 +6,7 @@
  */
 
 import type { ThreadState, Thread, RoutedMessage } from "./messaging-types.js";
-import { getAgentMessageCounts, getAllThreads, getAllMessages, getActiveThreads } from "./thread-manager.js";
+import { getAgentMessageCounts, getAllThreads, getAllMessages } from "./thread-manager.js";
 
 // --- Roster Line with Messaging Counts ---
 
