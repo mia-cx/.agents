@@ -14,6 +14,7 @@ import {
   createThread,
   postMessage,
   resolveThread,
+  closeThread,
   resetCounters,
 } from "./thread-manager.js";
 import type { ThreadState } from "./messaging-types.js";
@@ -218,11 +219,13 @@ describe("messaging-ui", () => {
       const t1 = createThread(state, "Revenue", "ceo");
       postMessage(state, "broadcast", "ceo", [], t1.id, "Opening", 1, 0, 100, 0.05);
       postMessage(state, "broadcast", "cfo", [], t1.id, "Reply", 1, 1, 80, 0.03);
+      const quietChild = createThread(state, "Revenue Detail", "cfo", t1.id);
+      postMessage(state, "broadcast", "cfo", [], quietChild.id, "Detail", 1, 1, 30, 0.01);
 
       const t2 = createThread(state, "Tech", "ceo");
       resolveThread(state, t2.id, "convergence-heuristic", "All agreed on tech approach");
-
-      createThread(state, "Tech Detail", "cto", t2.id);
+      const closedChild = createThread(state, "Tech Detail", "cto", t2.id);
+      closeThread(state, closedChild.id, "Closed for follow-up");
 
       const summary = buildThreadOutcomeSummary(state);
       expect(summary).toContain("Thread Outcomes");
@@ -230,7 +233,9 @@ describe("messaging-ui", () => {
       expect(summary).toContain("Tech");
       expect(summary).toContain("convergence-heuristic");
       expect(summary).toContain("All agreed on tech approach");
-      expect(summary).toContain("└─");
+      expect(summary).toContain("○ Revenue Detail");
+      expect(summary).toContain("✗ Tech Detail");
+      expect(summary.match(/Tech Detail/g)).toHaveLength(1);
     });
 
     it("returns empty for no threads", () => {

@@ -191,16 +191,31 @@ export function buildThreadOutcomeSummary(state: ThreadState): string {
 
   const lines = ["## Thread Outcomes", ""];
 
+  const childrenByParent = new Map<string, Thread[]>();
   for (const thread of threads) {
-    const statusIcon = thread.status === "resolved" ? "✓"
-      : thread.status === "closed" ? "✗"
-      : thread.status === "quiet" ? "○"
-      : "●";
+    if (!thread.parent_id) continue;
+    const siblings = childrenByParent.get(thread.parent_id) ?? [];
+    siblings.push(thread);
+    childrenByParent.set(thread.parent_id, siblings);
+  }
 
+  const appendChildSummary = (thread: Thread, depth: number) => {
+    const indent = "  ".repeat(depth);
+    lines.push(`${indent}- ${getThreadStatusIcon(thread.status)} ${thread.title} (${thread.message_ids.length} msgs)`);
+    if (thread.summary) {
+      lines.push(`${indent}  Summary: ${thread.summary}`);
+    }
+    const children = childrenByParent.get(thread.id) ?? [];
+    for (const child of children) {
+      appendChildSummary(child, depth + 1);
+    }
+  };
+
+  for (const thread of threads.filter((candidate) => candidate.parent_id === null)) {
     const msgCount = thread.message_ids.length;
     const participantList = thread.participants.join(", ");
 
-    lines.push(`### ${statusIcon} ${thread.title}`);
+    lines.push(`### ${getThreadStatusIcon(thread.status)} ${thread.title}`);
     lines.push(`- Status: ${thread.status}${thread.resolution_reason ? ` (${thread.resolution_reason})` : ""}`);
     lines.push(`- Messages: ${msgCount} | Participants: ${participantList}`);
 
@@ -208,13 +223,9 @@ export function buildThreadOutcomeSummary(state: ThreadState): string {
       lines.push(`- Summary: ${thread.summary}`);
     }
 
-    // Show child threads
-    const children = threads.filter(t => t.parent_id === thread.id);
-    if (children.length > 0) {
-      for (const child of children) {
-        const childIcon = child.status === "resolved" ? "✓" : "●";
-        lines.push(`  └─ ${childIcon} ${child.title} (${child.message_ids.length} msgs)`);
-      }
+    const children = childrenByParent.get(thread.id) ?? [];
+    for (const child of children) {
+      appendChildSummary(child, 1);
     }
 
     lines.push("");
