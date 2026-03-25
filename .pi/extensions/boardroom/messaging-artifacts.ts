@@ -51,7 +51,10 @@ function renderMessagingLogAsMarkdown(log: MessagingLog): string {
   // Render thread summaries
   lines.push("## Thread Overview", "");
   for (const thread of log.threads) {
-    const statusIcon = thread.status === "resolved" ? "✓" : thread.status === "closed" ? "✗" : "●";
+    const statusIcon = thread.status === "resolved" ? "✓"
+      : thread.status === "closed" ? "✗"
+      : thread.status === "quiet" ? "○"
+      : "●";
     lines.push(
       `### ${statusIcon} ${thread.title}`,
       `- **ID**: ${thread.id}${thread.parent_id ? ` (child of ${thread.parent_id})` : ""}`,
