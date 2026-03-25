@@ -532,7 +532,7 @@ export async function runFreeformMessagingMeeting(
       rosterSlugs, startedAt.toISOString(), disposition,
     );
     const memoPath = writeMemo(cwd, brief.slug, synthRes.content, startedAt);
-    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog, startedAt);
+    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog);
 
     if (allMermaid.length > 0) {
       visualPaths = writeVisuals(cwd, meetingId, allMermaid);
@@ -589,7 +589,7 @@ export async function runFreeformMessagingMeeting(
     const memoContent = lastCeoMsg?.content ?? "[Meeting aborted. No CEO synthesis available.]";
 
     const memoPath = writeMemo(cwd, brief.slug, memoContent, startedAt);
-    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog, startedAt);
+    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog);
 
     const allMermaid: { label: string; code: string }[] = [];
     for (const msg of getAllMessages(threadState)) {
@@ -879,7 +879,7 @@ export async function runStructuredMessagingMeeting(
       rosterSlugs, startedAt.toISOString(), disposition,
     );
     const memoPath = writeMemo(cwd, brief.slug, synthRes.content, startedAt);
-    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog, startedAt);
+    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog);
 
     if (allMermaid.length > 0) {
       visualPaths = writeVisuals(cwd, meetingId, allMermaid);
@@ -934,7 +934,7 @@ export async function runStructuredMessagingMeeting(
     const memoContent = lastCeoMsg?.content ?? "[Meeting aborted. No CEO synthesis available.]";
 
     const memoPath = writeMemo(cwd, brief.slug, memoContent, startedAt);
-    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog, startedAt);
+    const { jsonPath: debateJsonPath, mdPath: debateMarkdownPath } = writeMessagingLog(cwd, messagingLog);
 
     const allMermaid: { label: string; code: string }[] = [];
     for (const msg of getAllMessages(threadState)) {

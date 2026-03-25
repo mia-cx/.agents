@@ -76,7 +76,7 @@ describe("writeMessagingLog", () => {
       ],
     };
 
-    const { jsonPath, mdPath } = writeMessagingLog(tmpDir, log, new Date());
+    const { jsonPath, mdPath } = writeMessagingLog(tmpDir, log);
 
     expect(fs.existsSync(jsonPath)).toBe(true);
     expect(fs.existsSync(mdPath)).toBe(true);
