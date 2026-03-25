@@ -84,7 +84,7 @@ Always check whether a GitHub PR exists for the current branch, even if the user
 gh pr view --json number,url 2>/dev/null
 ```
 
-If a PR exists, post every valid finding as an **inline review comment** anchored to the specific file and line, so each finding becomes its own discussion thread the author can resolve:
+If a PR exists, post the review as a **comment review** with every valid finding attached as an **inline review comment** anchored to the specific file and line, so each finding becomes its own discussion thread the author can resolve:
 
 ```bash
 # Start a review, add inline comments, then submit in one batch.
@@ -100,15 +100,9 @@ Key rules for inline comments:
 - Use the severity emoji prefix (`🔴`, `🟠`, `🟡`) so authors can triage at a glance.
 - If a finding spans multiple files, comment on the primary location and mention the others in the body.
 - If a finding applies to unchanged context lines (not part of the diff), post it as a top-level review body note instead — GitHub only allows inline comments on diff lines.
-
-The overall review verdict goes in the review body:
-
-```bash
-# For approve:
-gh pr review <number> --approve --body "<collated summary>"
-# For request changes:
-gh pr review <number> --request-changes --body "<collated summary>"
-```
+- Put the overall verdict (`✅ Approved`, `⚠️ Approved with recommendations`, or `❌ Changes requested`) in the review body itself.
+- Do **not** call `gh pr review --request-changes` or any other follow-up review-submission command after posting the inline review.
+- This avoids the GitHub limitation where authors cannot formally request changes on their own PRs, while still creating resolvable discussion threads for every finding.
 
 If no PR exists, present the summary to the user in chat and note that findings weren't posted because there's no open PR.
 
