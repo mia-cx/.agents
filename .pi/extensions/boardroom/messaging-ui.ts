@@ -189,14 +189,11 @@ export function buildThreadOutcomeSummary(state: ThreadState): string {
   const threads = getAllThreads(state);
   if (threads.length === 0) return "";
 
+  const rootThreads = threads.filter(thread => thread.parent_id === null);
   const lines = ["## Thread Outcomes", ""];
 
-  for (const thread of threads) {
-    const statusIcon = thread.status === "resolved" ? "✓"
-      : thread.status === "closed" ? "✗"
-      : thread.status === "quiet" ? "○"
-      : "●";
-
+  for (const thread of rootThreads) {
+    const statusIcon = getThreadStatusIcon(thread.status);
     const msgCount = thread.message_ids.length;
     const participantList = thread.participants.join(", ");
 
@@ -212,7 +209,7 @@ export function buildThreadOutcomeSummary(state: ThreadState): string {
     const children = threads.filter(t => t.parent_id === thread.id);
     if (children.length > 0) {
       for (const child of children) {
-        const childIcon = child.status === "resolved" ? "✓" : "●";
+        const childIcon = getThreadStatusIcon(child.status);
         lines.push(`  └─ ${childIcon} ${child.title} (${child.message_ids.length} msgs)`);
       }
     }

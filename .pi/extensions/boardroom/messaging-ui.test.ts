@@ -14,6 +14,8 @@ import {
   createThread,
   postMessage,
   resolveThread,
+  closeThread,
+  updateThreadStatus,
   resetCounters,
 } from "./thread-manager.js";
 import type { ThreadState } from "./messaging-types.js";
@@ -231,6 +233,32 @@ describe("messaging-ui", () => {
       expect(summary).toContain("convergence-heuristic");
       expect(summary).toContain("All agreed on tech approach");
       expect(summary).toContain("└─");
+    });
+
+    it("renders child threads only under their parent", () => {
+      const parent = createThread(state, "Tech", "ceo");
+      const child = createThread(state, "Tech Detail", "cto", parent.id);
+
+      const summary = buildThreadOutcomeSummary(state);
+
+      expect(summary.match(/### .*Tech Detail/g)).toBeNull();
+      expect(summary).toContain(`└─ ● ${child.title} (0 msgs)`);
+    });
+
+    it("uses the correct icon for quiet and closed child threads", () => {
+      const parent = createThread(state, "Tech", "ceo");
+
+      const quietChild = createThread(state, "Quiet Detail", "cto", parent.id);
+      postMessage(state, "broadcast", "cto", [], quietChild.id, "Settled", 1, 0, 50, 0.01);
+      updateThreadStatus(state, quietChild.id);
+
+      const closedChild = createThread(state, "Closed Detail", "cfo", parent.id);
+      closeThread(state, closedChild.id);
+
+      const summary = buildThreadOutcomeSummary(state);
+
+      expect(summary).toContain(`└─ ○ ${quietChild.title} (1 msgs)`);
+      expect(summary).toContain(`└─ ✗ ${closedChild.title} (0 msgs)`);
     });
 
     it("returns empty for no threads", () => {
