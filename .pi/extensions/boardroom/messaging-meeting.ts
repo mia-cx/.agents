@@ -30,7 +30,7 @@ import {
 } from "./messaging-prompts.js";
 import { writeMessagingLog } from "./messaging-artifacts.js";
 import { buildRosterInfo } from "./messaging-ui.js";
-import { SessionPool } from "./runtime.js";
+import { SessionPool, preferLocalProviderModel } from "./runtime.js";
 import { runSemiLiveRound, DEFAULT_ROUND_CONFIG, type QueueCallbacks } from "./round-queue.js";
 import { writeMemo, writeExpertise, writeVisuals } from "./artifacts.js";
 import { loadScratchpad, saveScratchpad, extractScratchpadUpdate, stripScratchpadBlock } from "./scratchpad.js";
@@ -440,8 +440,8 @@ function buildMessagingAgentSnapshots(
       slug: agent.slug,
       name: agent.name,
       status: "idle" as const,
-      modelLabel: agent.model,
-      modelAltLabel: agent.modelAlt,
+      modelLabel: preferLocalProviderModel(agent.model),
+      modelAltLabel: preferLocalProviderModel(agent.modelAlt),
       activity: threadActivity,
       turns: 0,
       totalTokens: 0,
@@ -956,6 +956,7 @@ export async function runStructuredMessagingMeeting(
       const stressAgents = findAgentsByTag(rosterAgents, "stress-test");
 
       if (stressAgents.length > 0) {
+        tracker.incrementRound();
         callbacks.onStatus("Phase 3: Stress test via semi-live queue...");
         emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 3, "Stress Test", "Running adversarial stress test.", callbacks, pool);
 

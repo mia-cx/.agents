@@ -36,6 +36,13 @@ vi.mock("./runtime.js", () => ({
       return runtimeMocks.destroyAll(...args);
     }
   },
+  preferLocalProviderModel: (model: string | undefined) => {
+    if (!model) return undefined;
+    if (model.includes("/")) return model;
+    if (/^(claude|sonnet|opus|haiku)\b/i.test(model)) return `anthropic/${model}`;
+    if (/^(gpt|o[1-9]|codex)\b/i.test(model)) return `openai-codex/${model}`;
+    return model;
+  },
 }));
 
 vi.mock("./round-queue.js", () => ({
@@ -45,7 +52,7 @@ vi.mock("./round-queue.js", () => ({
 
 import { runFreeformMessagingMeeting, runStructuredMessagingMeeting } from "./messaging-meeting.js";
 
-function makeAgent(slug: string, name: string): AgentConfig {
+function makeAgent(slug: string, name: string, overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
     slug,
     name,
@@ -54,6 +61,7 @@ function makeAgent(slug: string, name: string): AgentConfig {
     tags: [],
     systemPrompt: `You are ${name}.`,
     filePath: `agents/executive-board/${slug}.md`,
+    ...overrides,
   };
 }
 
@@ -158,6 +166,56 @@ describe("messaging-meeting", () => {
       presidentNote: "Round 1: semi-live discussion in progress.",
     }));
     expect(fs.existsSync(result.debateJsonPath)).toBe(true);
+  });
+
+  it("normalizes fallback model labels in messaging snapshots", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO"),
+    ];
+    const onSnapshot = vi.fn();
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Final brief.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    await runFreeformMessagingMeeting(
+      cwd,
+      makeBrief("snapshot-model-labels"),
+      agents,
+      "freeform",
+      "standard",
+      makeConstraints(),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot,
+      },
+    );
+
+    const framingSnapshot = onSnapshot.mock.calls
+      .map(([snapshot]) => snapshot)
+      .find((snapshot) => snapshot.phaseLabel === "CEO Framing");
+
+    expect(framingSnapshot?.agents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ slug: "ceo", modelLabel: "anthropic/claude-sonnet-4-6" }),
+      expect.objectContaining({ slug: "cfo", modelLabel: "anthropic/claude-sonnet-4-6" }),
+    ]));
   });
 
   it("preserves partial CEO framing output during force-close", async () => {
@@ -386,6 +444,56 @@ describe("messaging-meeting", () => {
     );
 
     expect(result.roster).toEqual(["ceo", "cto"]);
+  });
+
+  it("counts the structured stress-test phase as its own semi-live round", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO", { tags: ["stress-test"] }),
+    ];
+    const onSnapshot = vi.fn();
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Structured final brief.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    await runStructuredMessagingMeeting(
+      cwd,
+      makeBrief("structured-stress-rounds"),
+      agents,
+      "standard",
+      makeConstraints({ max_debate_rounds: 1 }),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot,
+      },
+    );
+
+    const stressSnapshot = onSnapshot.mock.calls
+      .map(([snapshot]) => snapshot)
+      .find((snapshot) => snapshot.phaseLabel === "Stress Test");
+
+    expect(roundQueueMocks.runSemiLiveRound).toHaveBeenCalledTimes(2);
+    expect(stressSnapshot).toEqual(expect.objectContaining({
+      phase: 3,
+      roundsUsed: 2,
+    }));
   });
 
   it("falls back to a default thread when CEO emits no workstreams", async () => {
