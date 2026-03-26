@@ -462,6 +462,13 @@ describe("messaging-meeting", () => {
       })
       .mockResolvedValueOnce({
         agent: "ceo",
+        content: "Structured checkpoint.",
+        exitCode: 0,
+        tokenCount: 110,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
         content: "Structured final brief.",
         exitCode: 0,
         tokenCount: 120,
@@ -473,7 +480,7 @@ describe("messaging-meeting", () => {
       makeBrief("structured-stress-rounds"),
       agents,
       "standard",
-      makeConstraints({ max_debate_rounds: 1 }),
+      makeConstraints({ max_debate_rounds: 2 }),
       { budget_hard_stop: false, time_hard_stop: false },
       {
         onStatus: vi.fn(),
@@ -492,6 +499,62 @@ describe("messaging-meeting", () => {
       phase: 3,
       roundsUsed: 2,
     }));
+  });
+
+  it("stops structured re-engagement when the round limit is reached", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO", { tags: ["stress-test"] }),
+    ];
+    const onStatus = vi.fn();
+    const onSnapshot = vi.fn();
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "NEED MORE DATA before deciding.",
+        exitCode: 0,
+        tokenCount: 110,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Structured final brief.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    await runStructuredMessagingMeeting(
+      cwd,
+      makeBrief("structured-round-limit"),
+      agents,
+      "standard",
+      makeConstraints({ max_debate_rounds: 1 }),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus,
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot,
+      },
+    );
+
+    const stressSnapshot = onSnapshot.mock.calls
+      .map(([snapshot]) => snapshot)
+      .find((snapshot) => snapshot.phaseLabel === "Stress Test");
+
+    expect(roundQueueMocks.runSemiLiveRound).toHaveBeenCalledTimes(1);
+    expect(stressSnapshot).toBeUndefined();
+    expect(onStatus).not.toHaveBeenCalledWith("CEO re-engaging board (attempt 2)...");
   });
 
   it("falls back to a default thread when CEO emits no workstreams", async () => {

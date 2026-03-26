@@ -927,7 +927,7 @@ export async function runStructuredMessagingMeeting(
       signal: callbacks.signal,
     };
 
-    while (reEngagementCount <= MAX_RE_ENGAGEMENTS) {
+    while (reEngagementCount <= MAX_RE_ENGAGEMENTS && !tracker.hasMetRoundTarget) {
       if (!tracker.canContinue(config.budget_hard_stop, config.time_hard_stop)) {
         callbacks.onStatus("Constraints reached. Skipping to CEO decision.");
         break;
@@ -956,7 +956,7 @@ export async function runStructuredMessagingMeeting(
       // ── Phase 3: Stress Test (semi-live with stress-test agents) ──
       const stressAgents = findAgentsByTag(rosterAgents, "stress-test");
 
-      if (stressAgents.length > 0) {
+      if (stressAgents.length > 0 && !tracker.hasMetRoundTarget) {
         tracker.incrementRound();
         callbacks.onStatus("Phase 3: Stress test via semi-live queue...");
         emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 3, "Stress Test", "Running adversarial stress test.", callbacks, pool);
@@ -989,7 +989,11 @@ export async function runStructuredMessagingMeeting(
       callbacks.onStatus("Phase 4: CEO conflict synthesis...");
       emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, rosterAgents, 4, "CEO Conflict Synthesis", "CEO reviewing conflicts and open questions.", callbacks, pool);
 
-      const canReEngage = reEngagementCount < MAX_RE_ENGAGEMENTS && tracker.canContinue(config.budget_hard_stop, config.time_hard_stop);
+      const canReEngage = (
+        reEngagementCount < MAX_RE_ENGAGEMENTS
+        && !tracker.hasMetRoundTarget
+        && tracker.canContinue(config.budget_hard_stop, config.time_hard_stop)
+      );
       const ceoConflictScratchpad = loadScratchpad(cwd, ceo.slug);
       const conflictPrompt = composeMessagingSynthesisPrompt(
         ceo, brief, framingRes.content,
