@@ -129,10 +129,14 @@ function resolveRoutingRecipients(
   if (msgType === "ceo-only") {
     return agentSlug === "ceo" ? [] : ["ceo"];
   }
-  if (msgType === "reply") {
+  if (msgType === "reply" || msgType === "request-reply") {
     return resolveReplyRecipients(threadState, agentSlug, replyTo);
   }
   return [];
+}
+
+function requiresResolvedRecipients(msgType: MessageType): boolean {
+  return msgType === "direct" || msgType === "request-reply" || msgType === "reply";
 }
 
 function resolveChildThreadAudience(
@@ -284,6 +288,11 @@ export async function runSemiLiveRound(
         msgType = routing.type as MessageType;
       }
       const to = resolveRoutingRecipients(threadState, agent.slug, msgType, routing.to, routing.replyTo);
+      if (requiresResolvedRecipients(msgType) && to.length === 0) {
+        droppedMessages++;
+        callbacks.onStatus(`${agent.name}: ${msgType} message has no resolved recipients. Message dropped.`);
+        continue;
+      }
 
       // Determine target thread (active or quiet threads can receive messages)
       let targetThread = focusThread;

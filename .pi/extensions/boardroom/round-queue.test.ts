@@ -515,6 +515,86 @@ describe("round-queue", () => {
       expect(state.agent_inboxes.get("ceo")).toHaveLength(1);
     });
 
+    it("defaults request-reply recipients from the replied-to message", async () => {
+      const thread = createThread(state, "Revenue", "ceo", null, ["ceo", "cfo"]);
+      const message = postMessage(state, "broadcast", "ceo", [], thread.id, "What changed?", 1, 0, 100, 0.05);
+      state.agent_inboxes.set("cfo", [message.id]);
+
+      const agents = [makeAgent("cfo", "CFO")];
+      const allAgents = [makeAgent("ceo", "CEO"), ...agents];
+      const tracker = new ConstraintTracker(makeConstraintValues());
+      const callbacks = makeCallbacks();
+
+      mockRunOne.mockResolvedValue({
+        agent: "cfo",
+        content: "Can you clarify the timing?",
+        exitCode: 0,
+        tokenCount: 80,
+        cost: 0.03,
+      });
+
+      mockParseRouting.mockReturnValue({
+        to: [],
+        replyTo: message.id,
+        type: "request-reply",
+        newThread: null,
+        content: "Can you clarify the timing?",
+      });
+
+      const result = await runSemiLiveRound(
+        cwd, state, agents, allAgents, makeBrief(), "CEO framing",
+        1, 2, tracker, makeConstraintValues(),
+        { budget_hard_stop: false, time_hard_stop: false },
+        DEFAULT_ROUND_CONFIG, callbacks, makePool(),
+      );
+
+      expect(result.messagesPosted).toBe(1);
+      expect(callbacks.onMessagePosted).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "request-reply", to: ["ceo"] }),
+      );
+      expect(thread.pending_replies).toContain("ceo");
+    });
+
+    it("drops request-reply messages that still have no resolved recipients", async () => {
+      const thread = createThread(state, "Revenue", "ceo", null, ["ceo", "cfo"]);
+      const framing = postMessage(state, "broadcast", "ceo", [], thread.id, "CEO framing", 1, 0, 100, 0.05);
+      state.agent_inboxes.set("cfo", [framing.id]);
+
+      const agents = [makeAgent("cfo", "CFO")];
+      const allAgents = [makeAgent("ceo", "CEO"), ...agents];
+      const tracker = new ConstraintTracker(makeConstraintValues());
+      const callbacks = makeCallbacks();
+
+      mockRunOne.mockResolvedValue({
+        agent: "cfo",
+        content: "Need a response from someone.",
+        exitCode: 0,
+        tokenCount: 80,
+        cost: 0.03,
+      });
+
+      mockParseRouting.mockReturnValue({
+        to: [],
+        replyTo: null,
+        type: "request-reply",
+        newThread: null,
+        content: "Need a response from someone.",
+      });
+
+      const result = await runSemiLiveRound(
+        cwd, state, agents, allAgents, makeBrief(), "CEO framing",
+        1, 2, tracker, makeConstraintValues(),
+        { budget_hard_stop: false, time_hard_stop: false },
+        DEFAULT_ROUND_CONFIG, callbacks, makePool(),
+      );
+
+      expect(result.messagesPosted).toBe(0);
+      expect(result.droppedMessages).toBe(1);
+      expect(callbacks.onStatus).toHaveBeenCalledWith("CFO: request-reply message has no resolved recipients. Message dropped.");
+      expect(thread.message_ids).toHaveLength(1);
+      expect(thread.pending_replies).toHaveLength(0);
+    });
+
     it("limits private child threads to the sender and intended recipients", async () => {
       const parent = createThread(state, "Revenue", "ceo", null, ["ceo", "cfo", "cto"]);
       const framing = postMessage(state, "broadcast", "ceo", [], parent.id, "CEO framing", 1, 0, 100, 0.05);
