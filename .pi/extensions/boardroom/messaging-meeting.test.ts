@@ -541,9 +541,52 @@ describe("messaging-meeting", () => {
     );
 
     expect(roundQueueMocks.runSemiLiveRound).toHaveBeenCalledTimes(2);
-    expect(runtimeMocks.runOne).toHaveBeenCalledTimes(3);
+    expect(runtimeMocks.runOne).toHaveBeenCalledTimes(2);
     expect(onStatus).not.toHaveBeenCalledWith(expect.stringContaining("CEO re-engaging board"));
     expect(onStatus).toHaveBeenCalledWith("Phase 5: CEO final decision...");
+  });
+
+  it("reuses freeform checkpoint synthesis instead of calling the CEO twice", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO"),
+    ];
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Strategic Brief\n\nDecision: Proceed.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    await runFreeformMessagingMeeting(
+      cwd,
+      makeBrief("freeform-terminal-checkpoint"),
+      agents,
+      "freeform",
+      "standard",
+      makeConstraints({ max_debate_rounds: 2 }),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot: vi.fn(),
+      },
+    );
+
+    expect(roundQueueMocks.runSemiLiveRound).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.runOne).toHaveBeenCalledTimes(2);
   });
 
   it("falls back to a default thread when CEO emits no workstreams", async () => {

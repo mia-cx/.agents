@@ -317,6 +317,9 @@ describe("ThreadManager", () => {
       postMessage(state, "broadcast", "cfo", [], thread.id, "I agree", 1, 1, 80, 0.03);
       postMessage(state, "broadcast", "ceo", [], thread.id, "Good, aligned", 1, 2, 80, 0.03);
 
+      markInboxRead(state, "ceo");
+      markInboxRead(state, "cfo");
+
       expect(checkThreadConvergence(state, thread.id)).toBe(true);
     });
 
@@ -327,6 +330,21 @@ describe("ThreadManager", () => {
       postMessage(state, "request-reply", "ceo", ["cto"], thread.id, "CTO, thoughts?", 1, 2, 80, 0.03);
 
       expect(checkThreadConvergence(state, thread.id)).toBe(false);
+    });
+
+    it("does not converge while the thread still has unread inbox work", () => {
+      const thread = createThread(state, "Discussion", "ceo", null, ["ceo", "cfo", "cto"]);
+      postMessage(state, "broadcast", "ceo", [], thread.id, "Opening", 1, 0, 100, 0.05);
+      postMessage(state, "broadcast", "cfo", [], thread.id, "I agree", 1, 1, 80, 0.03);
+      postMessage(state, "broadcast", "cto", [], thread.id, "One more concern", 1, 2, 80, 0.03);
+
+      expect(checkThreadConvergence(state, thread.id)).toBe(false);
+
+      markInboxRead(state, "ceo");
+      markInboxRead(state, "cfo");
+      markInboxRead(state, "cto");
+
+      expect(checkThreadConvergence(state, thread.id)).toBe(true);
     });
 
     it("does not converge with fewer than 3 messages", () => {
@@ -357,7 +375,7 @@ describe("ThreadManager", () => {
       expect(checkThreadConvergence(state, thread.id)).toBe(false);
     });
 
-    it("auto-resolves converged threads", () => {
+    it("auto-resolves converged threads only after inbox work is drained", () => {
       const t1 = createThread(state, "Revenue", "ceo");
       postMessage(state, "broadcast", "ceo", [], t1.id, "Opening", 1, 0, 100, 0.05);
       postMessage(state, "broadcast", "cfo", [], t1.id, "Agreed", 1, 1, 80, 0.03);
@@ -366,6 +384,11 @@ describe("ThreadManager", () => {
       const t2 = createThread(state, "Tech", "ceo");
       postMessage(state, "broadcast", "ceo", [], t2.id, "Tech question", 1, 0, 100, 0.05);
       // Only 1 message, shouldn't converge
+
+      expect(autoResolveConvergedThreads(state)).toEqual([]);
+
+      markInboxRead(state, "ceo");
+      markInboxRead(state, "cfo");
 
       const resolved = autoResolveConvergedThreads(state);
       expect(resolved).toEqual([t1.id]);

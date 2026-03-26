@@ -364,6 +364,18 @@ export function getAllMessages(state: ThreadState): RoutedMessage[] {
   return Array.from(state.messages.values());
 }
 
+function hasUnreadMessagesInThread(state: ThreadState, threadId: string): boolean {
+  for (const inbox of state.agent_inboxes.values()) {
+    for (const messageId of inbox) {
+      const message = state.messages.get(messageId);
+      if (message?.thread_id === threadId) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // --- Serialization for Artifacts ---
 
 export function serializeToMessagingLog(
@@ -401,6 +413,7 @@ export function serializeToMessagingLog(
  * A thread is considered converged when:
  * - It has at least 3 messages
  * - No pending replies remain
+ * - No unread inbox entries still point at the thread
  * - The last N messages don't introduce new disagreements (no request-reply)
  * - At least 2 unique participants have posted
  */
@@ -409,6 +422,7 @@ export function checkThreadConvergence(state: ThreadState, threadId: string, loo
   if (!thread) return false;
   if (thread.status !== "active" && thread.status !== "quiet") return false;
   if (thread.pending_replies.length > 0) return false;
+  if (hasUnreadMessagesInThread(state, threadId)) return false;
   if (thread.message_ids.length < 3) return false;
   if (thread.participants.length < 2) return false;
 
