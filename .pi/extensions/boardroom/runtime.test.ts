@@ -402,11 +402,20 @@ describe("executive write policy helpers", () => {
     }
   });
 
-  it("treats nested shells and pi launches as mutating bash commands", () => {
+  it("allows only explicit read-only bash commands in executive sessions", () => {
     expect(isMutatingBashCommand("pi -p \"hello\"")).toBe(true);
     expect(isMutatingBashCommand("env -u BOARDROOM_EXECUTIVE_SESSION pi -p \"hello\"")).toBe(true);
     expect(isMutatingBashCommand("bash -lc 'ls'")).toBe(true);
+    expect(isMutatingBashCommand("git apply /tmp/patch.diff")).toBe(true);
+    expect(isMutatingBashCommand("patch -p0 < /tmp/patch.diff")).toBe(true);
+    expect(isMutatingBashCommand("git checkout -- boardroom/briefs/demo.md")).toBe(true);
+    expect(isMutatingBashCommand("tar -xf archive.tar")).toBe(true);
+    expect(isMutatingBashCommand("rsync src/ dst/")).toBe(true);
+
     expect(isMutatingBashCommand("rg TODO .")).toBe(false);
+    expect(isMutatingBashCommand("find . -name '*.md'")).toBe(false);
+    expect(isMutatingBashCommand("git diff --stat")).toBe(false);
+    expect(isMutatingBashCommand("git status --short --branch")).toBe(false);
   });
 });
 

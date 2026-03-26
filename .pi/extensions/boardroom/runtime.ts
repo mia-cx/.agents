@@ -85,19 +85,179 @@ export function getBoardroomExecutiveWritePolicy(): {
   };
 }
 
+const READ_ONLY_COMMANDS = new Set([
+  "basename",
+  "cat",
+  "cut",
+  "dirname",
+  "du",
+  "file",
+  "find",
+  "git",
+  "grep",
+  "head",
+  "jq",
+  "ls",
+  "pwd",
+  "readlink",
+  "realpath",
+  "rg",
+  "sort",
+  "stat",
+  "tail",
+  "tree",
+  "uniq",
+  "wc",
+  "which",
+]);
+
+const READ_ONLY_GIT_SUBCOMMANDS = new Set([
+  "branch",
+  "config",
+  "describe",
+  "diff",
+  "grep",
+  "log",
+  "ls-files",
+  "merge-base",
+  "remote",
+  "rev-list",
+  "rev-parse",
+  "show",
+  "status",
+  "symbolic-ref",
+]);
+
+function hasUnsafeShellOperators(command: string): boolean {
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+    const prev = i > 0 ? command[i - 1] : "";
+
+    if (quote) {
+      if (char === quote && prev !== "\\") quote = null;
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+
+    if (char === "`" || char === ";" || char === "&" || char === "|" || char === ">" || char === "<" || char === "\n") {
+      return true;
+    }
+    if (char === "$" && command[i + 1] === "(") {
+      return true;
+    }
+  }
+  return quote !== null;
+}
+
+function tokenizeShellCommand(command: string): string[] | null {
+  const tokens: string[] = [];
+  let quote: '"' | "'" | null = null;
+  let current = "";
+
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else if (char === "\\" && quote === '"' && i + 1 < command.length) {
+        i++;
+        current += command[i];
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    if (char === "\\" && i + 1 < command.length) {
+      i++;
+      current += command[i];
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (quote) return null;
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+function stripEnvPrefix(tokens: string[]): string[] {
+  if (tokens[0] !== "env") return tokens;
+
+  let index = 1;
+  while (index < tokens.length) {
+    const token = tokens[index];
+    if (token === "--") {
+      index++;
+      break;
+    }
+    if (token === "-u") {
+      index += 2;
+      continue;
+    }
+    if (/^[A-Za-z_][A-Za-z0-9_]*=.*/.test(token)) {
+      index++;
+      continue;
+    }
+    if (token.startsWith("-")) {
+      return [];
+    }
+    break;
+  }
+
+  return tokens.slice(index);
+}
+
+function isReadOnlyFindCommand(tokens: string[]): boolean {
+  return !tokens.some((token) => ["-delete", "-exec", "-execdir", "-ok", "-okdir"].includes(token));
+}
+
+function isReadOnlyGitCommand(tokens: string[]): boolean {
+  const subcommand = tokens[1]?.toLowerCase();
+  return !!subcommand && READ_ONLY_GIT_SUBCOMMANDS.has(subcommand);
+}
+
+function isReadOnlyExecutiveBashCommand(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) return true;
+  if (hasUnsafeShellOperators(trimmed)) return false;
+
+  const rawTokens = tokenizeShellCommand(trimmed);
+  if (!rawTokens || rawTokens.length === 0) return false;
+
+  const tokens = stripEnvPrefix(rawTokens);
+  if (tokens.length === 0) return false;
+
+  const program = tokens[0]?.toLowerCase();
+  if (!program || !READ_ONLY_COMMANDS.has(program)) return false;
+
+  if (program === "git") return isReadOnlyGitCommand(tokens);
+  if (program === "find") return isReadOnlyFindCommand(tokens);
+  return true;
+}
+
 export function isMutatingBashCommand(command: string): boolean {
-  const patterns = [
-    /(^|[;&|])\s*(rm|mv|cp|touch|install|truncate)\b/i,
-    /(^|[;&|])\s*sed\b[^\n]*\s-i\b/i,
-    /(^|[;&|])\s*perl\b[^\n]*-pi\b/i,
-    /(^|[;&|])\s*(python[23]?|node|ruby|php|lua)\b/i,
-    /(^|[;&|])\s*(env\b[^\n]*\s+)?(pi|bash|sh|zsh|fish)\b/i,
-    /(^|[;&|])\s*(curl|wget)\b[^\n]*(-o|--output)\b/i,
-    /(^|[;&|])\s*dd\b/i,
-    /\|\s*tee\b/i,
-    /(^|[^<])>>?/,
-  ];
-  return patterns.some((pattern) => pattern.test(command));
+  return !isReadOnlyExecutiveBashCommand(command);
 }
 
 function stringifyRuntimeError(value: unknown): string | undefined {
