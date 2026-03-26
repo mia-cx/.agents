@@ -77,6 +77,8 @@ let piScopedModelPatternsCache: string[] | undefined;
 let piScopedModelPatternsCacheKey: string | null = null;
 const thinkingLevelsCache = new Map<string, Promise<ThinkingLevel[]>>();
 const THINKING_LEVEL_ORDER: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const LOADING_ELLIPSIS_FRAMES = [".  ", ".. ", "...", " ..", "  .", "   "] as const;
+const LOADING_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 
 function prioritizeOption<T extends string>(options: T[], preferred: T): T[] {
   const unique = Array.from(new Set(options));
@@ -99,6 +101,49 @@ function truncateInline(text: string, maxLength: number): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function getAnimatedEllipsis(frame = Math.floor(Date.now() / 350)): string {
+  return LOADING_ELLIPSIS_FRAMES[Math.abs(frame) % LOADING_ELLIPSIS_FRAMES.length];
+}
+
+function getAnimatedSpinner(frame = Math.floor(Date.now() / 120)): string {
+  return LOADING_SPINNER_FRAMES[Math.abs(frame) % LOADING_SPINNER_FRAMES.length];
+}
+
+function formatAnimatedLoadingText(text: string, frame?: number): string {
+  const base = text.trimEnd().replace(/^(?:⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏)\s+/u, "").replace(/(?:\.{1,3}|…)+\s*$/u, "");
+  return `${getAnimatedSpinner(frame)} ${base}${getAnimatedEllipsis(frame)}`;
+}
+
+async function withAnimatedBoardroomStatus<T>(
+  ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+  text: string,
+  work: () => Promise<T>,
+  delayMs = 120,
+): Promise<T> {
+  let frame = 0;
+  let visible = false;
+  let animationTimer: ReturnType<typeof setInterval> | null = null;
+  let revealTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+    visible = true;
+    ctx.ui.setStatus("boardroom", formatAnimatedLoadingText(text, frame));
+    animationTimer = setInterval(() => {
+      frame += 1;
+      ctx.ui.setStatus("boardroom", formatAnimatedLoadingText(text, frame));
+    }, 250);
+  }, delayMs);
+
+  try {
+    return await work();
+  } finally {
+    if (revealTimer) {
+      clearTimeout(revealTimer);
+      revealTimer = null;
+    }
+    if (animationTimer) clearInterval(animationTimer);
+    if (visible) ctx.ui.setStatus("boardroom", undefined);
+  }
 }
 
 function isRightArrowKey(keyData: string, keybindings: any): boolean {
@@ -210,8 +255,9 @@ async function loadPiModelCatalogAsync(): Promise<PiModelCatalogEntry[]> {
   });
 }
 
-function prewarmPiModelCatalog(): void {
-  if (piModelCatalogCache || piModelCatalogWarmPromise) return;
+function prewarmPiModelCatalog(): Promise<PiModelCatalogEntry[]> {
+  if (piModelCatalogCache) return Promise.resolve(piModelCatalogCache);
+  if (piModelCatalogWarmPromise) return piModelCatalogWarmPromise;
   piModelCatalogWarmPromise = loadPiModelCatalogAsync()
     .then((catalog) => {
       piModelCatalogCache = catalog;
@@ -224,10 +270,12 @@ function prewarmPiModelCatalog(): void {
     .finally(() => {
       piModelCatalogWarmPromise = null;
     });
+  return piModelCatalogWarmPromise;
 }
 
 function getPiModelCatalog(): PiModelCatalogEntry[] {
   if (piModelCatalogCache) return piModelCatalogCache;
+  if (piModelCatalogWarmPromise) return [];
   try {
     const result = spawnSync("pi", ["--list-models"], {
       encoding: "utf-8",
@@ -380,7 +428,7 @@ function prewarmModelPickerData(
   agents: AgentConfig[],
   additionalModels: Array<string | undefined> = [],
 ): void {
-  prewarmPiModelCatalog();
+  void prewarmPiModelCatalog();
 
   const uniqueModels = new Set<string>();
   for (const model of [
@@ -404,6 +452,34 @@ function orderEffortOptions(options: EffortOption[], preferred: ReasoningEffort)
     preferredOption,
     ...options.filter((option) => option.label !== preferredLabel),
   ];
+}
+
+async function ensureModelCatalogReady(
+  ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+  agents: AgentConfig[],
+  additionalModels: Array<string | undefined> = [],
+): Promise<void> {
+  prewarmModelPickerData(agents, additionalModels);
+  if (piModelCatalogCache) return;
+  await withAnimatedBoardroomStatus(
+    ctx,
+    `Loading ${getModelCatalogSourceLabel()}`,
+    async () => {
+      await prewarmPiModelCatalog();
+    },
+  );
+}
+
+async function loadEffortOptionsWithStatus(
+  ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
+  baseModel: string | undefined,
+  preferred: ReasoningEffort,
+): Promise<EffortOption[]> {
+  return await withAnimatedBoardroomStatus(
+    ctx,
+    `Loading reasoning effort for ${truncateInline(baseModel ?? "selected model", 42)}`,
+    async () => orderEffortOptions(await getEffortOptionsForModel(baseModel), preferred),
+  );
 }
 
 async function getEffortOptionsForModel(baseModel: string | undefined): Promise<EffortOption[]> {
@@ -482,6 +558,7 @@ async function chooseAgentModel(
   defaultModel: string | undefined,
   title = `Choose primary model for ${agent.name}`,
 ): Promise<string | undefined | null> {
+  await ensureModelCatalogReady(ctx, allAgents, [agent.model, agent.modelAlt, defaultModel]);
   const current = parseModelSpec(agent.model);
   const baseChoices = buildAvailableModelOptions(allAgents, agent.model);
   const defaultLabel = defaultModel
@@ -513,10 +590,7 @@ async function chooseAgentModel(
   const selectedBase = modelChoiceByLabel.get(baseChoice);
   if (!selectedBase) return null;
 
-  const effortOptions = orderEffortOptions(
-    await getEffortOptionsForModel(selectedBase),
-    current.effort,
-  );
+  const effortOptions = await loadEffortOptionsWithStatus(ctx, selectedBase, current.effort);
   const effortChoice = await ctx.ui.select(
     [
       `Reasoning effort for ${agent.name}`,
@@ -537,6 +611,7 @@ async function chooseSharedModel(
   allAgents: AgentConfig[],
   currentModels: Array<string | undefined>,
 ): Promise<string | "reset-defaults" | null> {
+  await ensureModelCatalogReady(ctx, allAgents, currentModels);
   const uniqueCurrent = Array.from(new Set(currentModels.map((model) => resolveModelLabel(model))));
   const currentLabel = uniqueCurrent.length === 1 ? uniqueCurrent[0] : "mixed";
   const currentEfforts = Array.from(new Set(currentModels.map((model) => parseModelSpec(model).effort)));
@@ -561,10 +636,7 @@ async function chooseSharedModel(
   const selectedBase = modelChoiceByLabel.get(baseChoice);
   if (!selectedBase) return null;
 
-  const effortOptions = orderEffortOptions(
-    await getEffortOptionsForModel(selectedBase),
-    currentEffort,
-  );
+  const effortOptions = await loadEffortOptionsWithStatus(ctx, selectedBase, currentEffort);
   const effortChoice = await ctx.ui.select(
     [
       "Reasoning effort for all listed board members",
@@ -613,10 +685,13 @@ function createRosterEditorComponent(
         optionIndex: number;
         draftBase?: string;
         effortOptions?: EffortOption[];
+        catalogLoading?: boolean;
         effortLoading?: boolean;
         effortError?: string;
       }
     | null = null;
+  let loadingFrame = 0;
+  let animationTimer: ReturnType<typeof setInterval> | null = null;
 
   const getCurrentAgent = () => agents[selectedIndex];
 
@@ -702,6 +777,28 @@ function createRosterEditorComponent(
       });
   };
 
+  const warmModelOptionsForPicker = () => {
+    prewarmModelPickerData(agents);
+    if (piModelCatalogCache) return;
+    void prewarmPiModelCatalog()
+      .then(() => {
+        if (!pickerState || pickerState.stage !== "model") return;
+        pickerState = {
+          ...pickerState,
+          catalogLoading: false,
+        };
+        refresh();
+      })
+      .catch(() => {
+        if (!pickerState || pickerState.stage !== "model") return;
+        pickerState = {
+          ...pickerState,
+          catalogLoading: false,
+        };
+        refresh("Could not load the live Pi model catalog. Showing cached and board-local models.");
+      });
+  };
+
   const openSinglePicker = () => {
     const current = getCurrentAgent();
     if (!current) return;
@@ -711,7 +808,9 @@ function createRosterEditorComponent(
       targetSlug: current.slug,
       query: "",
       optionIndex: 0,
+      catalogLoading: !piModelCatalogCache,
     };
+    warmModelOptionsForPicker();
   };
 
   const openAllPicker = () => {
@@ -720,11 +819,18 @@ function createRosterEditorComponent(
       stage: "model",
       query: "",
       optionIndex: 0,
+      catalogLoading: !piModelCatalogCache,
     };
+    warmModelOptionsForPicker();
   };
 
   const closePicker = () => {
     pickerState = null;
+  };
+
+  const finishWith = (result: RosterEditorResult) => {
+    if (animationTimer) clearInterval(animationTimer);
+    onDone(result);
   };
 
   const buildPickerBoxLines = (current: AgentConfig | undefined): string[] => {
@@ -811,6 +917,7 @@ function createRosterEditorComponent(
       return [
         title,
         `Search: ${state.query || "type model or provider"}`,
+        ...(state.catalogLoading ? [formatAnimatedLoadingText("Loading live Pi models", loadingFrame)] : []),
         ...display.rows.map((row) => row.kind === "header" ? row.text : row.text),
         "Enter select  Esc close",
       ];
@@ -821,7 +928,7 @@ function createRosterEditorComponent(
       return [
         title,
         `Base: ${truncateInline(state.draftBase ?? "", 44)}`,
-        "Loading actual Pi reasoning levels...",
+        formatAnimatedLoadingText("Loading actual Pi reasoning levels", loadingFrame),
         "Esc back",
       ];
     }
@@ -948,7 +1055,7 @@ function createRosterEditorComponent(
       refresh("Select at least one board member before continuing.");
       return;
     }
-    onDone(agents.filter((agent) => selected.has(agent.slug)).map((agent) => agent.slug));
+    finishWith(agents.filter((agent) => selected.has(agent.slug)).map((agent) => agent.slug));
   };
 
   root.addChild(new DynamicBorder());
@@ -968,6 +1075,12 @@ function createRosterEditorComponent(
   }
   root.addChild(new Spacer(1));
   root.addChild(new DynamicBorder());
+
+  animationTimer = setInterval(() => {
+    if (!pickerState || (!pickerState.catalogLoading && !pickerState.effortLoading)) return;
+    loadingFrame += 1;
+    refresh();
+  }, 120);
 
   root.handleInput = (keyData: string) => {
     if (pickerState) {
@@ -1050,7 +1163,7 @@ function createRosterEditorComponent(
     }
     if (keybindings.matches(keyData, "tui.select.cancel")) {
       reset();
-      onDone(undefined);
+      finishWith(undefined);
       return;
     }
     if (keyData === "r" || keyData === "R") {
@@ -1291,7 +1404,7 @@ export default function (pi: ExtensionAPI) {
       `  Mode: ${meeting.mode}`,
       `  Constraints: ${meeting.constraints}`,
       `  Elapsed: ${elapsedMinutes} min`,
-      `  Status: ${meeting.lastStatus}`,
+      `  Status: ${formatAnimatedLoadingText(meeting.lastStatus)}`,
     ];
 
     if (meeting.agentSnapshots.length > 0) {
@@ -1691,7 +1804,7 @@ export default function (pi: ExtensionAPI) {
   ) => {
     if (!ctx.hasUI || !meeting) return;
     if (!meeting.lastSnapshot) {
-      ctx.ui.setStatus("boardroom", meeting.lastStatus);
+      ctx.ui.setStatus("boardroom", formatAnimatedLoadingText(meeting.lastStatus));
       ctx.ui.setWidget("boardroom", renderWidgetLines(buildPendingMeetingWidgetLines(meeting)));
       return;
     }
@@ -2285,7 +2398,7 @@ export default function (pi: ExtensionAPI) {
         const renderToolUi = () => {
           if (!ctx.hasUI || !activeMeeting) return;
           if (!lastSnapshot) {
-            ctx.ui.setStatus("boardroom", activeMeeting.lastStatus);
+            ctx.ui.setStatus("boardroom", formatAnimatedLoadingText(activeMeeting.lastStatus));
             ctx.ui.setWidget("boardroom", renderWidgetLines(buildPendingMeetingWidgetLines(activeMeeting)));
             return;
           }
