@@ -101,6 +101,23 @@ function makeFramingOutput(roster: string[]): string {
   ].join("\n");
 }
 
+function makeFramingOutputWithWorkstreams(
+  roster: string[],
+  workstreams: Array<{ title: string; description: string }>,
+): string {
+  return [
+    "CEO framing",
+    "",
+    "```json",
+    JSON.stringify({
+      workstreams,
+      roster: roster.map((name) => ({ name, reason: `${name} is needed` })),
+      rationale: "Selected for relevant expertise.",
+    }, null, 2),
+    "```",
+  ].join("\n");
+}
+
 describe("messaging-meeting", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -593,6 +610,51 @@ describe("messaging-meeting", () => {
     expect(onStatus).toHaveBeenCalledWith("Phase 5: CEO final decision...");
   });
 
+  it("uses final synthesis instructions in the structured checkpoint task", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO"),
+    ];
+
+    runtimeMocks.runOne.mockReset();
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Strategic Brief\n\nDecision: Proceed.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    await runStructuredMessagingMeeting(
+      cwd,
+      makeBrief("structured-terminal-checkpoint"),
+      agents,
+      "standard",
+      makeConstraints({ max_debate_rounds: 2 }),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot: vi.fn(),
+      },
+    );
+
+    expect(roundQueueMocks.runSemiLiveRound).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.runOne).toHaveBeenCalledTimes(2);
+    expect(runtimeMocks.runOne.mock.calls[1]?.[3]).toContain("Reference specific threads and their resolution.");
+    expect(runtimeMocks.runOne.mock.calls[1]?.[3]).toContain("include Mermaid diagrams");
+  });
+
   it("reuses freeform checkpoint synthesis instead of calling the CEO twice", async () => {
     const cwd = makeTempDir();
     const agents = [
@@ -634,6 +696,74 @@ describe("messaging-meeting", () => {
 
     expect(roundQueueMocks.runSemiLiveRound).toHaveBeenCalledTimes(1);
     expect(runtimeMocks.runOne).toHaveBeenCalledTimes(2);
+  });
+
+  it("posts the full CEO framing to only one workstream thread", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO"),
+      makeAgent("cto", "CTO"),
+    ];
+    const framingOutput = makeFramingOutputWithWorkstreams(
+      ["cfo", "cto"],
+      [
+        { title: "Revenue", description: "Discuss revenue" },
+        { title: "Operations", description: "Discuss operations" },
+      ],
+    );
+
+    runtimeMocks.runOne.mockReset();
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: framingOutput,
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Final brief.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    const result = await runFreeformMessagingMeeting(
+      cwd,
+      makeBrief("freeform-framing-thread-seeding"),
+      agents,
+      "freeform",
+      "standard",
+      makeConstraints(),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot: vi.fn(),
+      },
+    );
+
+    const debate = JSON.parse(fs.readFileSync(result.debateJsonPath, "utf-8")) as {
+      threads: Array<{ id: string; title: string }>;
+      messages: Array<{ thread_id: string; type: string; content: string; token_count: number; cost: number }>;
+    };
+
+    expect(debate.threads).toHaveLength(2);
+    expect(debate.messages.filter((message) => message.content === framingOutput)).toHaveLength(1);
+
+    const operationsThread = debate.threads.find((thread) => thread.title === "Operations");
+    const operationsKickoff = debate.messages.find((message) => message.thread_id === operationsThread?.id);
+
+    expect(operationsKickoff).toEqual(expect.objectContaining({
+      type: "moderation",
+      token_count: 0,
+      cost: 0,
+    }));
+    expect(operationsKickoff?.content).toContain("Refer to the full CEO framing");
+    expect(operationsKickoff?.content).not.toBe(framingOutput);
   });
 
   it("falls back to a default thread when CEO emits no workstreams", async () => {

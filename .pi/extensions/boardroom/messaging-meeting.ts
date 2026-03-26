@@ -217,12 +217,27 @@ async function runMessagingFramingPhase(
     createThread(threadState, ws.title, "ceo", null, rosterSlugs),
   );
 
-  for (let i = 0; i < createdThreads.length; i++) {
+  if (createdThreads.length > 0) {
     postMessage(
       threadState, "broadcast", "ceo", [],
-      createdThreads[i].id, framingRes.content, 1, 0,
-      i === 0 ? framingRes.tokenCount : 0,
-      i === 0 ? framingRes.cost : 0,
+      createdThreads[0].id, framingRes.content, 1, 0,
+      framingRes.tokenCount, framingRes.cost,
+    );
+  }
+
+  for (let i = 1; i < createdThreads.length; i++) {
+    const workstream = workstreams[i];
+    const kickoff = [
+      `CEO kickoff for this workstream: focus on "${workstream?.title ?? createdThreads[i].title}".`,
+      workstream?.description ? `Scope: ${workstream.description}` : null,
+      `Refer to the full CEO framing in ${createdThreads[0]?.id ?? "the primary thread"} for the overall decision context.`,
+    ]
+      .filter((line): line is string => Boolean(line))
+      .join("\n");
+    postMessage(
+      threadState, "moderation", "ceo", [],
+      createdThreads[i].id, kickoff, 1, 0,
+      0, 0,
     );
   }
 
@@ -772,7 +787,9 @@ export async function runFreeformMessagingMeeting(
           `Round ${debateRound} of ${constraintValues.max_debate_rounds}. Budget: ${tracker.summary}`,
           "Review all thread discussions.",
           "If critical disagreements remain, say 'NEED MORE DATA' to re-engage.",
-          "Otherwise, proceed with your Strategic Brief.",
+          "Otherwise, produce your Strategic Brief using the final synthesis instructions below.",
+          "",
+          buildFinalMessagingSynthesisTask(false, false),
         ].join("\n");
 
         const reviewRes = await runCeoWithRetry(cwd, pool, ceo, reviewPrompt, reviewTask, "Reviewing discussions", callbacks, callbacks.signal);
@@ -1036,7 +1053,9 @@ export async function runStructuredMessagingMeeting(
         ? [
             `Review all thread discussions. Re-engagements left: ${MAX_RE_ENGAGEMENTS - reEngagementCount}. Budget: ${tracker.summary}`,
             "If critical disagreements remain, say 'NEED MORE DATA' to re-engage.",
-            "Otherwise, produce your Strategic Brief.",
+            "Otherwise, produce your Strategic Brief using the final synthesis instructions below.",
+            "",
+            buildFinalMessagingSynthesisTask(false, false),
           ].join("\n")
         : buildFinalMessagingSynthesisTask(false, false);
 
