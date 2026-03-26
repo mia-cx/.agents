@@ -183,6 +183,8 @@ async function runMessagingFramingPhase(
   let rosterAgents = applyRosterLimit(resolveRoster(allAgents, rosterNames), constraintValues);
   const rosterRationale = parsed?.rationale ?? "Full board (CEO workstream selection could not be parsed)";
 
+  callbacks.onStatus(`CEO proposed roster: ${rosterAgents.map((agent) => agent.name).join(", ") || "full board"}. Awaiting confirmation...`);
+
   tracker.pause();
   let rosterDecision;
   try {
@@ -683,6 +685,7 @@ export async function runFreeformMessagingMeeting(
   let rosterSlugs = ["ceo"];
   const pool = new SessionPool(callbacks.onAgentUpdate);
   pool.ensureAgents([ceo], "Preparing framing");
+  emitMessagingSnapshot(meetingId, brief, mode, constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, [], 0, "Preparing CEO Framing", "Warming up the threaded meeting and preparing the CEO framing prompt.", callbacks, pool);
 
   try {
     const {
@@ -917,6 +920,7 @@ export async function runStructuredMessagingMeeting(
   let rosterSlugs = ["ceo"];
   const pool = new SessionPool(callbacks.onAgentUpdate);
   pool.ensureAgents([ceo], "Preparing framing");
+  emitMessagingSnapshot(meetingId, brief, "structured", constraintsName, constraintValues, tracker, startedAt, threadState, allAgents, [], 0, "Preparing CEO Framing", "Warming up the threaded meeting and preparing the CEO framing prompt.", callbacks, pool);
 
   try {
     const {

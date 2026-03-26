@@ -115,6 +115,53 @@ describe("messaging-meeting", () => {
     });
   });
 
+  it("emits an initial threaded snapshot before CEO framing completes", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO"),
+    ];
+    const onSnapshot = vi.fn();
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Final brief.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    await runFreeformMessagingMeeting(
+      cwd,
+      makeBrief("threading-startup-visibility"),
+      agents,
+      "freeform",
+      "standard",
+      makeConstraints(),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot,
+      },
+    );
+
+    expect(onSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 0,
+      phaseLabel: "Preparing CEO Framing",
+      presidentNote: "Warming up the threaded meeting and preparing the CEO framing prompt.",
+    }));
+  });
+
   it("emits freeform debate snapshots without crashing", async () => {
     const cwd = makeTempDir();
     const agents = [

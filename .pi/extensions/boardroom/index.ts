@@ -72,7 +72,9 @@ interface PiModelCatalogEntry {
 }
 
 let piModelCatalogCache: PiModelCatalogEntry[] | null = null;
+let piModelCatalogWarmPromise: Promise<PiModelCatalogEntry[]> | null = null;
 let piScopedModelPatternsCache: string[] | undefined;
+let piScopedModelPatternsCacheKey: string | null = null;
 const thinkingLevelsCache = new Map<string, Promise<ThinkingLevel[]>>();
 const THINKING_LEVEL_ORDER: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
@@ -176,6 +178,54 @@ function parsePiModelCatalog(output: string): PiModelCatalogEntry[] {
   return entries;
 }
 
+async function loadPiModelCatalogAsync(): Promise<PiModelCatalogEntry[]> {
+  return await new Promise((resolve) => {
+    try {
+      const proc = spawn("pi", ["--list-models"], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+
+      proc.stdout.on("data", (chunk: Buffer | string) => {
+        stdout += chunk.toString();
+      });
+      proc.stderr.on("data", (chunk: Buffer | string) => {
+        stderr += chunk.toString();
+      });
+      proc.on("error", () => resolve([]));
+      proc.on("close", () => {
+        const combinedOutput = `${stdout}\n${stderr}`.trim();
+        resolve(parsePiModelCatalog(combinedOutput));
+      });
+
+      setTimeout(() => {
+        if (proc.exitCode === null && proc.signalCode === null) {
+          try { proc.kill("SIGKILL"); } catch {}
+        }
+      }, 10_000);
+    } catch {
+      resolve([]);
+    }
+  });
+}
+
+function prewarmPiModelCatalog(): void {
+  if (piModelCatalogCache || piModelCatalogWarmPromise) return;
+  piModelCatalogWarmPromise = loadPiModelCatalogAsync()
+    .then((catalog) => {
+      piModelCatalogCache = catalog;
+      return catalog;
+    })
+    .catch(() => {
+      piModelCatalogCache = [];
+      return [];
+    })
+    .finally(() => {
+      piModelCatalogWarmPromise = null;
+    });
+}
+
 function getPiModelCatalog(): PiModelCatalogEntry[] {
   if (piModelCatalogCache) return piModelCatalogCache;
   try {
@@ -192,13 +242,30 @@ function getPiModelCatalog(): PiModelCatalogEntry[] {
   return piModelCatalogCache;
 }
 
-function getPiScopedModelPatterns(): string[] {
-  if (piScopedModelPatternsCache !== undefined) return piScopedModelPatternsCache;
-
+function getPiSettingsPath(): string {
   const agentDir = process.env.PI_CODING_AGENT_DIR
     ?? path.join(process.env.HOME ?? "", ".pi", "agent");
-  const settingsPath = path.join(agentDir, "settings.json");
-  if (!settingsPath || !fs.existsSync(settingsPath)) {
+  return path.join(agentDir, "settings.json");
+}
+
+function getPiSettingsCacheKey(settingsPath: string): string {
+  try {
+    const stats = fs.statSync(settingsPath);
+    return `${stats.mtimeMs}:${stats.size}`;
+  } catch {
+    return "missing";
+  }
+}
+
+function getPiScopedModelPatterns(): string[] {
+  const settingsPath = getPiSettingsPath();
+  const cacheKey = getPiSettingsCacheKey(settingsPath);
+  if (piScopedModelPatternsCache !== undefined && piScopedModelPatternsCacheKey === cacheKey) {
+    return piScopedModelPatternsCache;
+  }
+
+  piScopedModelPatternsCacheKey = cacheKey;
+  if (cacheKey === "missing") {
     piScopedModelPatternsCache = [];
     return piScopedModelPatternsCache;
   }
@@ -307,6 +374,26 @@ async function getAvailableThinkingLevels(baseModel: string | undefined): Promis
 
   thinkingLevelsCache.set(normalizedBase, probePromise);
   return probePromise;
+}
+
+function prewarmModelPickerData(
+  agents: AgentConfig[],
+  additionalModels: Array<string | undefined> = [],
+): void {
+  prewarmPiModelCatalog();
+
+  const uniqueModels = new Set<string>();
+  for (const model of [
+    ...additionalModels,
+    ...agents.flatMap((agent) => [agent.model, agent.modelAlt]),
+  ]) {
+    const base = parseModelSpec(model).base;
+    if (base) uniqueModels.add(base);
+  }
+
+  for (const model of uniqueModels) {
+    void getAvailableThinkingLevels(model);
+  }
 }
 
 function orderEffortOptions(options: EffortOption[], preferred: ReasoningEffort): EffortOption[] {
@@ -1193,6 +1280,34 @@ export default function (pi: ExtensionAPI) {
     return container;
   };
 
+  const buildPendingMeetingWidgetLines = (meeting: ActiveMeetingState) => {
+    const elapsedMinutes = ((Date.now() - meeting.startedAt - meeting.pausedTotalMs) / 60_000).toFixed(1);
+    const lines = [
+      "────────────────────────────────────────",
+      `  BOARDROOM · ${meeting.brief}`,
+      "────────────────────────────────────────",
+      "",
+      `  Phase: ${meeting.phase}`,
+      `  Mode: ${meeting.mode}`,
+      `  Constraints: ${meeting.constraints}`,
+      `  Elapsed: ${elapsedMinutes} min`,
+      `  Status: ${meeting.lastStatus}`,
+    ];
+
+    if (meeting.agentSnapshots.length > 0) {
+      lines.push("", "  Board Members:");
+      for (const agent of meeting.agentSnapshots) {
+        const turns = `${agent.turns} turns`;
+        const cost = `$${agent.totalCost.toFixed(4)}`;
+        const tokens = agent.totalTokens > 0 ? ` · ${agent.totalTokens} tok` : "";
+        const activity = agent.activity ? ` · ${agent.activity}` : "";
+        lines.push(`    ${agent.name} [${agent.modelLabel ?? "default"}] · ${agent.status} · ${turns} · ${cost}${tokens}${activity}`);
+      }
+    }
+
+    return lines;
+  };
+
   const setBoardroomWidget = (
     ctx: { ui: ExtensionAPI["commands"][number] extends never ? never : any },
     snapshot: MeetingProgressSnapshot,
@@ -1577,6 +1692,7 @@ export default function (pi: ExtensionAPI) {
     if (!ctx.hasUI || !meeting) return;
     if (!meeting.lastSnapshot) {
       ctx.ui.setStatus("boardroom", meeting.lastStatus);
+      ctx.ui.setWidget("boardroom", renderWidgetLines(buildPendingMeetingWidgetLines(meeting)));
       return;
     }
 
@@ -1798,6 +1914,8 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
+      prewarmModelPickerData(agents);
+
       let cliConstraints: string | undefined;
       let cliMode: string | undefined;
       let cliMessagingMode: string | undefined;
@@ -1911,6 +2029,7 @@ export default function (pi: ExtensionAPI) {
       };
 
       ctx.ui.setStatus("boardroom", "Board meeting in progress...");
+      renderMeetingUi(ctx, activeMeeting);
       clearActiveMeetingTimer();
       if (ctx.hasUI) {
         activeMeetingTimer = setInterval(() => renderMeetingUi(ctx, activeMeeting), 1000);
@@ -2164,7 +2283,12 @@ export default function (pi: ExtensionAPI) {
         lastCloseoutResult = null;
 
         const renderToolUi = () => {
-          if (!ctx.hasUI || !lastSnapshot) return;
+          if (!ctx.hasUI || !activeMeeting) return;
+          if (!lastSnapshot) {
+            ctx.ui.setStatus("boardroom", activeMeeting.lastStatus);
+            ctx.ui.setWidget("boardroom", renderWidgetLines(buildPendingMeetingWidgetLines(activeMeeting)));
+            return;
+          }
           const theme = ctx.ui.theme;
           const snapshot = withLiveElapsed(lastSnapshot, startedAtMs, agentSnapshots, null, 0);
           ctx.ui.setStatus("boardroom", formatDashboardStatus(snapshot, theme));
@@ -2172,6 +2296,7 @@ export default function (pi: ExtensionAPI) {
         };
 
         if (agents.length === 0) throw new Error("No executive board agents found in agents/executive-board/");
+        prewarmModelPickerData(agents);
 
         const briefPath = path.resolve(cwd, params.brief);
         const fs = await import("node:fs");
@@ -2188,6 +2313,8 @@ export default function (pi: ExtensionAPI) {
         });
         const mode = params.mode ?? brief.mode ?? config.default_mode;
         const messagingMode = resolveMessagingMode(params.messagingMode) ?? brief.messagingMode ?? config.default_messaging_mode;
+        const ceo = agents.find((agent) => agent.slug === "ceo");
+        if (!ceo) throw new Error("CEO agent not found in agents/executive-board/");
 
         activeMeeting = {
           meetingId: "",
@@ -2211,6 +2338,7 @@ export default function (pi: ExtensionAPI) {
         onUpdate?.({ content: [{ type: "text", text: `Starting board meeting: ${brief.title} (${mode}, ${messagingMode}, ${constraintsName})...` }] });
         if (ctx.hasUI) {
           ctx.ui.setStatus("boardroom", "Board meeting in progress...");
+          renderToolUi();
           toolUiTimer = setInterval(renderToolUi, 1000);
         }
 
@@ -2252,7 +2380,38 @@ export default function (pi: ExtensionAPI) {
             }
             renderToolUi();
           },
-          onConfirmRoster: async () => ({ action: "approve" }),
+          onConfirmRoster: async (proposed, available, rationale): Promise<RosterConfirmation> => {
+            if (!ctx.hasUI) return { action: "approve" };
+            pauseMeetingUi(ctx);
+            try {
+              while (true) {
+                const choice = await confirmRosterDecision(ctx, proposed, rationale, abortController.signal);
+                if (choice === undefined) {
+                  return { action: "cancel" };
+                }
+                if (choice === "No") {
+                  return { action: "reject" };
+                }
+                if (choice === "Yes") {
+                  return { action: "approve" };
+                }
+
+                const edited = await editRosterSelection(
+                  ctx,
+                  ceo,
+                  proposed,
+                  available,
+                  constraintValues.max_roster_size,
+                  rationale,
+                  abortController.signal,
+                );
+                if (edited === undefined) continue;
+                return { action: "edit", roster: edited };
+              }
+            } finally {
+              resumeMeetingUi(ctx);
+            }
+          },
           signal: abortController.signal,
         });
         } finally {
