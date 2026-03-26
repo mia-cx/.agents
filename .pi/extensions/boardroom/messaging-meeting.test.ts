@@ -541,7 +541,7 @@ describe("messaging-meeting", () => {
     );
 
     expect(roundQueueMocks.runSemiLiveRound).toHaveBeenCalledTimes(2);
-    expect(runtimeMocks.runOne).toHaveBeenCalledTimes(3);
+    expect(runtimeMocks.runOne).toHaveBeenCalledTimes(2);
     expect(onStatus).not.toHaveBeenCalledWith(expect.stringContaining("CEO re-engaging board"));
     expect(onStatus).toHaveBeenCalledWith("Phase 5: CEO final decision...");
   });

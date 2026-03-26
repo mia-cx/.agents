@@ -924,6 +924,7 @@ export async function runStructuredMessagingMeeting(
 
     let reEngagementCount = 0;
     const MAX_RE_ENGAGEMENTS = 2;
+    let forcedFinalReviewRes: { content: string; tokenCount: number; cost: number } | undefined;
 
     const queueCallbacks: QueueCallbacks = {
       onStatus: callbacks.onStatus,
@@ -1033,6 +1034,9 @@ export async function runStructuredMessagingMeeting(
 
       const lower = reviewRes.content.toLowerCase();
       if (!canReEngage || (!lower.includes("need more data") && !lower.includes("another round") && !lower.includes("re-engage"))) {
+        if (!canReEngage) {
+          forcedFinalReviewRes = reviewRes;
+        }
         break;
       }
 
@@ -1065,39 +1069,42 @@ export async function runStructuredMessagingMeeting(
       pool,
     );
 
-    const synthExpertise = loadExpertise(cwd, ceo.slug);
-    const ceoSynthScratchpad = loadScratchpad(cwd, ceo.slug);
-    const synthPrompt = composeMessagingSynthesisPrompt(
-      ceo, brief, framingRes.content,
-      getAllThreads(threadState),
-      getAllMessages(threadState),
-      synthExpertise,
-      ceoSynthScratchpad,
-    );
-
     const earlyClose = !forceClosed && !tracker.canContinue(config.budget_hard_stop, config.time_hard_stop);
-    const synthTask = forceClosed
-      ? [
-          "The operator force-closed the board meeting.",
-          "Produce your final Strategic Brief using only the information gathered so far.",
-          "Do not ask for another round of discussion.",
-          "Explicitly call out which questions, risks, or workstreams remain unresolved because the meeting was interrupted.",
-          "",
-          "If the decision involves data worth visualizing, include Mermaid diagrams.",
-        ].join("\n")
-      : earlyClose
-      ? "Constraints reached. Produce your final Strategic Brief with available data. Note any gaps. Reference thread outcomes."
-      : [
-          "Synthesize all thread discussions into your final Strategic Brief.",
-          "Address disagreements explicitly. Reference specific threads and their resolution.",
-          "",
-          "If the decision involves data worth visualizing, include Mermaid diagrams.",
-        ].join("\n");
+    let synthRes = forcedFinalReviewRes;
+    if (!synthRes) {
+      const synthExpertise = loadExpertise(cwd, ceo.slug);
+      const ceoSynthScratchpad = loadScratchpad(cwd, ceo.slug);
+      const synthPrompt = composeMessagingSynthesisPrompt(
+        ceo, brief, framingRes.content,
+        getAllThreads(threadState),
+        getAllMessages(threadState),
+        synthExpertise,
+        ceoSynthScratchpad,
+      );
 
-    const synthSignal = forceClosed ? undefined : callbacks.signal;
-    const synthRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, synthTask, "Synthesizing final decision", callbacks, synthSignal);
-    synthRes.content = processScratchpadOutput(cwd, ceo.slug, synthRes.content);
-    tracker.addCost(synthRes.cost);
+      const synthTask = forceClosed
+        ? [
+            "The operator force-closed the board meeting.",
+            "Produce your final Strategic Brief using only the information gathered so far.",
+            "Do not ask for another round of discussion.",
+            "Explicitly call out which questions, risks, or workstreams remain unresolved because the meeting was interrupted.",
+            "",
+            "If the decision involves data worth visualizing, include Mermaid diagrams.",
+          ].join("\n")
+        : earlyClose
+        ? "Constraints reached. Produce your final Strategic Brief with available data. Note any gaps. Reference thread outcomes."
+        : [
+            "Synthesize all thread discussions into your final Strategic Brief.",
+            "Address disagreements explicitly. Reference specific threads and their resolution.",
+            "",
+            "If the decision involves data worth visualizing, include Mermaid diagrams.",
+          ].join("\n");
+
+      const synthSignal = forceClosed ? undefined : callbacks.signal;
+      synthRes = await runCeoWithRetry(cwd, pool, ceo, synthPrompt, synthTask, "Synthesizing final decision", callbacks, synthSignal);
+      synthRes.content = processScratchpadOutput(cwd, ceo.slug, synthRes.content);
+      tracker.addCost(synthRes.cost);
+    }
     return completeMessagingMeeting(
       cwd,
       meetingId,
