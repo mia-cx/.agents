@@ -146,7 +146,6 @@ describe("messaging-meeting", () => {
       cwd,
       makeBrief("freeform-snapshot"),
       agents,
-      "freeform",
       "standard",
       makeConstraints(),
       { budget_hard_stop: false, time_hard_stop: false },
@@ -196,7 +195,6 @@ describe("messaging-meeting", () => {
       cwd,
       makeBrief("snapshot-model-labels"),
       agents,
-      "freeform",
       "standard",
       makeConstraints(),
       { budget_hard_stop: false, time_hard_stop: false },
@@ -250,7 +248,6 @@ describe("messaging-meeting", () => {
       cwd,
       makeBrief("force-close-partial"),
       agents,
-      "freeform",
       "standard",
       makeConstraints(),
       { budget_hard_stop: false, time_hard_stop: false },
@@ -268,7 +265,7 @@ describe("messaging-meeting", () => {
     expect(fs.readFileSync(result.memoPath, "utf-8")).toContain("Boardroom force-closed");
   });
 
-  it("keeps thread and message ids monotonic across meetings", async () => {
+  it("resets thread and message ids for each meeting", async () => {
     const cwd = makeTempDir();
     const agents = [
       makeAgent("ceo", "CEO"),
@@ -310,7 +307,6 @@ describe("messaging-meeting", () => {
       cwd,
       makeBrief("first-meeting"),
       agents,
-      "freeform",
       "standard",
       makeConstraints(),
       { budget_hard_stop: false, time_hard_stop: false },
@@ -325,7 +321,6 @@ describe("messaging-meeting", () => {
       cwd,
       makeBrief("second-meeting"),
       agents,
-      "freeform",
       "standard",
       makeConstraints(),
       { budget_hard_stop: false, time_hard_stop: false },
@@ -348,8 +343,47 @@ describe("messaging-meeting", () => {
 
     expect(firstLog.threads[0]?.id).toBe("thread-001");
     expect(firstLog.messages[0]?.id).toBe("msg-0001");
-    expect(secondLog.threads[0]?.id).toBe("thread-002");
-    expect(secondLog.messages[0]?.id).toBe("msg-0003");
+    expect(secondLog.threads[0]?.id).toBe("thread-001");
+    expect(secondLog.messages[0]?.id).toBe("msg-0001");
+  });
+
+  it("skips debate rounds when max_debate_rounds is zero", async () => {
+    const cwd = makeTempDir();
+    const agents = [makeAgent("ceo", "CEO"), makeAgent("cfo", "CFO")];
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Final brief without debate round.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    const result = await runFreeformMessagingMeeting(
+      cwd,
+      makeBrief("zero-rounds"),
+      agents,
+      "standard",
+      makeConstraints({ max_debate_rounds: 0 }),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus: vi.fn(),
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot: vi.fn(),
+      },
+    );
+
+    expect(result.disposition).toBe("completed");
+    expect(roundQueueMocks.runSemiLiveRound).not.toHaveBeenCalled();
   });
 
   it("applies max roster size to parsed and rejected freeform rosters", async () => {
@@ -385,7 +419,6 @@ describe("messaging-meeting", () => {
       cwd,
       makeBrief("freeform-roster-limit"),
       agents,
-      "freeform",
       "quick",
       makeConstraints({ max_roster_size: 1 }),
       { budget_hard_stop: false, time_hard_stop: false },
@@ -533,7 +566,6 @@ describe("messaging-meeting", () => {
       cwd,
       makeBrief("default-thread-fallback"),
       agents,
-      "freeform",
       "standard",
       makeConstraints(),
       { budget_hard_stop: false, time_hard_stop: false },

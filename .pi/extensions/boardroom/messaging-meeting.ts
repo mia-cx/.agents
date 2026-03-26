@@ -22,6 +22,7 @@ import {
   resolveAllActiveThreads,
   markUndeliverableMessages,
   formatRecoveryCheckpoint,
+  resetCounters,
 } from "./thread-manager.js";
 import {
   composeMessagingFramingPrompt,
@@ -630,7 +631,6 @@ export async function runFreeformMessagingMeeting(
   cwd: string,
   brief: ParsedBrief,
   allAgents: AgentConfig[],
-  mode: MeetingMode,
   constraintsName: string,
   constraintValues: ConstraintSet,
   config: { budget_hard_stop: boolean; time_hard_stop: boolean },
@@ -639,8 +639,10 @@ export async function runFreeformMessagingMeeting(
   const ceo = allAgents.find(a => a.slug === "ceo");
   if (!ceo) throw new Error("CEO agent not found in agents/executive-board/");
 
+  const mode: MeetingMode = "freeform";
   const meetingId = generateMeetingId(brief);
   const tracker = new ConstraintTracker(constraintValues);
+  resetCounters();
   const threadState = createThreadState();
   const startedAt = new Date();
   const nonCeo = getNonCeoAgents(allAgents);
@@ -679,7 +681,7 @@ export async function runFreeformMessagingMeeting(
       signal: callbacks.signal,
     };
 
-    while (tracker.canContinue(config.budget_hard_stop, config.time_hard_stop)) {
+    while (debateRound < constraintValues.max_debate_rounds && tracker.canContinue(config.budget_hard_stop, config.time_hard_stop)) {
       debateRound++;
       tracker.incrementRound();
 
@@ -716,8 +718,6 @@ export async function runFreeformMessagingMeeting(
         callbacks.onStatus("Constraints reached. Moving to CEO synthesis.");
         break;
       }
-
-      if (debateRound >= constraintValues.max_debate_rounds) break;
 
       // CEO checkpoint between rounds (multi-round only)
       if (constraintValues.max_debate_rounds > 1) {
@@ -888,6 +888,7 @@ export async function runStructuredMessagingMeeting(
 
   const meetingId = generateMeetingId(brief);
   const tracker = new ConstraintTracker(constraintValues);
+  resetCounters();
   const threadState = createThreadState();
   const startedAt = new Date();
   const nonCeo = getNonCeoAgents(allAgents);
