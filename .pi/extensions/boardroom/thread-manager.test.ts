@@ -22,7 +22,6 @@ import {
   resolveAllActiveThreads,
   markUndeliverableMessages,
   formatRecoveryCheckpoint,
-  resetCounters,
 } from "./thread-manager.js";
 import type { ThreadState } from "./messaging-types.js";
 
@@ -30,7 +29,6 @@ describe("ThreadManager", () => {
   let state: ThreadState;
 
   beforeEach(() => {
-    resetCounters();
     state = createThreadState();
   });
 

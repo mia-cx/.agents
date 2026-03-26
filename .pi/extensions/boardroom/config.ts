@@ -53,7 +53,7 @@ export function resolveConstraints(
   const values: ConstraintSet = {
     budget: overrides?.budget ?? base.budget,
     time_limit_minutes: overrides?.time_limit_minutes ?? base.time_limit_minutes,
-    max_debate_rounds: Math.min(overrides?.max_debate_rounds ?? base.max_debate_rounds, MAX_ROUNDS_CAP),
+    max_debate_rounds: Math.max(1, Math.min(overrides?.max_debate_rounds ?? base.max_debate_rounds, MAX_ROUNDS_CAP)),
     max_roster_size: base.max_roster_size,
   };
 

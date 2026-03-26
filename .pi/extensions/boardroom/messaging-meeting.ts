@@ -630,7 +630,7 @@ export async function runFreeformMessagingMeeting(
   cwd: string,
   brief: ParsedBrief,
   allAgents: AgentConfig[],
-  mode: MeetingMode,
+  mode: "freeform",
   constraintsName: string,
   constraintValues: ConstraintSet,
   config: { budget_hard_stop: boolean; time_hard_stop: boolean },
@@ -679,7 +679,10 @@ export async function runFreeformMessagingMeeting(
       signal: callbacks.signal,
     };
 
-    while (tracker.canContinue(config.budget_hard_stop, config.time_hard_stop)) {
+    while (
+      tracker.canContinue(config.budget_hard_stop, config.time_hard_stop)
+      && debateRound < constraintValues.max_debate_rounds
+    ) {
       debateRound++;
       tracker.incrementRound();
 
@@ -716,8 +719,6 @@ export async function runFreeformMessagingMeeting(
         callbacks.onStatus("Constraints reached. Moving to CEO synthesis.");
         break;
       }
-
-      if (debateRound >= constraintValues.max_debate_rounds) break;
 
       // CEO checkpoint between rounds (multi-round only)
       if (constraintValues.max_debate_rounds > 1) {

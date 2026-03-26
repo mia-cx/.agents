@@ -1087,12 +1087,12 @@ async function runMeeting(
     if (mode === "structured") {
       return runStructuredMessagingMeeting(cwd, brief, agents, constraintsName, constraintValues, config, callbacks);
     }
-    return runFreeformMessagingMeeting(cwd, brief, agents, mode, constraintsName, constraintValues, config, callbacks);
+    return runFreeformMessagingMeeting(cwd, brief, agents, "freeform", constraintsName, constraintValues, config, callbacks);
   }
   if (mode === "structured") {
     return runStructuredMeeting(cwd, brief, agents, constraintsName, constraintValues, config, callbacks);
   }
-  return runFreeformMeeting(cwd, brief, agents, mode, constraintsName, constraintValues, config, callbacks);
+  return runFreeformMeeting(cwd, brief, agents, "freeform", constraintsName, constraintValues, config, callbacks);
 }
 
 export default function (pi: ExtensionAPI) {

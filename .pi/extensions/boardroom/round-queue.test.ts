@@ -5,7 +5,6 @@ import {
   createThreadState,
   createThread,
   postMessage,
-  resetCounters,
   getActiveThreads,
   buildRoomSummary,
 } from "./thread-manager.js";
@@ -96,7 +95,6 @@ describe("round-queue", () => {
   const cwd = "/tmp/test";
 
   beforeEach(() => {
-    resetCounters();
     vi.clearAllMocks();
     state = createThreadState();
     mockExtractScratchpadUpdate.mockReturnValue(null);

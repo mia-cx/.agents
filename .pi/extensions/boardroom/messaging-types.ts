@@ -90,6 +90,8 @@ export interface ThreadState {
   messages: Map<string, RoutedMessage>;
   agent_inboxes: Map<string, string[]>;   // agent slug → unread message ids
   agent_outboxes: Map<string, string[]>;  // agent slug → sent message ids
+  thread_counter: number;
+  message_counter: number;
 }
 
 // --- Meeting-Level Messaging Log ---

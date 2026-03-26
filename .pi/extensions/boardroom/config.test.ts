@@ -84,6 +84,11 @@ describe("config", () => {
       expect(values.max_debate_rounds).toBe(50);
     });
 
+    it("clamps max_debate_rounds to at least 1", () => {
+      const { values } = resolveConstraints(config, "thorough", { max_debate_rounds: 0 });
+      expect(values.max_debate_rounds).toBe(1);
+    });
+
     it("falls back to thorough for unknown constraints", () => {
       const { values } = resolveConstraints(config, "nonexistent");
       expect(values.budget).toBe(25);

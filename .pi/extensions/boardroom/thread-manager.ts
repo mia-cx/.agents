@@ -18,9 +18,6 @@ import type {
   MessagingLog,
 } from "./messaging-types.js";
 
-let messageCounter = 0;
-let threadCounter = 0;
-
 function dedupeSlugs(slugs: string[]): string[] {
   return Array.from(new Set(slugs.filter(Boolean)));
 }
@@ -67,19 +64,14 @@ export function isMessageVisibleToAgent(
   }
 }
 
-function nextMessageId(): string {
-  messageCounter++;
-  return `msg-${String(messageCounter).padStart(4, "0")}`;
+function nextMessageId(state: ThreadState): string {
+  state.message_counter++;
+  return `msg-${String(state.message_counter).padStart(4, "0")}`;
 }
 
-function nextThreadId(): string {
-  threadCounter++;
-  return `thread-${String(threadCounter).padStart(3, "0")}`;
-}
-
-export function resetCounters(): void {
-  messageCounter = 0;
-  threadCounter = 0;
+function nextThreadId(state: ThreadState): string {
+  state.thread_counter++;
+  return `thread-${String(state.thread_counter).padStart(3, "0")}`;
 }
 
 // --- Thread State Factory ---
@@ -90,6 +82,8 @@ export function createThreadState(): ThreadState {
     messages: new Map(),
     agent_inboxes: new Map(),
     agent_outboxes: new Map(),
+    thread_counter: 0,
+    message_counter: 0,
   };
 }
 
@@ -108,7 +102,7 @@ export function createThread(
     createdBy,
   ]);
   const thread: Thread = {
-    id: nextThreadId(),
+    id: nextThreadId(state),
     title,
     parent_id: parentId,
     created_by: createdBy,
@@ -195,7 +189,7 @@ export function postMessage(
   }
 
   const message: RoutedMessage = {
-    id: nextMessageId(),
+    id: nextMessageId(state),
     type,
     from,
     to: type === "broadcast" ? [] : to,

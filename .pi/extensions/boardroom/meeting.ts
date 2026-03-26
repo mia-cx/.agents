@@ -550,7 +550,7 @@ export async function runFreeformMeeting(
   cwd: string,
   brief: ParsedBrief,
   allAgents: AgentConfig[],
-  mode: MeetingMode,
+  mode: "freeform",
   constraintsName: string,
   constraintValues: ConstraintSet,
   config: { budget_hard_stop: boolean; time_hard_stop: boolean },

@@ -3,7 +3,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentConfig, ConstraintSet, ParsedBrief } from "./types.js";
-import { resetCounters } from "./thread-manager.js";
 
 const runtimeMocks = vi.hoisted(() => ({
   ensureAgents: vi.fn(),
@@ -104,7 +103,6 @@ function makeFramingOutput(roster: string[]): string {
 
 describe("messaging-meeting", () => {
   beforeEach(() => {
-    resetCounters();
     vi.clearAllMocks();
     runtimeMocks.snapshot.mockReturnValue([]);
     roundQueueMocks.runSemiLiveRound.mockResolvedValue({
@@ -268,7 +266,7 @@ describe("messaging-meeting", () => {
     expect(fs.readFileSync(result.memoPath, "utf-8")).toContain("Boardroom force-closed");
   });
 
-  it("keeps thread and message ids monotonic across meetings", async () => {
+  it("resets thread and message ids for each meeting", async () => {
     const cwd = makeTempDir();
     const agents = [
       makeAgent("ceo", "CEO"),
@@ -348,8 +346,8 @@ describe("messaging-meeting", () => {
 
     expect(firstLog.threads[0]?.id).toBe("thread-001");
     expect(firstLog.messages[0]?.id).toBe("msg-0001");
-    expect(secondLog.threads[0]?.id).toBe("thread-002");
-    expect(secondLog.messages[0]?.id).toBe("msg-0003");
+    expect(secondLog.threads[0]?.id).toBe("thread-001");
+    expect(secondLog.messages[0]?.id).toBe("msg-0001");
   });
 
   it("applies max roster size to parsed and rejected freeform rosters", async () => {

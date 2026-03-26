@@ -11,7 +11,6 @@ import {
   postMessage,
   resolveThread,
   closeThread,
-  resetCounters,
 } from "./thread-manager.js";
 import type { ThreadState } from "./messaging-types.js";
 
@@ -19,7 +18,6 @@ describe("thread-graph", () => {
   let state: ThreadState;
 
   beforeEach(() => {
-    resetCounters();
     state = createThreadState();
   });
 
