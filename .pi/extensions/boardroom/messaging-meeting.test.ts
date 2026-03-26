@@ -473,7 +473,7 @@ describe("messaging-meeting", () => {
       makeBrief("structured-stress-rounds"),
       agents,
       "standard",
-      makeConstraints({ max_debate_rounds: 1 }),
+      makeConstraints({ max_debate_rounds: 2 }),
       { budget_hard_stop: false, time_hard_stop: false },
       {
         onStatus: vi.fn(),
@@ -492,6 +492,58 @@ describe("messaging-meeting", () => {
       phase: 3,
       roundsUsed: 2,
     }));
+  });
+
+  it("stops structured re-engagement when the round budget is exhausted", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO", { tags: ["stress-test"] }),
+    ];
+    const onStatus = vi.fn();
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "NEED MORE DATA before we commit.",
+        exitCode: 0,
+        tokenCount: 80,
+        cost: 0.04,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "Structured final brief.",
+        exitCode: 0,
+        tokenCount: 120,
+        cost: 0.06,
+      });
+
+    await runStructuredMessagingMeeting(
+      cwd,
+      makeBrief("structured-round-budget"),
+      agents,
+      "standard",
+      makeConstraints({ max_debate_rounds: 2 }),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus,
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot: vi.fn(),
+      },
+    );
+
+    expect(roundQueueMocks.runSemiLiveRound).toHaveBeenCalledTimes(2);
+    expect(runtimeMocks.runOne).toHaveBeenCalledTimes(3);
+    expect(onStatus).not.toHaveBeenCalledWith(expect.stringContaining("CEO re-engaging board"));
+    expect(onStatus).toHaveBeenCalledWith("Phase 5: CEO final decision...");
   });
 
   it("falls back to a default thread when CEO emits no workstreams", async () => {
