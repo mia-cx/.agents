@@ -768,18 +768,21 @@ export async function runFreeformMessagingMeeting(
           loadExpertise(cwd, ceo.slug),
           ceoReviewScratchpad,
         );
-        const reviewTask = [
-          `Round ${debateRound} of ${constraintValues.max_debate_rounds}. Budget: ${tracker.summary}`,
-          "Review all thread discussions.",
-          "If critical disagreements remain, say 'NEED MORE DATA' to re-engage.",
-          "Otherwise, proceed with your Strategic Brief.",
-        ].join("\n");
+        const canReEngage = canRunAnotherMessagingRound(tracker, config);
+        const reviewTask = canReEngage
+          ? [
+              `Round ${debateRound} of ${constraintValues.max_debate_rounds}. Budget: ${tracker.summary}`,
+              "Review all thread discussions.",
+              "If critical disagreements remain, say 'NEED MORE DATA' to re-engage.",
+              "Otherwise, proceed with your Strategic Brief.",
+            ].join("\n")
+          : buildFinalMessagingSynthesisTask(false, false);
 
         const reviewRes = await runCeoWithRetry(cwd, pool, ceo, reviewPrompt, reviewTask, "Reviewing discussions", callbacks, callbacks.signal);
         reviewRes.content = processScratchpadOutput(cwd, ceo.slug, reviewRes.content);
         tracker.addCost(reviewRes.cost);
 
-        if (!reviewRequestsReEngagement(reviewRes.content)) {
+        if (!canReEngage || !reviewRequestsReEngagement(reviewRes.content)) {
           terminalSynthesisRes = reviewRes;
           break;
         }

@@ -636,6 +636,63 @@ describe("messaging-meeting", () => {
     expect(runtimeMocks.runOne).toHaveBeenCalledTimes(2);
   });
 
+  it("stops freeform re-engagement when the round budget is exhausted", async () => {
+    const cwd = makeTempDir();
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("cfo", "CFO"),
+    ];
+    const onStatus = vi.fn();
+    roundQueueMocks.runSemiLiveRound.mockImplementationOnce(async (...args: unknown[]) => {
+      const tracker = args[8] as { incrementRound(): void };
+      tracker.incrementRound();
+      return {
+        messagesPosted: 0,
+        failedAgents: 0,
+        droppedMessages: 0,
+        totalCost: 0,
+        totalTokens: 0,
+        endReason: "quiet",
+      };
+    });
+
+    runtimeMocks.runOne
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: makeFramingOutput(["cfo"]),
+        exitCode: 0,
+        tokenCount: 100,
+        cost: 0.05,
+      })
+      .mockResolvedValueOnce({
+        agent: "ceo",
+        content: "NEED MORE DATA before we commit.",
+        exitCode: 0,
+        tokenCount: 80,
+        cost: 0.04,
+      });
+
+    await runFreeformMessagingMeeting(
+      cwd,
+      makeBrief("freeform-round-budget"),
+      agents,
+      "freeform",
+      "standard",
+      makeConstraints({ max_debate_rounds: 2 }),
+      { budget_hard_stop: false, time_hard_stop: false },
+      {
+        onStatus,
+        onAgentUpdate: vi.fn(),
+        onConfirmRoster: vi.fn(async () => ({ action: "approve" })),
+        onSnapshot: vi.fn(),
+      },
+    );
+
+    expect(roundQueueMocks.runSemiLiveRound).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.runOne).toHaveBeenCalledTimes(2);
+    expect(onStatus).not.toHaveBeenCalledWith("CEO requested another round of discussion.");
+  });
+
   it("falls back to a default thread when CEO emits no workstreams", async () => {
     const cwd = makeTempDir();
     const agents = [

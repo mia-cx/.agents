@@ -172,6 +172,17 @@ describe("ThreadManager", () => {
       const quiet = getQuietThreads(state);
       expect(quiet.length).toBeGreaterThanOrEqual(0);
     });
+
+    it("returns quiet threads to active when pending replies are added", () => {
+      const thread = createThread(state, "Discussion", "ceo");
+      postMessage(state, "broadcast", "ceo", [], thread.id, "Hello", 1, 0, 100, 0.05);
+      updateThreadStatus(state, thread.id);
+      expect(thread.status).toBe("quiet");
+
+      postMessage(state, "request-reply", "ceo", ["cto"], thread.id, "Please follow up", 1, 1, 80, 0.03);
+      expect(thread.pending_replies).toContain("cto");
+      expect(thread.status).toBe("active");
+    });
   });
 
   describe("context projection", () => {

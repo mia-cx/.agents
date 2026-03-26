@@ -155,10 +155,15 @@ export function closeThread(
 
 export function updateThreadStatus(state: ThreadState, threadId: string): void {
   const thread = state.threads.get(threadId);
-  if (!thread || thread.status !== "active") return;
+  if (!thread || (thread.status !== "active" && thread.status !== "quiet")) return;
+
+  if (thread.pending_replies.length > 0) {
+    thread.status = "active";
+    return;
+  }
 
   // Auto-detect quiet threads
-  if (thread.pending_replies.length === 0 && thread.message_ids.length > 0) {
+  if (thread.message_ids.length > 0) {
     thread.status = "quiet";
   }
 }
