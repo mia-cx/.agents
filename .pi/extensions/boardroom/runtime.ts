@@ -112,15 +112,12 @@ const READ_ONLY_COMMANDS = new Set([
 ]);
 
 const READ_ONLY_GIT_SUBCOMMANDS = new Set([
-  "branch",
-  "config",
   "describe",
   "diff",
   "grep",
   "log",
   "ls-files",
   "merge-base",
-  "remote",
   "rev-list",
   "rev-parse",
   "show",
@@ -135,7 +132,7 @@ function hasUnsafeShellOperators(command: string): boolean {
     const prev = i > 0 ? command[i - 1] : "";
 
     if (quote) {
-      if (char === quote && prev !== "\\") quote = null;
+      if (char === quote && (quote === "'" || prev !== "\\")) quote = null;
       continue;
     }
 
