@@ -1,1 +1,1 @@
-{"mcpServers":{"MCP_DOCKER":{"command":"docker","args":["mcp","gateway","run"],"type":"stdio"}}}
+{"mcpServers":{"auggie":{"type":"stdio","command":"/Users/mia/Library/pnpm/auggie","args":["--mcp","--mcp-auto-workspace"]},"MCP_DOCKER":{"command":"docker","args":["mcp","gateway","run"],"type":"stdio"}}}
