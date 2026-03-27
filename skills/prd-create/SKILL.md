@@ -1,121 +1,20 @@
 ---
 name: prd-create
-description: Create a PRD through user interview, codebase exploration, and module design, then submit as a GitHub issue. Use when user wants to write a PRD, create a product requirements document, or plan a new feature.
+description: "Creates a product requirements document through user interview, codebase exploration, and feature framing, then files it as a GitHub issue. Use when the user wants to write a PRD, define a new feature, or turn an idea into a structured requirements document. Prefer this before implementation planning when the requirements are still fuzzy."
 ---
 
-This skill will be invoked when the user wants to create a PRD. You may skip steps if you don't consider them necessary.
+# Create a PRD
 
-1. Ask the user for a long, detailed description of the problem they want to solve and any potential ideas for solutions.
+Treat this file as a router. Keep discovery and feature framing in one stage, then load the GitHub metadata/template guidance only when you are ready to file the PRD.
 
-2. Explore the repo to verify their assertions and understand the current state of the codebase.
+## Workflow
 
-3. Interview the user relentlessly about every aspect of this plan until you reach a shared understanding. Walk down each branch of the design tree, resolving dependencies between decisions one-by-one.
+1. Read `references/workflow.md` for user interviewing, codebase exploration, module sketching, and testing discussion.
+2. Read `references/issue-metadata-and-template.md` when you are ready to assemble and file the GitHub issue.
+3. Confirm the problem, solution shape, modules, and testing expectations before writing the PRD.
 
-4. Sketch out the major modules you will need to build or modify to complete the implementation. Actively look for opportunities to extract deep modules that can be tested in isolation.
+## Rules
 
-A deep module (as opposed to a shallow module) is one which encapsulates a lot of functionality in a simple, testable interface which rarely changes.
-
-Check with the user that these modules match their expectations. Check with the user which modules they want tests written for.
-
-5. Once you have a complete understanding of the problem and solution, use the template below to write the PRD. The PRD should be submitted as a GitHub issue.
-
-### Issue metadata
-
-Before creating the issue, discover available metadata for the repo and apply the best-fit values:
-
-```bash
-# Labels
-gh label list --json name,description
-
-# Issue types (if enabled)
-gh api "/repos/OWNER/REPO" --jq '.issue_types // empty' 2>/dev/null || true
-
-# Milestones
-gh api "/repos/OWNER/REPO/milestones?state=open" --jq '.[].title'
-
-# Projects (org or user)
-gh project list --owner OWNER --format json --jq '.projects[].title' 2>/dev/null || true
-
-# Assignees (collaborators)
-gh api "/repos/OWNER/REPO/collaborators" --jq '.[].login'
-```
-
-When creating the issue, apply the appropriate flags:
-
-- `--label` — use existing labels that fit (e.g., `enhancement`, `prd`, `feature`). Create a label if none fit and the repo has a labeling convention.
-- `--assignee` — assign to the user if they are a collaborator, or ask who should own it.
-- `--milestone` — attach to the relevant open milestone if one exists.
-- `--project` — attach to the relevant project board if one exists.
-
-If the repo has issue types enabled, set the type via:
-```bash
-gh api --method PATCH "/repos/OWNER/REPO/issues/NUMBER" \
-  --input - <<< '{"type": "TYPE_NAME"}'
-```
-
-Ask the user to confirm metadata choices if there are multiple plausible options. Skip silently if a metadata category has no values (e.g., no milestones, no projects).
-
-<prd-template>
-
-## Problem Statement
-
-The problem that the user is facing, from the user's perspective.
-
-## Solution
-
-The solution to the problem, from the user's perspective.
-
-## User Stories
-
-A LONG, numbered list of user stories. Each user story should be in the format of:
-
-1. As an <actor>, I want a <feature>, so that <benefit>
-
-<user-story-example>
-1. As a mobile bank customer, I want to see balance on my accounts, so that I can make better informed decisions about my spending
-</user-story-example>
-
-This list of user stories should be extremely extensive and cover all aspects of the feature.
-
-## Implementation Decisions
-
-A list of implementation decisions that were made. This can include:
-
-- The modules that will be built/modified
-- The interfaces of those modules that will be modified
-- Technical clarifications from the developer
-- Architectural decisions
-- Schema changes
-- API contracts
-- Specific interactions
-
-Do NOT include specific file paths or code snippets. They may end up being outdated very quickly.
-
-## Testing Decisions
-
-A list of testing decisions that were made. Include:
-
-- A description of what makes a good test (only test external behavior, not implementation details)
-- Which modules will be tested
-- Prior art for the tests (i.e. similar types of tests in the codebase)
-
-## Out of Scope
-
-A description of the things that are out of scope for this PRD.
-
-## Worktree Setup
-
-All implementation work for this PRD should happen in a dedicated worktree to keep `main` clean:
-
-```bash
-git worktree add .worktrees/<feature-name> -b feat/<feature-name>
-cd .worktrees/<feature-name>
-```
-
-Merge back to `main` only after the feature is complete and reviewed.
-
-## Further Notes
-
-Any further notes about the feature.
-
-</prd-template>
+- Keep requirement discovery separate from issue-filing mechanics.
+- Push toward durable module and testing decisions, not file-level implementation details.
+- The deliverable is the filed PRD issue, not just a draft in chat.

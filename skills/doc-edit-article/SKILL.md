@@ -1,6 +1,6 @@
 ---
 name: doc-edit-article
-description: Edit and improve articles by restructuring sections, improving clarity, and tightening prose. Use when user wants to edit, revise, or improve an article draft.
+description: "Edits article drafts for structure, clarity, pacing, and prose quality. Use when the user already has an article, post, essay, or draft and wants revision rather than greenfield writing. Not for internal comms formats, PRDs, or formal technical specs."
 ---
 
 1. First, divide the article into sections based on its headings. Think about the main points you want to make during those sections.
