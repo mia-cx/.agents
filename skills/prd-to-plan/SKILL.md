@@ -1,11 +1,11 @@
 ---
 name: prd-to-plan
-description: Turn a PRD into a multi-phase implementation plan using tracer-bullet vertical slices, saved as a local Markdown file in ./plans/. Use when user wants to break down a PRD, create an implementation plan, plan phases from a PRD, or mentions "tracer bullets".
+description: Turn a PRD into a multi-phase implementation plan using tracer-bullet vertical slices, saved as local Markdown files in .plans/. Use when user wants to break down a PRD, create an implementation plan, plan phases from a PRD, or mentions "tracer bullets".
 ---
 
 # PRD to Plan
 
-Break a PRD into a phased implementation plan using vertical slices (tracer bullets). Output is a Markdown file in `./plans/`.
+Break a PRD into a phased implementation plan using vertical slices (tracer bullets). Output is one Markdown file per slice in `.plans/` (gitignored — plans are working documents, not committed artifacts).
 
 ## Process
 
@@ -55,64 +55,79 @@ Ask the user:
 
 Iterate until the user approves the breakdown.
 
-### 6. Write the plan file
+### 6. Write the plan files
 
-Create `./plans/` if it doesn't exist. Write the plan as a Markdown file named after the feature (e.g. `./plans/user-onboarding.md`). Use the template below.
+Create `.plans/` if it doesn't exist. Add `.plans/` to `.gitignore` if not already present — plans are working documents, not committed artifacts.
 
-<plan-template>
+Write **one Markdown file per slice**, named `<issue-number>-<short-name>.md` (e.g. `.plans/42-sqlite-store.md`). If the slices come from a `prd-to-issues` breakdown with GitHub issue numbers, use those numbers. Otherwise use sequential phase numbers.
+
+Also write a **root plan file** `.plans/README.md` that links all slices together with the dependency graph and architectural decisions.
+
+<root-plan-template>
 # Plan: <Feature Name>
 
 > Source PRD: <brief identifier or link>
 
-## Worktree setup
-
-Before starting implementation, create a dedicated worktree:
-
-```bash
-git worktree add .worktrees/<feature-name> -b feat/<feature-name>
-cd .worktrees/<feature-name>
-```
-
-All phases below should be implemented in this worktree. Merge back to `main` only after the feature is complete and reviewed.
-
 ## Architectural decisions
 
-Durable decisions that apply across all phases:
+Durable decisions that apply across all slices:
 
-- **Routes**: ...
 - **Schema**: ...
 - **Key models**: ...
+- **Routes / API contracts**: ...
 - (add/remove sections as appropriate)
 
----
+## Slices
 
-## Phase 1: <Title>
+| # | Plan | Title | Blocked by | Status |
+|---|------|-------|------------|--------|
+| 3 | [scaffold](.plans/3-scaffold.md) | Package scaffold | — | ☐ |
+| 4 | [store](.plans/4-sqlite-store.md) | SQLite store | #3 | ☐ |
+| ... | ... | ... | ... | ... |
 
-**User stories**: <list from PRD>
+## Worktree setup
 
-### What to build
+Each slice should be implemented in a dedicated worktree:
 
-A concise description of this vertical slice. Describe the end-to-end behavior, not layer-by-layer implementation.
+```bash
+git worktree add .worktrees/<short-name> -b feat/<short-name>
+cd .worktrees/<short-name>
+```
 
-### Acceptance criteria
+Merge back to `main` only after the slice is complete and reviewed.
+</root-plan-template>
+
+<slice-plan-template>
+# Slice: <Title>
+
+> Issue: #<number> | PRD: #<prd-number>
+> Blocked by: #<blocker-numbers> (or "None")
+
+## Worktree setup
+
+```bash
+git worktree add .worktrees/<short-name> -b feat/<short-name>
+cd .worktrees/<short-name>
+```
+
+## What to build
+
+A concise description of this vertical slice. Describe the end-to-end behavior, not layer-by-layer implementation. Reference specific sections of the parent PRD rather than duplicating content.
+
+## Key decisions
+
+Decisions specific to this slice that aren't in the root plan:
+
+- ...
+
+## Acceptance criteria
 
 - [ ] Criterion 1
 - [ ] Criterion 2
 - [ ] Criterion 3
 
----
+## User stories addressed
 
-## Phase 2: <Title>
-
-**User stories**: <list from PRD>
-
-### What to build
-
-...
-
-### Acceptance criteria
-
-- [ ] ...
-
-<!-- Repeat for each phase -->
-</plan-template>
+- User story N
+- User story M
+</slice-plan-template>

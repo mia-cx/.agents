@@ -19,6 +19,42 @@ Check with the user that these modules match their expectations. Check with the 
 
 5. Once you have a complete understanding of the problem and solution, use the template below to write the PRD. The PRD should be submitted as a GitHub issue.
 
+### Issue metadata
+
+Before creating the issue, discover available metadata for the repo and apply the best-fit values:
+
+```bash
+# Labels
+gh label list --json name,description
+
+# Issue types (if enabled)
+gh api "/repos/OWNER/REPO" --jq '.issue_types // empty' 2>/dev/null || true
+
+# Milestones
+gh api "/repos/OWNER/REPO/milestones?state=open" --jq '.[].title'
+
+# Projects (org or user)
+gh project list --owner OWNER --format json --jq '.projects[].title' 2>/dev/null || true
+
+# Assignees (collaborators)
+gh api "/repos/OWNER/REPO/collaborators" --jq '.[].login'
+```
+
+When creating the issue, apply the appropriate flags:
+
+- `--label` — use existing labels that fit (e.g., `enhancement`, `prd`, `feature`). Create a label if none fit and the repo has a labeling convention.
+- `--assignee` — assign to the user if they are a collaborator, or ask who should own it.
+- `--milestone` — attach to the relevant open milestone if one exists.
+- `--project` — attach to the relevant project board if one exists.
+
+If the repo has issue types enabled, set the type via:
+```bash
+gh api --method PATCH "/repos/OWNER/REPO/issues/NUMBER" \
+  --input - <<< '{"type": "TYPE_NAME"}'
+```
+
+Ask the user to confirm metadata choices if there are multiple plausible options. Skip silently if a metadata category has no values (e.g., no milestones, no projects).
+
 <prd-template>
 
 ## Problem Statement
