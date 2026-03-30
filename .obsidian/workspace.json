@@ -1,0 +1,287 @@
+{
+  "main": {
+    "id": "150c58f5c1c99f95",
+    "type": "split",
+    "children": [
+      {
+        "id": "bda9d7a8bc20d7be",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "6528424860434da9",
+            "type": "leaf",
+            "state": {
+              "type": "empty",
+              "state": {},
+              "icon": "lucide-file",
+              "title": "New tab"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "8036f950e793513c",
+    "type": "split",
+    "children": [
+      {
+        "id": "771598fcc41150c0",
+        "type": "tabs",
+        "dimension": 59.01942645698428,
+        "children": [
+          {
+            "id": "69918aa583d84121",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "Characters/Nalla/Nalla.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of Nalla"
+            }
+          },
+          {
+            "id": "ca3009df5d5b7856",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "e18ceb716ff3a951",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          }
+        ],
+        "currentTab": 2
+      },
+      {
+        "id": "ca77c72611f2b537",
+        "type": "tabs",
+        "dimension": 40.98057354301572,
+        "children": [
+          {
+            "id": "2466aff5360c3350",
+            "type": "leaf",
+            "state": {
+              "type": "localgraph",
+              "state": {
+                "options": {
+                  "collapse-filter": true,
+                  "search": "",
+                  "localJumps": 1,
+                  "localBacklinks": true,
+                  "localForelinks": true,
+                  "localInterlinks": true,
+                  "showTags": true,
+                  "showAttachments": true,
+                  "hideUnresolved": false,
+                  "collapse-color-groups": true,
+                  "colorGroups": [],
+                  "collapse-display": true,
+                  "showArrow": false,
+                  "textFadeMultiplier": 0,
+                  "nodeSizeMultiplier": 1,
+                  "lineSizeMultiplier": 1,
+                  "collapse-forces": true,
+                  "centerStrength": 0.518713248970312,
+                  "repelStrength": 10,
+                  "linkStrength": 1,
+                  "linkDistance": 250,
+                  "scale": 0.7173954722922811,
+                  "close": true
+                }
+              },
+              "icon": "lucide-git-fork",
+              "title": "Graph view"
+            }
+          },
+          {
+            "id": "d5dc246e7a9746d0",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "Characters/Nalla/Nalla.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for Nalla"
+            }
+          },
+          {
+            "id": "d20a6c58d1cb4bac",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "Characters/Nalla/Nalla.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from Nalla"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 252,
+    "collapsed": true
+  },
+  "right": {
+    "id": "e7a5f3f6b9ca2a88",
+    "type": "split",
+    "children": [
+      {
+        "id": "695654971a3a17b6",
+        "type": "tabs",
+        "dimension": 64.32624113475177,
+        "children": [
+          {
+            "id": "a28f779a9dc91317",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "6a7b0a0b5e4d5f63",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          }
+        ]
+      },
+      {
+        "id": "534b8f6460daa67c",
+        "type": "tabs",
+        "dimension": 35.67375886524823,
+        "children": [
+          {
+            "id": "2dafd93ba5e585f4",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 252,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false,
+      "ribbon-divider:ribbon-divider-0cf6610a-5b18-4281-8b36-c3cb5d1df197": false,
+      "iconic:Open rulebook": false
+    }
+  },
+  "active": "6528424860434da9",
+  "lastOpenFiles": [
+    "Untitled.md",
+    "Book 1 - Ash and Bloom/Chapter 1 — Nalla.md",
+    "Glossary/Research & Development/Magic-System/Elemental-Theory.md",
+    "AGENTS.md",
+    "Glossary/Research & Development/SCHEMAS.md",
+    "Book 1 - Ash and Bloom/Research & Development/SCHEMAS.md",
+    "Book 1 - Ash and Bloom/Research & Development/Characters/Eranu.md",
+    "Book 1 - Ash and Bloom/Research & Development/Characters/Mister-Capy.md",
+    "Book 1 - Ash and Bloom/Research & Development/Characters/Joshuara-Mother.md",
+    "Book 1 - Ash and Bloom/Research & Development/Characters/Soren.md",
+    "Book 1 - Ash and Bloom/Research & Development/Characters/Kuori.md",
+    "Book 1 - Ash and Bloom/Research & Development/Characters/Kaela.md",
+    "Book 1 - Ash and Bloom/Research & Development/Characters/Ruvan.md",
+    "Glossary/Research & Development/Future-Books/Book-4-Notes.md",
+    "Glossary/Research & Development/Future-Books/Book-3-Notes.md",
+    "Glossary/Research & Development/Future-Books/Book-2-Notes.md",
+    "Glossary/Research & Development/Magic-System/Lost-Knowledge.md",
+    "Glossary/Research & Development/World-Building/Languages.md",
+    "Book 1 - Ash and Bloom/Research & Development/Magic/Elementals-and-Magic.md",
+    "Book 1 - Ash and Bloom/Research & Development/Timelines/Chapter-Pacing.md",
+    "Glossary/Research & Development/World-Building/Cultures.md",
+    "Book 1 - Ash and Bloom/Research & Development/Timelines/Book-1-Timeline.md",
+    "Book 1 - Ash and Bloom/Research & Development/Locations/POIs.md",
+    "Book 1 - Ash and Bloom/Research & Development/Locations/Papa.md",
+    "Book 1 - Ash and Bloom/Research & Development/Locations/Akea.md",
+    "Book 1 - Ash and Bloom/Research & Development/Locations/Tokalani.md",
+    "Book 1 - Ash and Bloom/Research & Development/Magic",
+    "Book 1 - Ash and Bloom/Research & Development/Timelines",
+    "Book 1 - Ash and Bloom/Research & Development/Locations",
+    "Glossary/Research & Development/World-Building",
+    "Glossary/Research & Development/Magic-System",
+    "Glossary/Research & Development/Future-Books",
+    "Glossary/Research & Development",
+    "Book 1 - Ash and Bloom/Research & Development/Characters",
+    "Glossary/Old/legacy",
+    "Glossary/Old",
+    "Characters/Nalla/Nalla.png",
+    "Characters/Nalla/Nalla.jpg",
+    "Characters/Nalla/World (Tokalea)/Tokalea Archipelago reference 2.png",
+    "Characters/Nalla/World (Tokalea)/Tokalea Archipelago (reference).png",
+    "Characters/Nalla/World (Tokalea)/Tokalea & The Larger Tokalea Region.png",
+    "Characters/Nalla/World (Tokalea)/Tokalea & The Larger Tokalea Region v2.png",
+    "Characters/Nalla/Tokalea Archipelago reference 2.png",
+    "Characters/Nalla/Tokalea Archipelago (reference).png",
+    "Characters/Nalla/Tokalea & The Larger Tokalea Region v2.png",
+    "Characters/Nalla/Tokalea & The Larger Tokalea Region.png"
+  ]
+}

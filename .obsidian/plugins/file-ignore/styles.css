@@ -1,0 +1,413 @@
+.file-ignore-hidden-files-list {
+    margin-top: 1em;
+}
+
+.file-ignore-hidden-files-list ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.file-ignore-hidden-files-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5em;
+    margin: 0.25em 0;
+    border-radius: 4px;
+}
+
+.file-ignore-hidden-files-list button {
+    margin-left: 1em;
+    padding: 0.25em 0.5em;
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.file-ignore-hidden-files-list button:hover {
+    background-color: var(--interactive-accent-hover);
+}
+
+/* 设置页面标题 */
+.file-ignore-settings-title {
+    margin-top: 0;
+    margin-bottom: 16px;
+    color: var(--text-normal);
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding-bottom: 8px;
+}
+
+/* 新增顶部行样式 */
+.file-ignore-top-action-row {
+    display: flex;
+    justify-content: space-between; /* 两端对齐 */
+    align-items: center;
+    margin-bottom: 24px;
+    padding: 8px 12px; /* 减少垂直内边距 */
+    background-color: var(--background-secondary);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    position: sticky; /* Make it stick to top */
+    top: 0;
+    z-index: 10; /* Ensure it appears above other elements */
+}
+
+/* 行内状态指示器 */
+.file-ignore-status-inline-container {
+    flex-shrink: 0; /* 防止被压缩 */
+}
+
+/* 按钮组 */
+.file-ignore-button-group {
+    display: flex;
+    gap: 8px; /* 按钮间距 */
+    flex-shrink: 0; /* 防止被压缩 */
+}
+
+/* 调整 Setting 组件内部按钮的边距 (如果需要) */
+.file-ignore-top-action-row .setting-item-control button {
+    margin-left: 0; /* 移除默认的左边距 */
+}
+
+.file-ignore-status-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.file-ignore-status-icon {
+    color: var(--text-accent);
+    display: flex;
+    align-items: center;
+}
+
+.file-ignore-status-icon svg {
+    vertical-align: middle; /* 图标垂直居中 */
+}
+
+/* 加载图标动画 */
+.file-ignore-loading .file-ignore-status-icon svg {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.file-ignore-status-text {
+    font-size: 14px;
+    color: var(--text-normal);
+}
+
+/* 设置页面样式 */
+/* 旧的主容器 */
+/*
+.file-ignore-main-container {
+    display: flex;
+    gap: 24px; 
+    margin-top: 16px;
+    height: 460px; 
+}
+.file-ignore-left-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+.file-ignore-right-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+*/
+
+/* 新的规则格式说明容器 */
+.file-ignore-rule-format-container {
+    margin-bottom: 16px;
+    padding: 8px 12px; /* 减少 padding */
+    background-color: var(--background-secondary);
+    border-radius: 8px;
+    font-size: 13px; /* 稍小字体 */
+    color: var(--text-muted);
+}
+
+/* 行内格式文本 */
+.file-ignore-format-inline {
+    display: inline; /* 直接显示文本 */
+}
+
+/* 新的主行容器 (左右布局) */
+.file-ignore-main-row-container {
+    display: flex;
+    gap: 24px; /* 增加间距 */
+    margin-top: 20px;
+    min-height: 400px; /* 稍微增加高度 */
+}
+
+/* 左侧输入面板 */
+.file-ignore-input-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background-color: var(--background-primary);
+    overflow: hidden;
+}
+
+/* 右侧匹配文件面板 */
+.file-ignore-matched-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background-color: var(--background-primary);
+    overflow: hidden;
+}
+
+/* 标题容器通用样式 */
+.file-ignore-panel-title-container,
+.file-ignore-matched-files-title-container {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* 标题文本通用样式 */
+.file-ignore-panel-title,
+.file-ignore-matched-files-title {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-normal);
+    font-weight: 500;
+}
+
+/* 标题栏操作按钮 */
+.file-ignore-title-actions button.mod-cta {
+    font-size: 13px;
+    padding: 0 12px;
+    height: 28px;
+    background-color: var(--interactive-accent);
+    border: none;
+    color: var(--text-on-accent);
+}
+
+/* 规则操作按钮容器 */
+.file-ignore-rule-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+/* 按钮行容器 */
+.file-ignore-button-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+/* 顶部操作按钮容器 */
+.file-ignore-action-container {
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* Scan and Apply Rules 按钮样式 */
+.file-ignore-action-container button.mod-cta {
+    font-size: 14px;
+    padding: 0 20px;
+    height: 34px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+/* 导航按钮容器 */
+.file-ignore-nav-container {
+    display: flex;
+    gap: 4px;
+    padding: 8px;
+    margin: 16px 16px 0;
+}
+
+/* 导航按钮样式 */
+.file-ignore-nav-button {
+    flex: 1;
+    font-size: 13px;
+    padding: 0 12px;
+    height: 28px;
+    background-color: var(--background-secondary);
+    color: var(--text-normal);
+    border: none;
+    border-radius: 4px;
+    transition: background-color 0.1s ease;
+}
+
+.file-ignore-nav-button:hover {
+    background-color: var(--background-secondary-alt);
+}
+
+/* 文本区域容器 */
+.file-ignore-rules-textarea-container {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+}
+
+/* 文本区域 */
+.file-ignore-rules-textarea {
+    width: 100%;
+    flex-grow: 1;
+    border: none;
+    padding: 12px 16px;
+    margin: 0 16px 16px;
+    resize: none;
+    background-color: var(--background-secondary);
+    font-family: var(--font-monospace);
+    font-size: 13px;
+    line-height: 1.6;
+    border-radius: 4px;
+}
+
+/* 匹配文件列表容器 */
+.file-ignore-matched-files-list-container {
+    padding: 16px;
+    overflow-y: auto;
+    flex: 1;
+    background-color: var(--background-primary);
+}
+
+/* 匹配文件摘要信息 */
+.file-ignore-matched-files-summary {
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    background-color: var(--background-secondary);
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.file-ignore-summary-item {
+    margin: 0;
+    line-height: 1.6;
+    color: var(--text-muted);
+}
+
+.file-ignore-truncation-message {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--background-modifier-border);
+    color: var(--text-accent);
+}
+
+/* 文件项样式优化 */
+.file-ignore-file-item {
+    padding: 8px 12px;
+    border-radius: 4px;
+    background-color: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    transition: all 150ms ease-in-out;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    margin-bottom: 4px;
+    position: relative;
+}
+
+.file-ignore-file-item:hover {
+    background-color: var(--background-primary-alt);
+    border-color: var(--background-modifier-border-hover);
+}
+
+/* 文件夹和普通文件的标识简化 */
+.file-ignore-folder-item::before,
+.file-ignore-regular-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    border-radius: 3px 0 0 3px;
+}
+
+.file-ignore-folder-item::before {
+    background-color: var(--interactive-accent);
+    opacity: 0.5;
+}
+
+.file-ignore-regular-item::before {
+    background-color: var(--text-muted);
+    opacity: 0.3;
+}
+
+/* 文件路径文本样式 */
+.file-ignore-item-path {
+    font-size: 13px;
+    color: var(--text-normal);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    padding-left: 4px;
+}
+
+/* 文件夹路径加粗 */
+.file-ignore-folder-item .file-ignore-item-path {
+    font-weight: 500;
+}
+
+/* 无匹配提示 */
+.file-ignore-no-matches {
+    text-align: center;
+    margin: 12px 0;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* 文件夹项样式 */
+.file-ignore-folder-item {
+    border-left: 2px solid var(--interactive-accent);
+}
+
+/* 文件项样式 */
+.file-ignore-regular-item {
+    border-left: 2px solid var(--text-accent);
+}
+
+.file-ignore-folder-link, 
+.file-ignore-file-link {
+    display: block;
+    color: var(--text-normal);
+    text-decoration: none;
+    width: 100%;
+    overflow-wrap: break-word;
+}
+
+.file-ignore-folder-link:hover, 
+.file-ignore-file-link:hover {
+    color: var(--text-accent);
+}
+
+/* 加载提示样式 */
+.file-ignore-loading {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* 错误信息样式 */
+.mod-error {
+    color: var(--text-error);
+} 

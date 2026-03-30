@@ -1,0 +1,11 @@
+{
+  "baseFontSize": 13,
+  "baseFontSizeAction": true,
+  "translucency": true,
+  "showRibbon": true,
+  "enabledCssSnippets": [
+    "right-side-ribbon"
+  ],
+  "cssTheme": "AnuPpuccin",
+  "accentColor": "#99ccff"
+}
