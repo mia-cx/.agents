@@ -23,7 +23,6 @@ Usage:
 
 import argparse
 import sys
-import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -196,10 +195,6 @@ def main():
     if not files:
         parser.error("No source files. Pass as args, --file-list, or pipe to stdin.")
 
-    if not files:
-        print("Error: no source files provided.", file=sys.stderr)
-        sys.exit(1)
-
     input_dir = args.input_dir.resolve()
     if not input_dir.is_dir():
         print(f"Error: {input_dir} is not a directory.", file=sys.stderr)
@@ -223,25 +218,29 @@ def main():
 
     cli = detect_cli()
 
-    n_passes = '3' if args.no_validate else '4'
+    n_passes = 3 if args.no_validate else 4
     print(f"{C.BOLD}{C.BLUE}Cross-file synthesis:{C.RESET} {n_passes}-pass with {C.CYAN}{cli}{C.RESET} --model {C.MAGENTA}{args.model}{C.RESET}", file=sys.stderr)
     print(f"  Pass 1 (blind):    {C.YELLOW}{len(files)}{C.RESET} source files", file=sys.stderr)
     print(f"  Pass 2 (informed): {C.YELLOW}{len(result_files)}{C.RESET} per-file reviews", file=sys.stderr)
     print(file=sys.stderr)
 
     output_base = args.output.parent if args.output else input_dir
-
-    n_passes = 3 if args.no_validate else 4
     display = LiveDisplay(n_passes, phase="Cross-file")
     display.start()
+    try:
+        _run_pipeline(cli, args, display, output_base, file_list_str, blind_prompt, informed_prompt, n_passes)
+    finally:
+        display.stop()
 
+
+def _run_pipeline(cli, args, display, output_base, file_list_str, blind_prompt, informed_prompt, n_passes):
     blind_output = None
     informed_output = None
 
     def run_pass(worker_id, label, system_prompt, prompt):
         display.add_worker(worker_id, f"pass: {label}")
         on_line = lambda line: display.feed_line(worker_id, line)
-        output, success, error = run_llm(cli, args.model, system_prompt, prompt, DEFAULT_TIMEOUT, on_line, TOOLS)
+        output, success, error = run_llm(cli, args.model, system_prompt, prompt, timeout=DEFAULT_TIMEOUT, on_line=on_line, tools=TOOLS)
         if success:
             display.complete_worker(worker_id, f"{C.GREEN}\u2705{C.RESET}", f" ({label})")
             intermediate_path = output_base / f"crossfile-{label}.md"
@@ -266,7 +265,6 @@ def main():
                     informed_output = output
 
     if not blind_output and not informed_output:
-        display.stop()
         print(f"{C.RED}Error: both passes failed.{C.RESET}", file=sys.stderr)
         sys.exit(1)
 
@@ -302,8 +300,6 @@ def main():
                 final_output = validated
         else:
             final_output = compiled_output
-
-    display.stop()
 
     # ---- Output -----------------------------------------------------------
     if final_output is None:

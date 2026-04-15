@@ -21,6 +21,8 @@ from pathlib import Path
 
 from _llm_utils import C, LiveDisplay, detect_cli, get_default_concurrency, run_llm, is_empty_output, resolve_file_list
 
+VALIDATION_CONTEXT_LINES = 3
+
 # ---------------------------------------------------------------------------
 # Review prompts
 # ---------------------------------------------------------------------------
@@ -128,30 +130,29 @@ def run_reviews(files, cli, model, output_dir, concurrency):
 
     display = LiveDisplay(total, phase="Review")
     display.start()
-
     successes = 0
     errors = []
+    try:
+        def do_review(i, filepath):
+            display.add_worker(i, filepath)
+            return review_file(filepath, cli, model, output_dir, display, i)
 
-    def do_review(i, filepath):
-        display.add_worker(i, filepath)
-        return review_file(filepath, cli, model, output_dir, display, i)
-
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = {pool.submit(do_review, i, f): (i, f) for i, f in enumerate(files)}
-        for future in as_completed(futures):
-            i, filepath = futures[future]
-            filepath, output_path, success, error = future.result()
-            if success and error == "clean":
-                successes += 1
-                display.complete_worker(i, f"{C.DIM}\u2014{C.RESET}", f" {C.DIM}(clean){C.RESET}")
-            elif success:
-                successes += 1
-                display.complete_worker(i, f"{C.GREEN}\u2705{C.RESET}")
-            else:
-                errors.append((filepath, error))
-                display.complete_worker(i, f"{C.RED}\u274c{C.RESET}", f" {C.RED}\u2014 {error}{C.RESET}")
-
-    display.stop()
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = {pool.submit(do_review, i, f): (i, f) for i, f in enumerate(files)}
+            for future in as_completed(futures):
+                i, filepath = futures[future]
+                filepath, output_path, success, error = future.result()
+                if success and error == "clean":
+                    successes += 1
+                    display.complete_worker(i, f"{C.DIM}\u2014{C.RESET}", f" {C.DIM}(clean){C.RESET}")
+                elif success:
+                    successes += 1
+                    display.complete_worker(i, f"{C.GREEN}\u2705{C.RESET}")
+                else:
+                    errors.append((filepath, error))
+                    display.complete_worker(i, f"{C.RED}\u274c{C.RESET}", f" {C.RED}\u2014 {error}{C.RESET}")
+    finally:
+        display.stop()
     print(f"\n  {C.GREEN}{successes} reviewed{C.RESET}, {C.RED if errors else C.DIM}{len(errors)} errors{C.RESET}.\n")
     return successes, errors
 
@@ -184,7 +185,7 @@ def extract_line_references(review_text):
     return line_refs
 
 
-def extract_code_context(filepath, line_refs, context_lines=3):
+def extract_code_context(filepath, line_refs, context_lines=VALIDATION_CONTEXT_LINES):
     try:
         source_lines = Path(filepath).read_text(encoding="utf-8").splitlines()
     except Exception:
@@ -213,9 +214,10 @@ def extract_code_context(filepath, line_refs, context_lines=3):
     return "\n\n---\n\n".join(sections) if sections else None
 
 
-def validate_file(review_path, cli, model, output_dir, display=None, worker_id=None):
+def validate_file(review_path, cli, model, output_dir, display=None, worker_id=None, review_text=None):
     """Validate one file's findings."""
-    review_text = review_path.read_text(encoding="utf-8")
+    if review_text is None:
+        review_text = review_path.read_text(encoding="utf-8")
     filepath = extract_filepath_from_review(review_text)
 
     if not filepath:
@@ -263,30 +265,30 @@ def run_validation(review_dir, output_dir, cli, model, concurrency):
 
     display = LiveDisplay(total, phase="Validate")
     display.start()
-
     stats = {"validated": 0, "passthrough": 0, "skipped": 0, "rejected": 0, "failed": 0}
+    try:
+        def do_validate(i, rf):
+            review_text = rf.read_text(encoding="utf-8")
+            fp = extract_filepath_from_review(review_text) or rf.name
+            display.add_worker(i, fp)
+            return validate_file(rf, cli, model, output_dir, display, i, review_text=review_text)
 
-    def do_validate(i, rf):
-        fp = extract_filepath_from_review(rf.read_text(encoding="utf-8")) or rf.name
-        display.add_worker(i, fp)
-        return validate_file(rf, cli, model, output_dir, display, i)
-
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = {pool.submit(do_validate, i, rf): (i, rf) for i, rf in enumerate(review_files)}
-        for future in as_completed(futures):
-            i, rf = futures[future]
-            path, out_path, status = future.result()
-            stats[status] = stats.get(status, 0) + 1
-            icon_map = {
-                "validated": f"{C.GREEN}\u2705{C.RESET}",
-                "passthrough": f"{C.DIM}\u23ed\ufe0f{C.RESET}",
-                "skipped": f"{C.DIM}\u23ed\ufe0f{C.RESET}",
-                "rejected": f"{C.YELLOW}\u274c{C.RESET}",
-                "failed": f"{C.RED}\u274c{C.RESET}",
-            }
-            display.complete_worker(i, icon_map.get(status, "?"), f" {C.DIM}({status}){C.RESET}")
-
-    display.stop()
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = {pool.submit(do_validate, i, rf): (i, rf) for i, rf in enumerate(review_files)}
+            for future in as_completed(futures):
+                i, rf = futures[future]
+                path, out_path, status = future.result()
+                stats[status] = stats.get(status, 0) + 1
+                icon_map = {
+                    "validated": f"{C.GREEN}\u2705{C.RESET}",
+                    "passthrough": f"{C.DIM}\u23ed\ufe0f{C.RESET}",
+                    "skipped": f"{C.DIM}\u23ed\ufe0f{C.RESET}",
+                    "rejected": f"{C.YELLOW}\u274c{C.RESET}",
+                    "failed": f"{C.RED}\u274c{C.RESET}",
+                }
+                display.complete_worker(i, icon_map.get(status, "?"), f" {C.DIM}({status}){C.RESET}")
+    finally:
+        display.stop()
     print(f"\n  {C.GREEN}{stats['validated']} verified{C.RESET}, "
           f"{C.YELLOW}{stats['rejected']} rejected{C.RESET}, "
           f"{C.DIM}{stats['passthrough'] + stats['skipped']} skipped{C.RESET}, "

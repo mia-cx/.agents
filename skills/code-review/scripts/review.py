@@ -19,7 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from _llm_utils import C, is_empty_output, resolve_file_list
+from _llm_utils import C, is_empty_output
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 STEP_TIMEOUT = 1800  # 30 min max per step
