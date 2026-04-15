@@ -29,7 +29,6 @@ from pathlib import Path
 
 from _llm_utils import detect_cli, run_llm, is_empty_output
 
-CONTEXT_PREVIEW_LINES = 30
 MAX_PARALLEL_PASSES = 2
 
 # ---------------------------------------------------------------------------
@@ -158,8 +157,8 @@ Note that the output format does not contain "All findings verified against the 
 If all findings were rejected, output exactly {{omit}} and nothing else.
 """.strip()
 
-VALIDATE_PROMPT_TEMPLATE = r"""## Code context
-{code_context}
+VALIDATE_PROMPT_TEMPLATE = r"""## Source files under review
+{file_list}
 
 ## Findings to verify
 {findings}"""
@@ -169,73 +168,7 @@ VALIDATE_PROMPT_TEMPLATE = r"""## Code context
 # Helpers
 # ---------------------------------------------------------------------------
 
-def extract_file_references(text):
-    """Extract file paths and optional line numbers from cross-file findings."""
-    refs = []
-    seen = set()
-    # Match backtick-wrapped paths: `path/to/file.ext` or `path/to/file.ext:42`
-    # Also match bare paths: path/to/file.ext (with word boundary)
-    patterns = [
-        r'`([^`]+\.\w{1,5})(?::(\d+(?:-\d+)?))?`',
-        r'(?:^|\s)([\w./\\-]+\.(?:py|ts|tsx|js|jsx|go|rs|rb|java|kt|cs|c|cpp|h|hpp|swift|vue|svelte))(?:\s+lines?\s+(\d+[\u2013\u2014-]\d+|\d+))?',
-    ]
-    for pattern in patterns:
-        for match in re.finditer(pattern, text, re.MULTILINE):
-            filepath = match.group(1).strip()
-            line_ref = match.group(2)
-            if line_ref:
-                # Normalize en-dash/em-dash to hyphen
-                line_ref = line_ref.replace('\u2013', '-').replace('\u2014', '-')
-                if '-' in line_ref:
-                    start, end = line_ref.split('-', 1)
-                    key = (filepath, int(start), int(end))
-                else:
-                    key = (filepath, int(line_ref), int(line_ref))
-            else:
-                key = (filepath, None, None)
-            if key not in seen:
-                seen.add(key)
-                refs.append(key)
-    return refs
 
-
-def build_code_context_for_crossfile(file_refs, context_lines=5):
-    """Read actual source code for referenced files/lines."""
-    sections = []
-    seen = set()
-
-    for filepath, start, end in file_refs:
-        try:
-            source_lines = Path(filepath).read_text(encoding="utf-8").splitlines()
-        except Exception:
-            continue
-
-        total = len(source_lines)
-
-        if start and end:
-            ctx_start = max(1, start - context_lines)
-            ctx_end = min(total, end + context_lines)
-            key = (filepath, ctx_start, ctx_end)
-            if key in seen:
-                continue
-            seen.add(key)
-
-            code_block = []
-            for i in range(ctx_start, ctx_end + 1):
-                marker = ">>>" if start <= i <= end else "   "
-                code_block.append(f"{marker} {i:4d} | {source_lines[i - 1]}")
-            sections.append(f"### `{filepath}:{start}-{end}`\n\n```\n" + "\n".join(code_block) + "\n```")
-        else:
-            key = (filepath, "head")
-            if key in seen:
-                continue
-            seen.add(key)
-
-            head = min(CONTEXT_PREVIEW_LINES, total)
-            code_block = [f"   {i:4d} | {source_lines[i - 1]}" for i in range(1, head + 1)]
-            sections.append(f"### `{filepath}` (first {head} lines)\n\n```\n" + "\n".join(code_block) + "\n```")
-
-    return "\n\n".join(sections) if sections else None
 
 
 # ---------------------------------------------------------------------------
@@ -367,29 +300,22 @@ def main():
     else:
         print(f"\n  Pass 4 (validate): checking findings against source...", file=sys.stderr)
 
-        file_refs = extract_file_references(compiled_output)
-        code_context = build_code_context_for_crossfile(file_refs)
-
-        if not code_context:
-            print(f"  \u26a0\ufe0f  No file references to validate, skipping.", file=sys.stderr)
-            final_output = compiled_output
-        else:
-            validate_prompt = VALIDATE_PROMPT_TEMPLATE.format(
-                code_context=code_context, findings=compiled_output,
-            )
-            validated, success, error = run_llm(
-                cli, args.model, VALIDATE_SYSTEM_PROMPT, validate_prompt, DEFAULT_TIMEOUT,
-            )
-            if success:
-                if is_empty_output(validated):
-                    print(f"  \u2705 All cross-file findings rejected during validation.", file=sys.stderr)
-                    final_output = None
-                else:
-                    print(f"  \u2705 Validation complete", file=sys.stderr)
-                    final_output = validated
+        validate_prompt = VALIDATE_PROMPT_TEMPLATE.format(
+            file_list=file_list_str, findings=compiled_output,
+        )
+        validated, success, error = run_llm(
+            cli, args.model, VALIDATE_SYSTEM_PROMPT, validate_prompt, DEFAULT_TIMEOUT,
+        )
+        if success:
+            if is_empty_output(validated):
+                print(f"  \u2705 All cross-file findings rejected during validation.", file=sys.stderr)
+                final_output = None
             else:
-                print(f"  \u274c Validation failed: {error}. Using unvalidated output.", file=sys.stderr)
-                final_output = compiled_output
+                print(f"  \u2705 Validation complete", file=sys.stderr)
+                final_output = validated
+        else:
+            print(f"  \u274c Validation failed: {error}. Using unvalidated output.", file=sys.stderr)
+            final_output = compiled_output
 
     # ---- Output -----------------------------------------------------------
     if final_output is None:
