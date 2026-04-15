@@ -84,6 +84,8 @@ When the user returns and points you at the output directory:
 
 **Deduplicate cross-file vs per-file findings.** If a cross-file finding subsumes individual per-file findings (same underlying issue, broader scope), keep the cross-file finding and drop the per-file entries it covers. The cross-file pattern is more useful because it names all affected files and identifies the systemic cause.
 
+**When a finding suggests abstraction, check for existing ones first.** Before recommending a new helper, utility, or pattern, search the codebase for existing abstractions that already do something similar. Prefer enhancing an existing abstraction over introducing a new one — new abstractions are noise if an existing one is close enough.
+
 Present the deduplicated findings to the user, organized by file.
 
 ### 5. File GitHub issue
