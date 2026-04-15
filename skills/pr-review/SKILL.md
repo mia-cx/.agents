@@ -11,6 +11,8 @@ Review a pull request by delegating to specialist subagents in parallel. This sk
 
 Agents live in `~/.agents/agents/review-and-qa/`. Read the agent file before spawning to confirm its interface.
 
+When spawning reviewer subagents, use the latest available model (e.g. gpt-5.4 over gpt-5.3-codex).
+
 | Agent | File | Purpose |
 |---|---|---|
 | **PR Reviewer** | `review-and-qa/pr-reviewer.md` | Bugs, correctness, API contracts. High-confidence issues only. |

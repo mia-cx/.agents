@@ -135,7 +135,7 @@ Present a summary table:
 | "This cast looks unsafe" | `types.ts:58` | Real design smell | Replaced `as any` with discriminated union | `def5678` |
 | "Shouldn't this be const?" | `config.ts:12` | False positive | Replied with evidence — already frozen via Object.freeze | — |
 
-End with a one-liner: **"N discussions resolved. M fixes pushed. The codebase is cleaner than we found it."**
+End with a one-liner: **"N discussions resolved. M fixes pushed."**
 
 ## Garbage Elimination Principles
 

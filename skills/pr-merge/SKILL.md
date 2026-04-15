@@ -53,29 +53,20 @@ Guidelines:
 - Flavour can take many forms: dry wit, a pun, a one-liner, a relevant song lyric or quote, a mini-poem, a metaphor, a cheeky aside — all fair game.
 - Don't overdo it — flavour should complement the substance, not drown it.
 - Still cover the real substance: what the PR delivers, key decisions, anything to watch out for.
-- End with a `Co-Authored-By` trailer reflecting **your own model name** (e.g. `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>` — use whatever model you actually are).
 
 #### Comment examples
 
 **feat:**
 > *"We're not in Kansas anymore"* — and neither is the dashboard. Ships the analytics overview: real-time charts, filterable date ranges, and an export button that actually works.
->
-> Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 **fix:**
 > The auth token was expiring mid-request like a carton of milk left on the counter. Added a refresh buffer so tokens get renewed 30 seconds before expiry instead of after the 401 hits.
->
-> Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 
 **chore:**
 > *"I fought the deps and the deps won"* — bumped everything that wasn't pinned, fixed the two breaking changes, and updated the lockfile. CI is green and the audit is clean.
->
-> Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 **refactor:**
 > Same behaviour, new skeleton. Extracted the shared validation logic into a single module instead of the previous three-headed hydra approach. Fewer lines, fewer bugs, fewer "wait, which validator does this endpoint use?" conversations.
->
-> Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 
 ### 6. Merge the PR
 
@@ -108,7 +99,6 @@ type(scope): short imperative description (#N)
 - Under ~72 chars, no trailing period
 - **No body** — all narrative goes in the comment (step 5)
 
-> **Note on the trailer:** In the comment, always use your actual model name — if you're Claude Opus 4.5, write `Claude Opus 4.5`; if you're GPT-5.4, write `GPT-5.4`, etc. Don't hardcode a model name that isn't yours.
 
 ## Checklist before finishing
 
@@ -116,5 +106,4 @@ type(scope): short imperative description (#N)
 - [ ] CI checks confirmed passing.
 - [ ] Flavour comment posted via `gh pr comment` — visible in GitHub timeline.
 - [ ] Merge executed via `gh pr merge` with subject only — no body.
-- [ ] `Co-Authored-By` trailer in the comment reflects your actual model name.
 - [ ] Confirmation summary sent to user.

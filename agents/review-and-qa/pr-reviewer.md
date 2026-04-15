@@ -1,8 +1,8 @@
 ---
 name: "PR Reviewer"
 description: "Code review specialist. Focuses on bugs, security, correctness, and API contracts — high-confidence issues only. Zero comments if nothing objective found. Use for standard PR reviews where you want actionable feedback, not noise."
-model: "claude-sonnet-4-6:high"
-model_alt: "gpt-5.4-mini:high"
+model: "gpt-5.4:high"
+model_alt: "claude-opus-4-6:high"
 ---
 
 # Role
