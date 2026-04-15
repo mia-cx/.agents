@@ -172,16 +172,30 @@ VALIDATE_PROMPT_TEMPLATE = r"""## Code context
 def extract_file_references(text):
     """Extract file paths and optional line numbers from cross-file findings."""
     refs = []
-    for match in re.finditer(r'`([^`]+\.\w{1,5})(?::(\d+(?:-\d+)?))?`', text):
-        filepath = match.group(1)
-        line_ref = match.group(2)
-        if line_ref and '-' in line_ref:
-            start, end = line_ref.split('-')
-            refs.append((filepath, int(start), int(end)))
-        elif line_ref:
-            refs.append((filepath, int(line_ref), int(line_ref)))
-        else:
-            refs.append((filepath, None, None))
+    seen = set()
+    # Match backtick-wrapped paths: `path/to/file.ext` or `path/to/file.ext:42`
+    # Also match bare paths: path/to/file.ext (with word boundary)
+    patterns = [
+        r'`([^`]+\.\w{1,5})(?::(\d+(?:-\d+)?))?`',
+        r'(?:^|\s)([\w./\\-]+\.(?:py|ts|tsx|js|jsx|go|rs|rb|java|kt|cs|c|cpp|h|hpp|swift|vue|svelte))(?:\s+lines?\s+(\d+[\u2013\u2014-]\d+|\d+))?',
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.MULTILINE):
+            filepath = match.group(1).strip()
+            line_ref = match.group(2)
+            if line_ref:
+                # Normalize en-dash/em-dash to hyphen
+                line_ref = line_ref.replace('\u2013', '-').replace('\u2014', '-')
+                if '-' in line_ref:
+                    start, end = line_ref.split('-', 1)
+                    key = (filepath, int(start), int(end))
+                else:
+                    key = (filepath, int(line_ref), int(line_ref))
+            else:
+                key = (filepath, None, None)
+            if key not in seen:
+                seen.add(key)
+                refs.append(key)
     return refs
 
 

@@ -266,16 +266,17 @@ def extract_filepath_from_review(review_text):
 
 def extract_line_references(review_text):
     patterns = [
-        r'\|\s*(\d+(?:\s*-\s*\d+)?)\s*\|',
-        r'\*\*Line\(?s?\)?\*\*:\s*(\d+(?:\s*-\s*\d+)?)',
-        r'[Ll]ines?\s+(\d+(?:\s*-\s*\d+)?)',
+        r'\*\*Line\(?s?\)?\*\*:\s*(\d+(?:\s*[\u2013\u2014-]\s*\d+)?)',
+        r'[Ll]ines?\s+(\d+(?:\s*[\u2013\u2014-]\s*\d+)?)',
     ]
     line_refs = []
     for pattern in patterns:
         for match in re.finditer(pattern, review_text):
             ref = match.group(1).strip()
+            # Normalize en-dash/em-dash to hyphen
+            ref = ref.replace('\u2013', '-').replace('\u2014', '-')
             if '-' in ref:
-                start, end = ref.split('-')
+                start, end = ref.split('-', 1)
                 line_refs.append((int(start.strip()), int(end.strip())))
             else:
                 line_refs.append((int(ref), int(ref)))

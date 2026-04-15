@@ -30,6 +30,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Add scripts dir to path for _llm_utils import
+sys.path.insert(0, str(Path(__file__).parent.resolve()))
+from _llm_utils import is_empty_output
+
 SCRIPT_DIR = Path(__file__).parent.resolve()
 
 
@@ -51,7 +55,6 @@ def build_report(output_dir):
 
     # Only files with findings survive (clean files emit {{omit}} and are never written)
     perfile_results = sorted(perfile_dir.glob("*.md"))
-    files_with_findings = len(perfile_results)
 
     lines = [
         "# Code Review Report",
@@ -70,7 +73,7 @@ def build_report(output_dir):
     # Cross-file synthesis
     if synthesis_path.exists():
         synthesis = synthesis_path.read_text(encoding="utf-8").strip()
-        if synthesis and "{{omit}}" not in synthesis:
+        if synthesis and not is_empty_output(synthesis):
             lines.append("## Cross-File Findings")
             lines.append("")
             lines.append(synthesis)

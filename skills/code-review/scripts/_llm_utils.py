@@ -30,7 +30,8 @@ def is_empty_output(output):
     if not output or not output.strip():
         return True
     text = output.strip()
-    if "{{omit}}" in text:
+    # Only match {{omit}} as the entire output, not as a substring in finding text
+    if text == "{{omit}}":
         return True
     has_separator = "---" in text
     has_line_ref = bool(re.search(r'[Ll]ines?\s+\d|\bLine\b.*\d', text))
@@ -124,17 +125,19 @@ def _run_pi_rpc(model, system_prompt, prompt, timeout, on_line, tools):
 
             if evt_type == "message_update":
                 ame = evt.get("assistantMessageEvent", {})
-                if ame.get("type") == "text_delta":
+                ame_type = ame.get("type")
+                if ame_type == "text_delta":
                     delta = ame.get("delta", "")
                     current_turn_text.append(delta)
-                    if on_line:
-                        current_line.append(delta)
-                        combined = "".join(current_line)
-                        if "\n" in combined:
-                            parts = combined.split("\n")
-                            for part in parts[:-1]:
-                                on_line(part)
-                            current_line = [parts[-1]] if parts[-1] else []
+                if ame_type in ("text_delta", "thinking_delta") and on_line:
+                    delta = ame.get("delta", "")
+                    current_line.append(delta)
+                    combined = "".join(current_line)
+                    if "\n" in combined:
+                        parts = combined.split("\n")
+                        for part in parts[:-1]:
+                            on_line(part)
+                        current_line = [parts[-1]] if parts[-1] else []
 
             elif evt_type == "response" and not evt.get("success", True):
                 return (None, False, evt.get("error", "RPC error"))
