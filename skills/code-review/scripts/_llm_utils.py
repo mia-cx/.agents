@@ -47,18 +47,10 @@ def get_default_concurrency():
 
 
 def is_empty_output(output):
-    """Detect if output is {{omit}}, empty, or just preamble with no real findings."""
+    """Detect if output is {{omit}} or empty."""
     if not output or not output.strip():
         return True
-    text = output.strip()
-    # Only match {{omit}} as the entire output, not as a substring in finding text
-    if text == "{{omit}}":
-        return True
-    has_separator = "---" in text
-    has_line_ref = bool(re.search(r'[Ll]ines?\s+\d|\bLine\b.*\d', text))
-    if not has_separator and not has_line_ref:
-        return True
-    return False
+    return output.strip() == "{{omit}}"
 
 
 DEFAULT_TIMEOUT = 600
