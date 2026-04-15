@@ -146,6 +146,7 @@ Output ONLY the surviving findings. No judgment, no reasoning, no "Looking at...
 
 Example valid output:
 
+```markdown
 `src/auth.ts:12`, `src/middleware.ts:34` — JWT secret loaded at module scope, exposed via import chain.
 Suggestion: load from env at call site.
 
@@ -153,6 +154,7 @@ Suggestion: load from env at call site.
 
 `src/api/*.ts` — three handlers swallow errors differently.
 Suggestion: establish single error boundary pattern.
+```
 
 If all findings were rejected, output exactly {{omit}} and nothing else.
 """.strip()

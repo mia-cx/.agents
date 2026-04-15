@@ -75,6 +75,7 @@ Output ONLY the surviving findings. No judgment, no reasoning, no "Looking at...
 
 Example valid output:
 
+```markdown
 Line 42: `db.query(userInput)` — SQL injection risk.
 Suggestion: use parameterized queries.
 
@@ -82,12 +83,15 @@ Suggestion: use parameterized queries.
 
 Line 78–85: `formatDate` wraps `date.toISOString()`, used in one place.
 Suggestion: inline it.
+```
 
 Example INVALID output (do not do this):
 
+```markdown
 Looking at the actual source code:
 Finding 1 — Line 13 shows export const... This is a real finding.
 Finding 2 — The error message appears misleading. This is a real finding.
+```
 
 If all findings were rejected, output exactly {{omit}} and nothing else.
 """.strip()
