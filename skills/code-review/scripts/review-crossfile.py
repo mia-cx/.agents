@@ -231,91 +231,79 @@ def main():
 
     output_base = args.output.parent if args.output else input_dir
 
-    _print_lock = threading.Lock()
-
-    def make_streamer(label):
-        def on_line(line):
-            with _print_lock:
-                truncated = line[:120] + ("..." if len(line) > 120 else "")
-                sys.stderr.write(f"     {C.GRAY}│ [{label}] {truncated}{C.RESET}\n")
-                sys.stderr.flush()
-        return on_line
+    n_passes = 3 if args.no_validate else 4
+    display = LiveDisplay(n_passes, phase="Cross-file")
+    display.start()
 
     blind_output = None
     informed_output = None
 
+    def run_pass(worker_id, label, system_prompt, prompt):
+        display.add_worker(worker_id, f"pass: {label}")
+        on_line = lambda line: display.feed_line(worker_id, line)
+        output, success, error = run_llm(cli, args.model, system_prompt, prompt, DEFAULT_TIMEOUT, on_line, TOOLS)
+        if success:
+            display.complete_worker(worker_id, f"{C.GREEN}\u2705{C.RESET}", f" ({label})")
+            intermediate_path = output_base / f"crossfile-{label}.md"
+            intermediate_path.write_text(output, encoding="utf-8")
+        else:
+            display.complete_worker(worker_id, f"{C.RED}\u274c{C.RESET}", f" ({label}) {error}")
+        return output, success, error
+
+    # Passes 1+2 in parallel
     with ThreadPoolExecutor(max_workers=MAX_PARALLEL_PASSES) as pool:
         futures = {
-            pool.submit(run_llm, cli, args.model, BLIND_SYSTEM_PROMPT, blind_prompt, DEFAULT_TIMEOUT, make_streamer("blind"), TOOLS): "blind",
-            pool.submit(run_llm, cli, args.model, INFORMED_SYSTEM_PROMPT, informed_prompt, DEFAULT_TIMEOUT, make_streamer("informed"), TOOLS): "informed",
+            pool.submit(run_pass, 0, "blind", BLIND_SYSTEM_PROMPT, blind_prompt): "blind",
+            pool.submit(run_pass, 1, "informed", INFORMED_SYSTEM_PROMPT, informed_prompt): "informed",
         }
         for future in as_completed(futures):
             label = futures[future]
             output, success, error = future.result()
             if success:
-                print(f"  {C.GREEN}\u2705 Pass ({label}) complete{C.RESET}", file=sys.stderr)
-                intermediate_path = output_base / f"crossfile-{label}.md"
-                intermediate_path.write_text(output, encoding="utf-8")
-                print(f"     {C.GRAY}\u2192 {intermediate_path}{C.RESET}", file=sys.stderr)
                 if label == "blind":
                     blind_output = output
                 else:
                     informed_output = output
-            else:
-                print(f"  {C.RED}\u274c Pass ({label}) failed: {error}{C.RESET}", file=sys.stderr)
 
     if not blind_output and not informed_output:
-        print("Error: both passes failed.", file=sys.stderr)
+        display.stop()
+        print(f"{C.RED}Error: both passes failed.{C.RESET}", file=sys.stderr)
         sys.exit(1)
 
-    # ---- Pass 3: Compile --------------------------------------------------
+    # Pass 3: Compile
     if not blind_output or not informed_output:
         surviving = blind_output or informed_output
         label = "blind" if blind_output else "informed"
-        print(f"\n  {C.YELLOW}\u26a0\ufe0f  Only {label} pass succeeded, skipping compilation.{C.RESET}", file=sys.stderr)
+        display.complete_worker(2, f"{C.YELLOW}\u26a0\ufe0f{C.RESET}", f" (compile skipped — only {label} succeeded)")
         compiled_output = surviving
     else:
-        print(f"\n  {C.BOLD}Pass 3 (compile):{C.RESET} merging results...", file=sys.stderr)
         compile_prompt = COMPILE_PROMPT_TEMPLATE.format(
             blind_output=blind_output, informed_output=informed_output,
         )
-        compiled_output, success, error = run_llm(
-            cli, args.model, COMPILE_SYSTEM_PROMPT, compile_prompt, DEFAULT_TIMEOUT, make_streamer("compile"), TOOLS,
-        )
+        compiled_output, success, error = run_pass(2, "compile", COMPILE_SYSTEM_PROMPT, compile_prompt)
         if not success:
-            print(f"  {C.RED}\u274c Compile failed: {error}.{C.RESET} Concatenating instead.", file=sys.stderr)
             compiled_output = (
                 f"## Blind Pass\n\n{blind_output}\n\n---\n\n"
                 f"## Informed Pass\n\n{informed_output}"
             )
-        else:
-            print(f"  {C.GREEN}\u2705 Compilation complete{C.RESET}", file=sys.stderr)
-            compiled_path = output_base / "crossfile-compiled.md"
-            compiled_path.write_text(compiled_output, encoding="utf-8")
-            print(f"     {C.GRAY}\u2192 {compiled_path}{C.RESET}", file=sys.stderr)
 
-    # ---- Pass 4: Validate -------------------------------------------------
+    # Pass 4: Validate
     if args.no_validate:
         final_output = compiled_output
     else:
-        print(f"\n  {C.BOLD}Pass 4 (validate):{C.RESET} checking findings against source...", file=sys.stderr)
-
         validate_prompt = VALIDATE_PROMPT_TEMPLATE.format(
             file_list=file_list_str, findings=compiled_output,
         )
-        validated, success, error = run_llm(
-            cli, args.model, VALIDATE_SYSTEM_PROMPT, validate_prompt, DEFAULT_TIMEOUT, make_streamer("validate"), TOOLS,
-        )
+        validated, success, error = run_pass(3, "validate", VALIDATE_SYSTEM_PROMPT, validate_prompt)
         if success:
             if is_empty_output(validated):
-                print(f"  {C.YELLOW}\u2705 All cross-file findings rejected during validation.{C.RESET}", file=sys.stderr)
                 final_output = None
             else:
-                print(f"  {C.GREEN}\u2705 Validation complete{C.RESET}", file=sys.stderr)
                 final_output = validated
         else:
-            print(f"  {C.RED}\u274c Validation failed: {error}.{C.RESET} Using unvalidated output.", file=sys.stderr)
             final_output = compiled_output
+
+    display.stop()
 
     # ---- Output -----------------------------------------------------------
     if final_output is None:

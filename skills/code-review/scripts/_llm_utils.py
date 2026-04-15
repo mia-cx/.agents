@@ -8,6 +8,7 @@ import signal
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -76,6 +77,103 @@ def resolve_file_list(args_files, args_file_list):
     elif not _sys.stdin.isatty():
         files = [l.strip() for l in _sys.stdin if l.strip()]
     return files
+
+
+# ---------------------------------------------------------------------------
+# Live display
+# ---------------------------------------------------------------------------
+
+class LiveDisplay:
+    """Thread-safe live TUI showing last N lines per active worker."""
+    MAX_LINES = 3
+
+    def __init__(self, total, phase="Review"):
+        self.total = total
+        self.phase = phase
+        self.lock = threading.Lock()
+        self.workers = {}
+        self.pending_completed = []
+        self.done_count = 0
+        self._last_height = 0
+        self._running = True
+        self._thread = threading.Thread(target=self._render_loop, daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        self._thread.join(timeout=1)
+        self._clear()
+        with self.lock:
+            for c in self.pending_completed:
+                sys.stderr.write(c + "\n")
+            self.pending_completed.clear()
+            sys.stderr.flush()
+
+    def add_worker(self, worker_id, filepath):
+        with self.lock:
+            self.workers[worker_id] = {
+                "filepath": filepath,
+                "lines": [],
+                "order": len(self.workers),
+            }
+
+    def feed_line(self, worker_id, line):
+        with self.lock:
+            w = self.workers.get(worker_id)
+            if w and line:
+                w["lines"].append(line)
+                w["lines"] = w["lines"][-self.MAX_LINES:]
+
+    def complete_worker(self, worker_id, status, summary=""):
+        with self.lock:
+            self.done_count += 1
+            w = self.workers.pop(worker_id, None)
+            fp = w["filepath"] if w else "?"
+            self.pending_completed.append(
+                f"  [{self.done_count}/{self.total}] {status} {fp}{summary}"
+            )
+
+    def _clear(self):
+        if self._last_height > 0:
+            sys.stderr.write(f"\033[{self._last_height}F")
+            for _ in range(self._last_height):
+                sys.stderr.write("\033[2K\n")
+            sys.stderr.write(f"\033[{self._last_height}F")
+            sys.stderr.flush()
+            self._last_height = 0
+
+    def _render_once(self):
+        with self.lock:
+            completed_lines = list(self.pending_completed)
+            self.pending_completed.clear()
+            active_lines = []
+            for wid, w in sorted(self.workers.items(), key=lambda x: x[1]["order"]):
+                fp = w["filepath"]
+                active_lines.append(f"  {C.CYAN}\u23f3{C.RESET} {C.WHITE}{fp}{C.RESET}")
+                for l in w["lines"][-self.MAX_LINES:]:
+                    truncated = l[:100] + ("..." if len(l) > 100 else "")
+                    active_lines.append(f"     {C.GRAY}\u2502 {truncated}{C.RESET}")
+
+        if completed_lines:
+            self._clear()
+            for line in completed_lines:
+                sys.stderr.write(line + "\n")
+            sys.stderr.flush()
+            self._last_height = 0
+
+        self._clear()
+        if active_lines:
+            sys.stderr.write("\n".join(active_lines) + "\n")
+            sys.stderr.flush()
+            self._last_height = len(active_lines)
+
+    def _render_loop(self):
+        while self._running:
+            self._render_once()
+            time.sleep(0.1)
+        self._render_once()
 
 
 def _safe_kill(proc):
