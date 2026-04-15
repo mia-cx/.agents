@@ -8,20 +8,9 @@ Runs the complete pipeline end-to-end:
   3. Combined final report
 
 Usage:
-    # From repo root, review all source files:
     rg --files -t py -t ts | python review.py --output-dir /tmp/code-review
-
-    # Explicit files:
     python review.py --output-dir /tmp/code-review src/auth.ts src/utils.ts
-
-    # File list:
     python review.py --output-dir /tmp/code-review --file-list files.txt
-
-    # Custom models:
-    python review.py --output-dir /tmp/code-review \\
-        --per-file-model anthropic/claude-haiku-4-5 \\
-        --crossfile-model anthropic/claude-sonnet-4 \\
-        --file-list files.txt
 """
 
 import argparse
@@ -30,30 +19,24 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Add scripts dir to path for _llm_utils import
-sys.path.insert(0, str(Path(__file__).parent.resolve()))
-from _llm_utils import is_empty_output
+from _llm_utils import C, is_empty_output, resolve_file_list
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-
-
-# ANSI colors
-BOLD = "\033[1m"
-DIM = "\033[2m"
-RESET = "\033[0m"
-BLUE = "\033[34m"
-GREEN = "\033[32m"
-RED = "\033[31m"
+STEP_TIMEOUT = 1800  # 30 min max per step
 
 
 def run_script(cmd, label, cwd=None):
     """Run a subprocess, streaming output. Returns success bool."""
-    print(f"\n{DIM}{'='*60}{RESET}")
-    print(f"  {BOLD}{BLUE}{label}{RESET}")
-    print(f"{DIM}{'='*60}{RESET}\n")
+    print(f"\n{C.DIM}{'='*60}{C.RESET}")
+    print(f"  {C.BOLD}{C.BLUE}{label}{C.RESET}")
+    print(f"{C.DIM}{'='*60}{C.RESET}\n")
 
-    result = subprocess.run(cmd, text=True, cwd=cwd)
-    return result.returncode == 0
+    try:
+        result = subprocess.run(cmd, text=True, cwd=cwd, timeout=STEP_TIMEOUT)
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        print(f"{C.RED}Step timed out after {STEP_TIMEOUT}s.{C.RESET}", file=sys.stderr)
+        return False
 
 
 def build_report(output_dir):
@@ -62,7 +45,6 @@ def build_report(output_dir):
     synthesis_path = output_dir / "synthesis.md"
     report_path = output_dir / "CODE_REVIEW.md"
 
-    # Only files with findings survive (clean files emit {{omit}} and are never written)
     perfile_results = sorted(perfile_dir.glob("*.md"))
 
     lines = [
@@ -70,18 +52,26 @@ def build_report(output_dir):
         "",
     ]
 
-    # Per-file findings
     if perfile_results:
         lines.append("## Per-File Findings")
         lines.append("")
         for rf in perfile_results:
-            content = rf.read_text(encoding="utf-8").strip()
+            try:
+                content = rf.read_text(encoding="utf-8").strip()
+            except OSError as e:
+                print(f"{C.RED}Warning: could not read {rf}: {e}{C.RESET}", file=sys.stderr)
+                continue
+            if is_empty_output(content):
+                continue
             lines.append(content)
             lines.append("")
 
-    # Cross-file synthesis
     if synthesis_path.exists():
-        synthesis = synthesis_path.read_text(encoding="utf-8").strip()
+        try:
+            synthesis = synthesis_path.read_text(encoding="utf-8").strip()
+        except OSError as e:
+            print(f"{C.RED}Warning: could not read synthesis: {e}{C.RESET}", file=sys.stderr)
+            synthesis = None
         if synthesis and not is_empty_output(synthesis):
             lines.append("## Cross-File Findings")
             lines.append("")
@@ -89,7 +79,10 @@ def build_report(output_dir):
             lines.append("")
 
     report = "\n".join(lines)
-    report_path.write_text(report, encoding="utf-8")
+    try:
+        report_path.write_text(report, encoding="utf-8")
+    except OSError as e:
+        print(f"{C.RED}Error writing report: {e}{C.RESET}", file=sys.stderr)
     return report_path
 
 
@@ -117,77 +110,74 @@ def main():
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     perfile_dir = output_dir / "per-file"
-
-    # Resolve file list to pass to subscripts
-    files = []
-    file_list_path = None
-
-    if args.files:
-        files = args.files
-    elif args.file_list:
-        file_list_path = args.file_list.resolve()
-    elif not sys.stdin.isatty():
-        # Drain stdin into a temp file so both scripts can read it
-        file_list_path = output_dir / ".filelist"
-        file_list_path.write_text(sys.stdin.read())
-    else:
-        parser.error("No files provided. Pass as args, --file-list, or pipe to stdin.")
-
-    # ---- Step 1: Per-file reviews + validation ----------------------------
-    cmd = [
-        sys.executable, str(SCRIPT_DIR / "review-files.py"),
-        "--output-dir", str(perfile_dir),
-        "--model", args.per_file_model,
-    ]
-    if args.concurrency:
-        cmd.extend(["--concurrency", str(args.concurrency)])
-    if args.no_validate:
-        cmd.append("--no-validate")
-    if file_list_path:
-        cmd.extend(["--file-list", str(file_list_path)])
-    else:
-        cmd.extend(files)
-
-    # Determine the working directory for subprocesses.
-    # If file paths are relative, they're relative to the caller's cwd.
-    source_cwd = os.getcwd()
-
-    ok = run_script(cmd, "Step 1: Per-file reviews + validation", cwd=source_cwd)
-    if not ok:
-        print(f"{RED}Per-file review failed. Check output above.{RESET}", file=sys.stderr)
-        sys.exit(1)
-
-    # ---- Step 2: Cross-file synthesis + validation ------------------------
-    cmd = [
-        sys.executable, str(SCRIPT_DIR / "review-crossfile.py"),
-        "--input-dir", str(perfile_dir),
-        "--model", args.crossfile_model,
-        "--output", str(output_dir / "synthesis.md"),
-    ]
-    if args.no_validate:
-        cmd.append("--no-validate")
-    if file_list_path:
-        cmd.extend(["--file-list", str(file_list_path)])
-    else:
-        cmd.extend(files)
-
-    ok = run_script(cmd, "Step 2: Cross-file synthesis + validation", cwd=source_cwd)
-    if not ok:
-        print(f"{RED}Cross-file synthesis failed.{RESET} Continuing with per-file results only.", file=sys.stderr)
-
-    # ---- Step 3: Build combined report ------------------------------------
-    print(f"\n{DIM}{'='*60}{RESET}")
-    print(f"  {BOLD}{BLUE}Step 3: Building report{RESET}")
-    print(f"{DIM}{'='*60}{RESET}\n")
-
-    report_path = build_report(output_dir)
-
-    # Clean up temp file list
     temp_filelist = output_dir / ".filelist"
-    if temp_filelist.exists():
-        temp_filelist.unlink()
 
-    print(f"{GREEN}{BOLD}Report:{RESET} {report_path}")
+    try:
+        # Resolve file list
+        files = []
+        file_list_path = None
+
+        if args.files:
+            files = args.files
+        elif args.file_list:
+            file_list_path = args.file_list.resolve()
+        elif not sys.stdin.isatty():
+            file_list_path = temp_filelist
+            file_list_path.write_text(sys.stdin.read())
+        else:
+            parser.error("No files provided. Pass as args, --file-list, or pipe to stdin.")
+
+        source_cwd = os.getcwd()
+
+        # Step 1: Per-file reviews + validation
+        cmd = [
+            sys.executable, str(SCRIPT_DIR / "review-files.py"),
+            "--output-dir", str(perfile_dir),
+            "--model", args.per_file_model,
+        ]
+        if args.concurrency:
+            cmd.extend(["--concurrency", str(args.concurrency)])
+        if args.no_validate:
+            cmd.append("--no-validate")
+        if file_list_path:
+            cmd.extend(["--file-list", str(file_list_path)])
+        else:
+            cmd.extend(files)
+
+        ok = run_script(cmd, "Step 1: Per-file reviews + validation", cwd=source_cwd)
+        if not ok:
+            print(f"{C.RED}Per-file review failed. Check output above.{C.RESET}", file=sys.stderr)
+            sys.exit(1)
+
+        # Step 2: Cross-file synthesis + validation
+        cmd = [
+            sys.executable, str(SCRIPT_DIR / "review-crossfile.py"),
+            "--input-dir", str(perfile_dir),
+            "--model", args.crossfile_model,
+            "--output", str(output_dir / "synthesis.md"),
+        ]
+        if args.no_validate:
+            cmd.append("--no-validate")
+        if file_list_path:
+            cmd.extend(["--file-list", str(file_list_path)])
+        else:
+            cmd.extend(files)
+
+        ok = run_script(cmd, "Step 2: Cross-file synthesis + validation", cwd=source_cwd)
+        if not ok:
+            print(f"{C.RED}Cross-file synthesis failed.{C.RESET} Continuing with per-file results only.", file=sys.stderr)
+
+        # Step 3: Build combined report
+        print(f"\n{C.DIM}{'='*60}{C.RESET}")
+        print(f"  {C.BOLD}{C.BLUE}Step 3: Building report{C.RESET}")
+        print(f"{C.DIM}{'='*60}{C.RESET}\n")
+
+        report_path = build_report(output_dir)
+        print(f"{C.GREEN}{C.BOLD}Report:{C.RESET} {report_path}")
+
+    finally:
+        if temp_filelist.exists():
+            temp_filelist.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

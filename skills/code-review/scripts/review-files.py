@@ -21,7 +21,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from _llm_utils import detect_cli, get_default_concurrency, run_llm, is_empty_output
+from _llm_utils import C, detect_cli, get_default_concurrency, run_llm, is_empty_output, resolve_file_list
 
 # ---------------------------------------------------------------------------
 # Review prompts
@@ -94,25 +94,6 @@ VALIDATE_PROMPT_TEMPLATE = r"""## Source file: `{filepath}`
 
 ## Findings to verify
 {findings}"""
-
-
-# ---------------------------------------------------------------------------
-# ANSI colors
-# ---------------------------------------------------------------------------
-
-class C:
-    """ANSI color codes."""
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    GRAY = "\033[90m"       # dark gray for streaming lines
-    WHITE = "\033[97m"
-    GREEN = "\033[32m"
-    RED = "\033[31m"
-    YELLOW = "\033[33m"
-    CYAN = "\033[36m"
-    BLUE = "\033[34m"
-    MAGENTA = "\033[35m"
 
 
 # ---------------------------------------------------------------------------
@@ -435,15 +416,8 @@ def main():
 
     args = parser.parse_args()
 
-    files = []
-    if args.files:
-        files = args.files
-    elif args.file_list:
-        files = [l.strip() for l in args.file_list.read_text().splitlines()
-                 if l.strip() and not l.startswith("#")]
-    elif not sys.stdin.isatty():
-        files = [l.strip() for l in sys.stdin if l.strip()]
-    else:
+    files = resolve_file_list(args.files, args.file_list)
+    if not files:
         parser.error("No files provided. Pass as args, --file-list, or pipe to stdin.")
 
     missing = [f for f in files if not Path(f).is_file()]

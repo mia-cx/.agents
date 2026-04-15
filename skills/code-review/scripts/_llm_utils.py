@@ -9,6 +9,26 @@ import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# ANSI colors
+# ---------------------------------------------------------------------------
+
+class C:
+    """ANSI color codes."""
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    GRAY = "\033[90m"
+    WHITE = "\033[97m"
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    YELLOW = "\033[33m"
+    CYAN = "\033[36m"
+    BLUE = "\033[34m"
+    MAGENTA = "\033[35m"
 
 
 def detect_cli():
@@ -40,6 +60,24 @@ def is_empty_output(output):
     return False
 
 
+DEFAULT_TIMEOUT = 600
+
+
+def resolve_file_list(args_files, args_file_list):
+    """Resolve file list from positional args, --file-list, or stdin.
+    Returns list of filepath strings."""
+    import sys as _sys
+    files = []
+    if args_files:
+        files = args_files
+    elif args_file_list:
+        files = [l.strip() for l in Path(args_file_list).read_text().splitlines()
+                 if l.strip() and not l.startswith("#")]
+    elif not _sys.stdin.isatty():
+        files = [l.strip() for l in _sys.stdin if l.strip()]
+    return files
+
+
 def _safe_kill(proc):
     """Kill process group, ignoring errors if already dead."""
     try:
@@ -49,7 +87,7 @@ def _safe_kill(proc):
     proc.wait()
 
 
-def run_llm(cli, model, system_prompt, prompt, timeout=300, on_line=None, tools=None):
+def run_llm(cli, model, system_prompt, prompt, timeout=DEFAULT_TIMEOUT, on_line=None, tools=None):
     """Run a single LLM call, optionally streaming text lines via on_line callback."""
     if cli == "pi":
         return _run_pi_rpc(model, system_prompt, prompt, timeout, on_line, tools)
