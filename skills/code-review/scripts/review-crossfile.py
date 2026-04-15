@@ -28,8 +28,8 @@ from pathlib import Path
 
 from _llm_utils import C, DEFAULT_TIMEOUT, LiveDisplay, detect_cli, run_llm, is_empty_output, resolve_file_list
 
-MAX_PARALLEL_PASSES = 2
-TOOLS = "read,write,edit"
+MAX_PARALLEL_PASSES = 2  # fixed: blind+informed run in parallel, compile+validate are sequential
+TOOLS = "read"  # review passes only need to read source files
 
 # ---------------------------------------------------------------------------
 # Pass 1 — Blind
@@ -37,7 +37,7 @@ TOOLS = "read,write,edit"
 
 BLIND_SYSTEM_PROMPT = r"""
 Analyze a codebase for systemic issues that span multiple files.
-You have tools: read, write, edit.
+You have tools: read.
 
 What to look for:
 1. Circular or tangled dependencies — mutual imports, long import chains signaling layering violations.
@@ -74,7 +74,7 @@ BLIND_PROMPT_TEMPLATE = r"""## Source files
 INFORMED_SYSTEM_PROMPT = r"""
 Read per-file code review findings and identify systemic issues that emerge from the aggregate — patterns that no single-file reviewer could catch on its own.
 Look for patterns that repeat, contradict, or connect across files.
-You have tools: read, write, edit.
+You have tools: read.
 
 What to look for:
 1. Recurring issues — the same finding type appearing in many files suggests a systemic cause (missing linter rule, cargo-culted pattern).
@@ -108,7 +108,7 @@ INFORMED_PROMPT_TEMPLATE = r"""## Per-file findings
 COMPILE_SYSTEM_PROMPT = r"""
 Compile cross-file findings from two independent analysis passes into a single report.
 Deduplicate (merge when both found the same issue, keep the stronger description and more specific file/line references). Drop contradictions. Include unique findings from either pass.
-You have tools: read, write, edit.
+You have tools: read.
 
 Output format — no headings, no preamble, no verdict. Separate findings with ---. Example of a valid response:
 
@@ -138,7 +138,7 @@ COMPILE_PROMPT_TEMPLATE = r"""## Pass A findings (blind — read source directly
 
 VALIDATE_SYSTEM_PROMPT = r"""
 Check whether cross-file findings are real by reading the actual source files referenced. Be very skeptical, of both the realness of the findings, and the suggestions to address them — reject anything you can't confirm from the code.
-You have tools: read, write, edit.
+You have tools: read.
 
 Output format — no headings, no preamble, no verdict, only output the findings. Separate findings with ---. Emit real finding verbatim, corrected finding if needed, omit finding if not real. Do your reasoning internally. Example of a valid response:
 
@@ -170,11 +170,9 @@ VALIDATE_PROMPT_TEMPLATE = r"""## Source files under review
 # Main
 # ---------------------------------------------------------------------------
 
-DEFAULT_TIMEOUT = 600
-
 def main():
     parser = argparse.ArgumentParser(
-        description="Three-pass cross-file synthesis with validation.",
+        description="Multi-pass cross-file synthesis with validation.",
         epilog="Source files can be passed as positional args, via --file-list, or piped to stdin.",
     )
     parser.add_argument("files", nargs="*", help="Source files (for blind pass).")
@@ -234,6 +232,8 @@ def main():
 
 
 def _run_pipeline(cli, args, display, output_base, file_list_str, blind_prompt, informed_prompt, n_passes):
+    blind_success = False
+    informed_success = False
     blind_output = None
     informed_output = None
 
@@ -261,15 +261,17 @@ def _run_pipeline(cli, args, display, output_base, file_list_str, blind_prompt, 
             if success:
                 if label == "blind":
                     blind_output = output
+                    blind_success = True
                 else:
                     informed_output = output
+                    informed_success = True
 
-    if not blind_output and not informed_output:
+    if not blind_success and not informed_success:
         print(f"{C.RED}Error: both passes failed.{C.RESET}", file=sys.stderr)
         sys.exit(1)
 
     # Pass 3: Compile
-    if not blind_output or not informed_output:
+    if not blind_success or not informed_success:
         surviving = blind_output or informed_output
         label = "blind" if blind_output else "informed"
         display.complete_worker(2, f"{C.YELLOW}\u26a0\ufe0f{C.RESET}", f" (compile skipped — only {label} succeeded)")

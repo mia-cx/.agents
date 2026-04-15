@@ -59,15 +59,14 @@ DEFAULT_TIMEOUT = 600
 def resolve_file_list(args_files, args_file_list):
     """Resolve file list from positional args, --file-list, or stdin.
     Returns list of filepath strings."""
-    import sys as _sys
     files = []
     if args_files:
         files = args_files
     elif args_file_list:
-        files = [l.strip() for l in Path(args_file_list).read_text().splitlines()
+        files = [l.strip() for l in Path(args_file_list).read_text(encoding="utf-8").splitlines()
                  if l.strip() and not l.startswith("#")]
-    elif not _sys.stdin.isatty():
-        files = [l.strip() for l in _sys.stdin if l.strip()]
+    elif not sys.stdin.isatty():
+        files = [l.strip() for l in sys.stdin if l.strip()]
     return files
 
 

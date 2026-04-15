@@ -106,7 +106,7 @@ def review_file(filepath, cli, model, output_dir, display=None, worker_id=None):
     output_path = output_dir / f"{safe_name}.md"
 
     try:
-        file_content = Path(filepath).read_text()
+        file_content = Path(filepath).read_text(encoding="utf-8")
     except Exception as e:
         return (filepath, None, False, f"Cannot read file: {e}")
 
@@ -140,7 +140,7 @@ def run_reviews(files, cli, model, output_dir, concurrency):
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             futures = {pool.submit(do_review, i, f): (i, f) for i, f in enumerate(files)}
             for future in as_completed(futures):
-                i, filepath = futures[future]
+                i, _ = futures[future]
                 filepath, output_path, success, error = future.result()
                 if success and error == "clean":
                     successes += 1
@@ -168,7 +168,6 @@ def extract_filepath_from_review(review_text):
 
 def extract_line_references(review_text):
     patterns = [
-        r'\*\*Line\(?s?\)?\*\*:\s*(\d+(?:\s*[\u2013\u2014-]\s*\d+)?)',
         r'[Ll]ines?\s+(\d+(?:\s*[\u2013\u2014-]\s*\d+)?)',
     ]
     line_refs = []
@@ -197,6 +196,7 @@ def extract_code_context(filepath, line_refs, context_lines=VALIDATION_CONTEXT_L
 
     for start, end in line_refs:
         if start < 1 or end > total_lines:
+            sections.append(f"⚠️ Lines {start}-{end} referenced but file only has {total_lines} lines")
             continue
         ctx_start = max(1, start - context_lines)
         ctx_end = min(total_lines, end + context_lines)
@@ -349,7 +349,7 @@ def main():
 
     total = len(files)
     print(f"Complete: {total} files processed. Results in {output_dir}/")
-    sys.exit(1 if successes == 0 else 0)
+    sys.exit(1 if errors else 0)
 
 
 if __name__ == "__main__":

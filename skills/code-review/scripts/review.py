@@ -123,7 +123,7 @@ def main():
             file_list_path = args.file_list.resolve()
         elif not sys.stdin.isatty():
             file_list_path = temp_filelist
-            file_list_path.write_text(sys.stdin.read())
+            file_list_path.write_text(sys.stdin.read(), encoding="utf-8")
         else:
             parser.error("No files provided. Pass as args, --file-list, or pipe to stdin.")
 
