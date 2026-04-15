@@ -334,7 +334,7 @@ def main():
         sys.exit(1)
 
     cli = detect_cli()
-    concurrency = args.concurrency or get_default_concurrency()
+    concurrency = args.concurrency if args.concurrency is not None else get_default_concurrency()
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 

@@ -26,7 +26,7 @@ STEP_TIMEOUT = 1800  # 30 min max per step
 
 
 def run_script(cmd, label, cwd=None):
-    """Run a subprocess, streaming output. Returns success bool."""
+    """Run a subprocess (inherits parent stdio). Returns success bool."""
     print(f"\n{C.DIM}{'='*60}{C.RESET}")
     print(f"  {C.BOLD}{C.BLUE}{label}{C.RESET}")
     print(f"{C.DIM}{'='*60}{C.RESET}\n")
@@ -135,7 +135,7 @@ def main():
             "--output-dir", str(perfile_dir),
             "--model", args.per_file_model,
         ]
-        if args.concurrency:
+        if args.concurrency is not None:
             cmd.extend(["--concurrency", str(args.concurrency)])
         if args.no_validate:
             cmd.append("--no-validate")

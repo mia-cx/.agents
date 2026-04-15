@@ -66,7 +66,7 @@ def resolve_file_list(args_files, args_file_list):
         files = [l.strip() for l in Path(args_file_list).read_text(encoding="utf-8").splitlines()
                  if l.strip() and not l.startswith("#")]
     elif not sys.stdin.isatty():
-        files = [l.strip() for l in sys.stdin if l.strip()]
+        files = [l.strip() for l in sys.stdin if l.strip() and not l.startswith("#")]
     return files
 
 

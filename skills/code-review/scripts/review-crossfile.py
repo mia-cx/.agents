@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-review-crossfile.py — Three-pass cross-file synthesis with validation.
+review-crossfile.py — Multi-pass cross-file synthesis with validation.
 
 Pass 1 (blind):    Analyzes source files for cross-file issues with NO prior findings.
 Pass 2 (informed): Analyzes per-file findings for emergent cross-file patterns.
@@ -210,6 +210,9 @@ def main():
             sections.append(content)
     aggregated_findings = "\n\n---\n\n".join(sections)
 
+    if not sections:
+        print(f"{C.YELLOW}Warning: all per-file reviews are empty.{C.RESET}", file=sys.stderr)
+
     file_list_str = "\n".join(f"- `{f}`" for f in files)
     blind_prompt = BLIND_PROMPT_TEMPLATE.format(file_list=file_list_str)
     informed_prompt = INFORMED_PROMPT_TEMPLATE.format(findings=aggregated_findings)
@@ -273,22 +276,24 @@ def _run_pipeline(cli, args, display, output_base, file_list_str, blind_prompt, 
     # Pass 3: Compile
     if not blind_success or not informed_success:
         surviving = blind_output or informed_output
-        label = "blind" if blind_output else "informed"
+        label = "blind" if blind_success else "informed"
+        display.add_worker(2, "pass: compile")
         display.complete_worker(2, f"{C.YELLOW}\u26a0\ufe0f{C.RESET}", f" (compile skipped — only {label} succeeded)")
-        compiled_output = surviving
+        compiled_output = surviving if not is_empty_output(surviving) else None
     else:
         compile_prompt = COMPILE_PROMPT_TEMPLATE.format(
             blind_output=blind_output, informed_output=informed_output,
         )
         compiled_output, success, error = run_pass(2, "compile", COMPILE_SYSTEM_PROMPT, compile_prompt)
         if not success:
-            compiled_output = (
-                f"## Blind Pass\n\n{blind_output}\n\n---\n\n"
-                f"## Informed Pass\n\n{informed_output}"
-            )
+            compiled_output = f"{blind_output}\n\n---\n\n{informed_output}"
+        elif is_empty_output(compiled_output):
+            compiled_output = None
 
     # Pass 4: Validate
-    if args.no_validate:
+    if compiled_output is None:
+        final_output = None
+    elif args.no_validate:
         final_output = compiled_output
     else:
         validate_prompt = VALIDATE_PROMPT_TEMPLATE.format(
