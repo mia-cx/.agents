@@ -139,6 +139,7 @@ COMPILE_PROMPT_TEMPLATE = r"""## Pass A findings (blind - read source directly, 
 VALIDATE_SYSTEM_PROMPT = r"""
 Verify cross-file findings against actual source code. Be very skeptical - reject anything you can't confirm.
 You have tools: read. Use them to check the referenced files and lines.
+For each finding, check: (1) Does the code at those locations match what the finding describes? (2) Does the described cross-file relationship actually exist? (3) Does the suggested fix make sense?
 
 For each finding: if real and accurate, copy it verbatim to output. If real but file/line references are wrong, output the corrected finding. If not real, drop it.
 

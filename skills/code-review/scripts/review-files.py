@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-review-files.py - Per-file code reviewer with built-in validation and live TUI.
+review-files.py — Per-file code reviewer with built-in validation and live TUI.
 
 Phase 1: Spawns one pi/claude process per file using a bounded worker pool.
 Phase 2: Validates findings against actual source code (catches hallucinated
@@ -32,25 +32,25 @@ Review the provided source file for code quality issues.
 Report only real issues. For each finding, include only: Line(s), Issue (one sentence), Suggestion (concrete fix).
 
 What to look for:
-1. Bad patterns - boolean traps, stringly-typed APIs, argument mutation, callback hell when async/await is available, reimplementing stdlib, leaky abstractions, resource leaks (unclosed handles, missing cleanup in error paths).
-2. Over-eager decomposition - unexported functions/classes used in only 1-2 places that add indirection without earning their abstraction. Fix is usually inlining.
-3. Deep nesting - 3+ levels of nested if/for/try. Prefer early returns, guard clauses, extracting coherent helper functions.
-4. Security issues - injection vectors, hardcoded secrets, missing input validation at trust boundaries, insecure crypto, unsafe deserialization, overly permissive CORS/permissions.
-5. Dead code - unused exports, unreachable branches, commented-out blocks, uncalled functions. Mark suspicious exports as "verify cross-file".
-6. Inconsistent error handling - swallowed errors, mixed paradigms in the same module, error messages that lose context, missing error handling on fallible operations.
-7. Magic values - unexplained numeric/string literals that should be named constants. Ignore obvious 0, 1, -1, "", true, false.
-8. Type safety holes - any casts, as unknown as X, @ts-ignore/@ts-expect-error without explanation, unsafe coercions.
-9. Copy-paste divergence - near-identical code blocks that have subtly diverged.
-10. Incorrect or missing documentation - public/exported symbols missing docstrings, or docstrings that contradict the implementation. Skip private/internal helpers.
+1. Bad patterns — boolean traps, stringly-typed APIs, argument mutation, callback hell when async/await is available, reimplementing stdlib, leaky abstractions, resource leaks (unclosed handles, missing cleanup in error paths).
+2. Over-eager decomposition — unexported functions/classes used in only 1–2 places that add indirection without earning their abstraction. Fix is usually inlining.
+3. Deep nesting — 3+ levels of nested if/for/try. Prefer early returns, guard clauses, extracting coherent helper functions.
+4. Security issues — injection vectors, hardcoded secrets, missing input validation at trust boundaries, insecure crypto, unsafe deserialization, overly permissive CORS/permissions.
+5. Dead code — unused exports, unreachable branches, commented-out blocks, uncalled functions. Mark suspicious exports as "verify cross-file".
+6. Inconsistent error handling — swallowed errors, mixed paradigms in the same module, error messages that lose context, missing error handling on fallible operations.
+7. Magic values — unexplained numeric/string literals that should be named constants. Ignore obvious 0, 1, -1, "", true, false.
+8. Type safety holes — any casts, as unknown as X, @ts-ignore/@ts-expect-error without explanation, unsafe coercions.
+9. Copy-paste divergence — near-identical code blocks that have subtly diverged.
+10. Incorrect or missing documentation — public/exported symbols missing docstrings, or docstrings that contradict the implementation. Skip private/internal helpers.
 
-Output format - no headings, no preamble, no verdict. Separate findings with ---. Example of a valid response:
+Output format — no headings, no preamble, no verdict. Separate findings with ---. Example of a valid response:
 
-Line 42: `db.query(userInput)` - unsanitized input passed directly to query, SQL injection risk.
+Line 42: `db.query(userInput)` — unsanitized input passed directly to query, SQL injection risk.
 Suggestion: use parameterized queries.
 
 ---
 
-Line 78-85: `formatDate` is a one-line wrapper around `date.toISOString()` used in only one place.
+Line 78–85: `formatDate` is a one-line wrapper around `date.toISOString()` used in only one place.
 Suggestion: inline it.
 
 If the file is clean with no issues, output exactly {{omit}} and nothing else.
@@ -69,6 +69,8 @@ REVIEW_PROMPT_TEMPLATE = r"""`{filepath}`:
 VALIDATE_SYSTEM_PROMPT = r"""
 Verify code review findings against actual source code. Be very skeptical - reject anything you can't confirm from the code provided.
 For each finding, check: (1) Does the code at that line match what the finding describes? (2) Does the code actually exhibit the described problem? (3) Does the suggested fix make sense?
+
+For each finding: if real and accurate, copy it verbatim to output. If real but line number is wrong, output the corrected finding with the right line number. If not real, drop it.
 
 Output format - no headings, no preamble, no verdict, only output the findings. Separate findings with ---. Emit real finding verbatim, corrected finding if needed, omit finding if not real. Do your reasoning internally.
 
