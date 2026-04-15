@@ -37,11 +37,20 @@ from _llm_utils import is_empty_output
 SCRIPT_DIR = Path(__file__).parent.resolve()
 
 
+# ANSI colors
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+BLUE = "\033[34m"
+GREEN = "\033[32m"
+RED = "\033[31m"
+
+
 def run_script(cmd, label, cwd=None):
     """Run a subprocess, streaming output. Returns success bool."""
-    print(f"\n{'='*60}")
-    print(f"  {label}")
-    print(f"{'='*60}\n")
+    print(f"\n{DIM}{'='*60}{RESET}")
+    print(f"  {BOLD}{BLUE}{label}{RESET}")
+    print(f"{DIM}{'='*60}{RESET}\n")
 
     result = subprocess.run(cmd, text=True, cwd=cwd)
     return result.returncode == 0
@@ -145,7 +154,7 @@ def main():
 
     ok = run_script(cmd, "Step 1: Per-file reviews + validation", cwd=source_cwd)
     if not ok:
-        print("Per-file review failed. Check output above.", file=sys.stderr)
+        print(f"{RED}Per-file review failed. Check output above.{RESET}", file=sys.stderr)
         sys.exit(1)
 
     # ---- Step 2: Cross-file synthesis + validation ------------------------
@@ -164,12 +173,12 @@ def main():
 
     ok = run_script(cmd, "Step 2: Cross-file synthesis + validation", cwd=source_cwd)
     if not ok:
-        print("Cross-file synthesis failed. Continuing with per-file results only.", file=sys.stderr)
+        print(f"{RED}Cross-file synthesis failed.{RESET} Continuing with per-file results only.", file=sys.stderr)
 
     # ---- Step 3: Build combined report ------------------------------------
-    print(f"\n{'='*60}")
-    print(f"  Step 3: Building report")
-    print(f"{'='*60}\n")
+    print(f"\n{DIM}{'='*60}{RESET}")
+    print(f"  {BOLD}{BLUE}Step 3: Building report{RESET}")
+    print(f"{DIM}{'='*60}{RESET}\n")
 
     report_path = build_report(output_dir)
 
@@ -178,7 +187,7 @@ def main():
     if temp_filelist.exists():
         temp_filelist.unlink()
 
-    print(f"Report: {report_path}")
+    print(f"{GREEN}{BOLD}Report:{RESET} {report_path}")
 
 
 if __name__ == "__main__":

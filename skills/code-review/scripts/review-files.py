@@ -97,6 +97,25 @@ VALIDATE_PROMPT_TEMPLATE = r"""## Source file: `{filepath}`
 
 
 # ---------------------------------------------------------------------------
+# ANSI colors
+# ---------------------------------------------------------------------------
+
+class C:
+    """ANSI color codes."""
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    GRAY = "\033[90m"       # dark gray for streaming lines
+    WHITE = "\033[97m"
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    YELLOW = "\033[33m"
+    CYAN = "\033[36m"
+    BLUE = "\033[34m"
+    MAGENTA = "\033[35m"
+
+
+# ---------------------------------------------------------------------------
 # Live display
 # ---------------------------------------------------------------------------
 
@@ -168,10 +187,10 @@ class LiveDisplay:
             active_lines = []
             for wid, w in sorted(self.workers.items(), key=lambda x: x[1]["order"]):
                 fp = w["filepath"]
-                active_lines.append(f"  \u23f3 {fp}")
+                active_lines.append(f"  {C.CYAN}\u23f3{C.RESET} {C.WHITE}{fp}{C.RESET}")
                 for l in w["lines"][-self.MAX_LINES:]:
                     truncated = l[:100] + ("..." if len(l) > 100 else "")
-                    active_lines.append(f"     \u2502 {truncated}")
+                    active_lines.append(f"     {C.GRAY}\u2502 {truncated}{C.RESET}")
 
         if completed_lines:
             self._clear()
@@ -222,8 +241,8 @@ def review_file(filepath, cli, model, output_dir, display=None, worker_id=None):
 def run_reviews(files, cli, model, output_dir, concurrency):
     """Run all per-file reviews with live display."""
     total = len(files)
-    print(f"Phase 1: Reviewing {total} file(s) with {cli} --model {model}")
-    print(f"  Concurrency: {concurrency} workers\n")
+    print(f"{C.BOLD}{C.BLUE}Phase 1: Reviewing {total} file(s){C.RESET} with {C.CYAN}{cli}{C.RESET} --model {C.MAGENTA}{model}{C.RESET}")
+    print(f"  Concurrency: {C.YELLOW}{concurrency}{C.RESET} workers\n")
 
     display = LiveDisplay(total, phase="Review")
     display.start()
@@ -242,16 +261,16 @@ def run_reviews(files, cli, model, output_dir, concurrency):
             filepath, output_path, success, error = future.result()
             if success and error == "clean":
                 successes += 1
-                display.complete_worker(i, "\u2014", " (clean)")
+                display.complete_worker(i, f"{C.DIM}\u2014{C.RESET}", f" {C.DIM}(clean){C.RESET}")
             elif success:
                 successes += 1
-                display.complete_worker(i, "\u2705")
+                display.complete_worker(i, f"{C.GREEN}\u2705{C.RESET}")
             else:
                 errors.append((filepath, error))
-                display.complete_worker(i, "\u274c", f" \u2014 {error}")
+                display.complete_worker(i, f"{C.RED}\u274c{C.RESET}", f" {C.RED}\u2014 {error}{C.RESET}")
 
     display.stop()
-    print(f"\n  Review: {successes} reviewed, {len(errors)} errors.\n")
+    print(f"\n  {C.GREEN}{successes} reviewed{C.RESET}, {C.RED if errors else C.DIM}{len(errors)} errors{C.RESET}.\n")
     return successes, errors
 
 
@@ -357,8 +376,8 @@ def run_validation(review_dir, output_dir, cli, model, concurrency):
         return {}
 
     total = len(review_files)
-    print(f"Phase 2: Validating {total} review(s)")
-    print(f"  Concurrency: {concurrency} workers\n")
+    print(f"{C.BOLD}{C.BLUE}Phase 2: Validating {total} review(s){C.RESET}")
+    print(f"  Concurrency: {C.YELLOW}{concurrency}{C.RESET} workers\n")
 
     display = LiveDisplay(total, phase="Validate")
     display.start()
@@ -376,12 +395,20 @@ def run_validation(review_dir, output_dir, cli, model, concurrency):
             i, rf = futures[future]
             path, out_path, status = future.result()
             stats[status] = stats.get(status, 0) + 1
-            icons = {"validated": "\u2705", "passthrough": "\u23ed\ufe0f", "skipped": "\u23ed\ufe0f", "rejected": "\u274c", "failed": "\u274c"}
-            display.complete_worker(i, icons.get(status, "?"), f" ({status})")
+            icon_map = {
+                "validated": f"{C.GREEN}\u2705{C.RESET}",
+                "passthrough": f"{C.DIM}\u23ed\ufe0f{C.RESET}",
+                "skipped": f"{C.DIM}\u23ed\ufe0f{C.RESET}",
+                "rejected": f"{C.YELLOW}\u274c{C.RESET}",
+                "failed": f"{C.RED}\u274c{C.RESET}",
+            }
+            display.complete_worker(i, icon_map.get(status, "?"), f" {C.DIM}({status}){C.RESET}")
 
     display.stop()
-    print(f"\n  Validation: {stats['validated']} verified, {stats['rejected']} fully rejected, "
-          f"{stats['passthrough'] + stats['skipped']} skipped, {stats['failed']} failed.\n")
+    print(f"\n  {C.GREEN}{stats['validated']} verified{C.RESET}, "
+          f"{C.YELLOW}{stats['rejected']} rejected{C.RESET}, "
+          f"{C.DIM}{stats['passthrough'] + stats['skipped']} skipped{C.RESET}, "
+          f"{C.RED if stats['failed'] else C.DIM}{stats['failed']} failed{C.RESET}.\n")
     return stats
 
 
