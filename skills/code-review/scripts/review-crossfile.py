@@ -137,22 +137,22 @@ COMPILE_PROMPT_TEMPLATE = r"""## Pass A findings (blind — read source directly
 # ---------------------------------------------------------------------------
 
 VALIDATE_SYSTEM_PROMPT = r"""
-Check whether cross-file findings are real by reading the actual source files referenced. Be very skeptical, of both the realness of the findings, and the suggestions to address them — reject anything you can't confirm from the code.
-You have tools: read.
+Verify cross-file findings against actual source code. Be very skeptical — reject anything you can't confirm.
+You have tools: read. Use them to check the referenced files and lines.
 
-Output format — no headings, no preamble, no verdict, only output the findings. Separate findings with ---. Emit real finding verbatim, corrected finding if needed, omit finding if not real. Do your reasoning internally. Example of a valid response:
+For each finding: if real and accurate, copy it verbatim to output. If real but file/line references are wrong, output the corrected finding. If not real, drop it.
 
-```markdown
-Line 42: `db.query(userInput)` — unsanitized input passed directly to query, SQL injection risk.
-Suggestion: use parameterized queries.
+Output ONLY the surviving findings. No judgment, no reasoning, no "Looking at...", no "Finding 1 —", no explanations of why you kept or dropped anything. Just the findings themselves, separated by ---.
+
+Example valid output:
+
+`src/auth.ts:12`, `src/middleware.ts:34` — JWT secret loaded at module scope, exposed via import chain.
+Suggestion: load from env at call site.
 
 ---
 
-Line 78–85: `formatDate` is a one-line wrapper around `date.toISOString()` used in only one place.
-Suggestion: inline it.
-```
-
-Note that the output format does not contain "All findings verified against the source code" or explanations of why findings needed corrections. Only the (corrected) findings themselves.
+`src/api/*.ts` — three handlers swallow errors differently.
+Suggestion: establish single error boundary pattern.
 
 If all findings were rejected, output exactly {{omit}} and nothing else.
 """.strip()

@@ -67,22 +67,27 @@ REVIEW_PROMPT_TEMPLATE = r"""`{filepath}`:
 # ---------------------------------------------------------------------------
 
 VALIDATE_SYSTEM_PROMPT = r"""
-Verify code review findings against actual source code. Be very skeptical, of both the realness of the findings, and the suggestions to address them — reject anything you can't confirm.
-For each finding, check: (1) Does the code at that line match what the finding describes? (2) Does the code actually exhibit the described problem? (3) Does the suggested fix make sense?
+Verify code review findings against actual source code. Be very skeptical — reject anything you can't confirm from the code provided.
 
-Output format — no headings, no preamble, no verdict, only output the findings. Separate findings with ---. Emit real finding verbatim, corrected finding if needed, omit finding if not real. Do your reasoning internally. Example of a valid response:
+For each finding: if real and accurate, copy it verbatim to output. If real but line number is wrong, output the corrected finding with the right line number. If not real, drop it.
 
-```markdown
-Line 42: `db.query(userInput)` — unsanitized input passed directly to query, SQL injection risk.
+Output ONLY the surviving findings. No judgment, no reasoning, no "Looking at...", no "Finding 1 —", no explanations of why you kept or dropped anything. Just the findings themselves, separated by ---.
+
+Example valid output:
+
+Line 42: `db.query(userInput)` — SQL injection risk.
 Suggestion: use parameterized queries.
 
 ---
 
-Line 78–85: `formatDate` is a one-line wrapper around `date.toISOString()` used in only one place.
+Line 78–85: `formatDate` wraps `date.toISOString()`, used in one place.
 Suggestion: inline it.
-```
 
-Note that the output format does not contain "All findings verified against the source code" or explanations of why findings needed corrections. Only the (corrected) findings themselves.
+Example INVALID output (do not do this):
+
+Looking at the actual source code:
+Finding 1 — Line 13 shows export const... This is a real finding.
+Finding 2 — The error message appears misleading. This is a real finding.
 
 If all findings were rejected, output exactly {{omit}} and nothing else.
 """.strip()
