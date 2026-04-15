@@ -5,21 +5,21 @@ description: Review all source files in a codebase for bad patterns, over-eager 
 
 # Code Review
 
-Full-codebase code review via bundled scripts. The scripts run outside the agent — the agent discovers files, presents the command, and processes the results when the user returns.
+Full-codebase code review via bundled scripts. The scripts run outside the agent - the agent discovers files, presents the command, and processes the results when the user returns.
 
 ## Pipeline overview
 
 The orchestrator (`scripts/review.py`) runs the full pipeline:
 
-1. **Per-file reviews** — one reviewer per file, bounded worker pool (CPU/2), cheap model. 10-item checklist embedded in `scripts/review-files.py`. Live TUI shows streaming output per active worker.
-2. **Per-file validation** — each finding verified against actual source code at the referenced lines. Hallucinated line numbers, phantom issues, and over-eager corrections are rejected.
-3. **Cross-file synthesis (3-pass)** — Pass 1 (blind) reads source files with no prior findings to avoid anchoring bias. Pass 2 (informed) reads per-file findings for emergent patterns. Pass 3 compiles both. Stronger model. Prompts embedded in `scripts/review-crossfile.py`.
-4. **Cross-file validation** — compiled cross-file findings verified against actual source code.
-5. **Combined report** — `CODE_REVIEW.md` with all surviving findings.
+1. **Per-file reviews** - one reviewer per file, bounded worker pool (CPU/2), cheap model. 10-item checklist embedded in `scripts/review-files.py`. Live TUI shows streaming output per active worker.
+2. **Per-file validation** - each finding verified against actual source code at the referenced lines. Hallucinated line numbers, phantom issues, and over-eager corrections are rejected.
+3. **Cross-file synthesis** - Pass 1 (blind) reads source files with no prior findings to avoid anchoring bias. Pass 2 (informed) reads per-file findings for emergent patterns. Both run in parallel, outputs merged naively. Stronger model. Prompts embedded in `scripts/review-crossfile.py`.
+4. **Cross-file validation** - merged cross-file findings verified against actual source code.
+5. **Combined report** - `CODE_REVIEW.md` with all surviving findings.
 
 ### Model selection
 
-Per-file reviews are high-volume grunt work — use the cheapest capable model (`claude-haiku-4-5` or `gpt-5.4-mini`). Cross-file synthesis benefits from a stronger model (`claude-sonnet` tier). User-specified model overrides both defaults.
+Per-file reviews are high-volume grunt work - use the cheapest capable model (`claude-haiku-4-5` or `gpt-5.4-mini`). Cross-file synthesis benefits from a stronger model (`claude-sonnet` tier). User-specified model overrides both defaults.
 
 ## Workflow
 
@@ -35,13 +35,13 @@ If `rg` is not available, fall back to `git ls-files` or `find`.
 
 Then **curate the list**. Identify the project type (SvelteKit, Next.js, Django, Go module, etc.) and remove files that aren't worth reviewing:
 
-- **Framework scaffold/boilerplate** — `app.html`, `+layout.ts` with just a `return`, `next.config.js` with default exports, `manage.py`, `wsgi.py`, `asgi.py`
-- **Config files that happen to match extensions** — `tailwind.config.ts`, `postcss.config.js`, `vite.config.ts`, `tsconfig.json` wrappers
-- **Barrel/re-export files** — files under 5 lines that just re-export from other modules
-- **Auto-generated code** — ORM migrations, GraphQL codegen output, protobuf stubs, `package-lock.json` wrappers
-- **Test fixtures and snapshots** — `.snap` files, large JSON fixtures
+- **Framework scaffold/boilerplate** - `app.html`, `+layout.ts` with just a `return`, `next.config.js` with default exports, `manage.py`, `wsgi.py`, `asgi.py`
+- **Config files that happen to match extensions** - `tailwind.config.ts`, `postcss.config.js`, `vite.config.ts`, `tsconfig.json` wrappers
+- **Barrel/re-export files** - files under 5 lines that just re-export from other modules
+- **Auto-generated code** - ORM migrations, GraphQL codegen output, protobuf stubs, `package-lock.json` wrappers
+- **Test fixtures and snapshots** - `.snap` files, large JSON fixtures
 
-The goal is to review actual business logic, not framework plumbing. Use judgment — a `vite.config.ts` with 3 lines is noise, one with custom plugin logic is worth reviewing.
+The goal is to review actual business logic, not framework plumbing. Use judgment - a `vite.config.ts` with 3 lines is noise, one with custom plugin logic is worth reviewing.
 
 Write the curated list to a temp file (e.g. `/tmp/review-files.txt`).
 
@@ -68,7 +68,7 @@ Replace `<skill-dir>` with the resolved absolute path to this skill's directory.
 Tell the user:
 > Run this in your terminal. The pipeline has a live TUI showing progress per worker. When it finishes, come back and point me at the output directory (`/tmp/code-review`) and I'll process the report.
 
-**Why the user runs it:** The pipeline spawns many parallel LLM processes with a live streaming TUI — this doesn't work well when run as a background process from an agent. Running it directly in the terminal gives proper TTY output and the user can observe progress in real time.
+**Why the user runs it:** The pipeline spawns many parallel LLM processes with a live streaming TUI - this doesn't work well when run as a background process from an agent. Running it directly in the terminal gives proper TTY output and the user can observe progress in real time.
 
 ### 4. Process the results
 
@@ -80,7 +80,7 @@ When the user returns and points you at the output directory:
 4. Read `<output-dir>/crossfile-blind.md`, `crossfile-informed.md`, `crossfile-compiled.md` for intermediate cross-file passes.
 5. Read `<output-dir>/synthesis.md` for the final validated cross-file findings.
 
-**Every finding must have file path, line number(s), one-sentence issue, and concrete suggestion.** A finding without a line reference or without a suggestion is incomplete — go back to the per-file output and extract it. Only files with findings appear in the report — clean files are omitted.
+**Every finding must have file path, line number(s), one-sentence issue, and concrete suggestion.** A finding without a line reference or without a suggestion is incomplete - go back to the per-file output and extract it. Only files with findings appear in the report - clean files are omitted.
 
 **Deduplicate cross-file vs per-file findings.** If a cross-file finding subsumes individual per-file findings (same underlying issue, broader scope), keep the cross-file finding and drop the per-file entries it covers. The cross-file pattern is more useful because it names all affected files and identifies the systemic cause.
 
@@ -97,7 +97,7 @@ gh issue create \
   --body "$REPORT_BODY"
 ```
 
-Use `--type task` (not a label). The issue body is the full report — self-contained so someone can start fixing without re-running the review. Include a worktree setup block:
+Use `--type task` (not a label). The issue body is the full report - self-contained so someone can start fixing without re-running the review. Include a worktree setup block:
 
 ```markdown
 ## Getting Started

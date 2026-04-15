@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-review-crossfile.py - Multi-pass cross-file synthesis with validation.
+review-crossfile.py - Cross-file synthesis with validation.
 
 Pass 1 (blind):    Analyzes source files for cross-file issues with NO prior findings.
 Pass 2 (informed): Analyzes per-file findings for emergent cross-file patterns.
-                   Passes 1 and 2 run in parallel.
-Pass 3 (compile):  Deduplicates and compiles both into one report.
-Pass 4 (validate): Verifies compiled findings against actual source code.
+                   Passes 1 and 2 run in parallel. Outputs merged naively.
+Pass 3 (validate): Verifies merged findings against actual source code.
 
 Usage:
     rg --files -t py | python review-crossfile.py \\
@@ -101,36 +100,6 @@ INFORMED_PROMPT_TEMPLATE = r"""## Per-file findings
 {findings}"""
 
 
-# ---------------------------------------------------------------------------
-# Pass 3 - Compile
-# ---------------------------------------------------------------------------
-
-COMPILE_SYSTEM_PROMPT = r"""
-Compile cross-file findings from two independent analysis passes into a single report.
-Deduplicate (merge when both found the same issue, keep the stronger description and more specific file/line references). Drop contradictions. Include unique findings from either pass.
-You have tools: read.
-
-Output format - no headings, no preamble, no verdict. Separate findings with ---. Example of a valid response:
-
-```markdown
-Line 42: `db.query(userInput)` - unsanitized input passed directly to query, SQL injection risk.
-Suggestion: use parameterized queries.
-
----
-
-Line 78-85: `formatDate` is a one-line wrapper around `date.toISOString()` used in only one place.
-Suggestion: inline it.
-```
-
-Output the compiled findings only.
-""".strip()
-
-COMPILE_PROMPT_TEMPLATE = r"""## Pass A findings (blind - read source directly, no prior context)
-{blind_output}
-
-## Pass B findings (informed - analyzed per-file review findings)
-{informed_output}"""
-
 
 # ---------------------------------------------------------------------------
 # Pass 4 - Validate cross-file findings against source
@@ -222,7 +191,7 @@ def main():
 
     cli = detect_cli()
 
-    n_passes = 3 if args.no_validate else 4
+    n_passes = 2 if args.no_validate else 3
     print(f"{C.BOLD}{C.BLUE}Cross-file synthesis:{C.RESET} {n_passes}-pass with {C.CYAN}{cli}{C.RESET} --model {C.MAGENTA}{args.model}{C.RESET}", file=sys.stderr)
     print(f"  Pass 1 (blind):    {C.YELLOW}{len(files)}{C.RESET} source files", file=sys.stderr)
     print(f"  Pass 2 (informed): {C.YELLOW}{len(result_files)}{C.RESET} per-file reviews", file=sys.stderr)
@@ -276,24 +245,11 @@ def _run_pipeline(cli, args, display, output_base, file_list_str, blind_prompt, 
         print(f"{C.RED}Error: both passes failed.{C.RESET}", file=sys.stderr)
         sys.exit(1)
 
-    # Pass 3: Compile
-    if not blind_success or not informed_success:
-        surviving = blind_output or informed_output
-        label = "blind" if blind_success else "informed"
-        display.add_worker(2, "pass: compile")
-        display.complete_worker(2, f"{C.YELLOW}\u26a0\ufe0f{C.RESET}", f" (compile skipped - only {label} succeeded)")
-        compiled_output = surviving if not is_empty_output(surviving) else None
-    else:
-        compile_prompt = COMPILE_PROMPT_TEMPLATE.format(
-            blind_output=blind_output, informed_output=informed_output,
-        )
-        compiled_output, success, error = run_pass(2, "compile", COMPILE_SYSTEM_PROMPT, compile_prompt)
-        if not success:
-            compiled_output = f"{blind_output}\n\n---\n\n{informed_output}"
-        elif is_empty_output(compiled_output):
-            compiled_output = None
+    # Merge blind + informed outputs
+    parts = [o for o in (blind_output, informed_output) if o and not is_empty_output(o)]
+    compiled_output = "\n\n---\n\n".join(parts) if parts else None
 
-    # Pass 4: Validate
+    # Pass 3: Validate
     if compiled_output is None:
         final_output = None
     elif args.no_validate:
@@ -302,7 +258,7 @@ def _run_pipeline(cli, args, display, output_base, file_list_str, blind_prompt, 
         validate_prompt = VALIDATE_PROMPT_TEMPLATE.format(
             file_list=file_list_str, findings=compiled_output,
         )
-        validated, success, error = run_pass(3, "validate", VALIDATE_SYSTEM_PROMPT, validate_prompt)
+        validated, success, error = run_pass(2, "validate", VALIDATE_SYSTEM_PROMPT, validate_prompt)
         if success:
             if is_empty_output(validated):
                 final_output = None
