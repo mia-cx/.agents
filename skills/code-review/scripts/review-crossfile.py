@@ -254,13 +254,24 @@ def main():
 
     output_base = args.output.parent if args.output else input_dir
 
+    import threading
+    _print_lock = threading.Lock()
+
+    def make_streamer(label):
+        def on_line(line):
+            with _print_lock:
+                truncated = line[:120] + ("..." if len(line) > 120 else "")
+                sys.stderr.write(f"     {GRAY}│ [{label}] {truncated}{RESET}\n")
+                sys.stderr.flush()
+        return on_line
+
     blind_output = None
     informed_output = None
 
     with ThreadPoolExecutor(max_workers=MAX_PARALLEL_PASSES) as pool:
         futures = {
-            pool.submit(run_llm, cli, args.model, BLIND_SYSTEM_PROMPT, blind_prompt, DEFAULT_TIMEOUT, None, "read,write,edit"): "blind",
-            pool.submit(run_llm, cli, args.model, INFORMED_SYSTEM_PROMPT, informed_prompt, DEFAULT_TIMEOUT, None, "read,write,edit"): "informed",
+            pool.submit(run_llm, cli, args.model, BLIND_SYSTEM_PROMPT, blind_prompt, DEFAULT_TIMEOUT, make_streamer("blind"), "read,write,edit"): "blind",
+            pool.submit(run_llm, cli, args.model, INFORMED_SYSTEM_PROMPT, informed_prompt, DEFAULT_TIMEOUT, make_streamer("informed"), "read,write,edit"): "informed",
         }
         for future in as_completed(futures):
             label = futures[future]
@@ -293,7 +304,7 @@ def main():
             blind_output=blind_output, informed_output=informed_output,
         )
         compiled_output, success, error = run_llm(
-            cli, args.model, COMPILE_SYSTEM_PROMPT, compile_prompt, DEFAULT_TIMEOUT,
+            cli, args.model, COMPILE_SYSTEM_PROMPT, compile_prompt, DEFAULT_TIMEOUT, make_streamer("compile"),
         )
         if not success:
             print(f"  {RED}\u274c Compile failed: {error}.{RESET} Concatenating instead.", file=sys.stderr)
@@ -317,7 +328,7 @@ def main():
             file_list=file_list_str, findings=compiled_output,
         )
         validated, success, error = run_llm(
-            cli, args.model, VALIDATE_SYSTEM_PROMPT, validate_prompt, DEFAULT_TIMEOUT,
+            cli, args.model, VALIDATE_SYSTEM_PROMPT, validate_prompt, DEFAULT_TIMEOUT, make_streamer("validate"),
         )
         if success:
             if is_empty_output(validated):
