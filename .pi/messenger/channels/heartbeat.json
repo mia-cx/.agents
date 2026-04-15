@@ -1,0 +1,7 @@
+{
+  "id": "heartbeat",
+  "type": "named",
+  "createdAt": "2026-03-27T12:33:07.107Z",
+  "createdBy": "TrueOwl",
+  "description": "Long-term status, reports, and cron-style agent updates"
+}
