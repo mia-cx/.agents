@@ -27,7 +27,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from _llm_utils import C, DEFAULT_TIMEOUT, detect_cli, run_llm, is_empty_output, resolve_file_list
+from _llm_utils import C, DEFAULT_TIMEOUT, LiveDisplay, detect_cli, run_llm, is_empty_output, resolve_file_list
 
 MAX_PARALLEL_PASSES = 2
 TOOLS = "read,write,edit"
