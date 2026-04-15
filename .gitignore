@@ -18,3 +18,5 @@ boardroom/memos/*-narration.mp3
 
 .env*
 !.env*.example
+.ant-colony/
+__pycache__/
