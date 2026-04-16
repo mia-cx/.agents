@@ -19,7 +19,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from _llm_utils import C, LiveDisplay, detect_cli, get_default_concurrency, run_llm, is_empty_output, resolve_file_list
+from _llm_utils import C, LiveDisplay, clean_output, detect_cli, get_default_concurrency, run_llm, is_empty_output, resolve_file_list
 
 VALIDATION_CONTEXT_LINES = 3
 
@@ -125,7 +125,8 @@ def review_file(filepath, cli, model, output_dir, display=None, worker_id=None):
 
     output, success, error = run_llm(cli, model, REVIEW_SYSTEM_PROMPT, prompt, on_line=on_line)
     if success:
-        if is_empty_output(output):
+        output = clean_output(output)
+        if not output:
             return (filepath, None, True, "clean")
         output_path.write_text(f"# `{filepath}`\n\n{output}\n", encoding="utf-8")
         return (filepath, str(output_path), True, None)
@@ -254,7 +255,8 @@ def validate_file(review_path, cli, model, output_dir, display=None, worker_id=N
 
     out = output_dir / review_path.name
     if success:
-        if is_empty_output(output):
+        output = clean_output(output)
+        if not output:
             return (str(review_path), None, "rejected")
         out.write_text(f"# `{filepath}`\n\n{output}\n", encoding="utf-8")
         return (str(review_path), str(out), "validated")

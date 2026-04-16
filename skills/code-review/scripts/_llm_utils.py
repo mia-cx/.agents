@@ -53,6 +53,19 @@ def is_empty_output(output):
     return output.strip() == "{{omit}}"
 
 
+def clean_output(output):
+    """Strip {{omit}} markers from output. Returns cleaned text or None if nothing remains."""
+    if not output:
+        return None
+    # Remove {{omit}} used as partial marker (model rejected some but not all findings)
+    cleaned = output.replace("{{omit}}", "").strip()
+    # Collapse leftover separators
+    while "\n---\n\n---\n" in cleaned:
+        cleaned = cleaned.replace("\n---\n\n---\n", "\n---\n")
+    cleaned = cleaned.strip().strip("-").strip()
+    return cleaned if cleaned else None
+
+
 DEFAULT_TIMEOUT = 600
 
 

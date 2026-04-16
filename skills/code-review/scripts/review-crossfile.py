@@ -25,7 +25,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from _llm_utils import C, DEFAULT_TIMEOUT, LiveDisplay, detect_cli, run_llm, is_empty_output, resolve_file_list
+from _llm_utils import C, DEFAULT_TIMEOUT, LiveDisplay, clean_output, detect_cli, run_llm, is_empty_output, resolve_file_list
 
 MAX_PARALLEL_PASSES = 2  # fixed: blind+informed run in parallel, compile+validate are sequential
 TOOLS = "read"  # review passes only need to read source files
@@ -246,7 +246,8 @@ def _run_pipeline(cli, args, display, output_base, file_list_str, blind_prompt, 
         sys.exit(1)
 
     # Merge blind + informed outputs
-    parts = [o for o in (blind_output, informed_output) if o and not is_empty_output(o)]
+    parts = [clean_output(o) for o in (blind_output, informed_output) if o]
+    parts = [p for p in parts if p]
     compiled_output = "\n\n---\n\n".join(parts) if parts else None
 
     # Pass 3: Validate
@@ -260,7 +261,8 @@ def _run_pipeline(cli, args, display, output_base, file_list_str, blind_prompt, 
         )
         validated, success, error = run_pass(2, "validate", VALIDATE_SYSTEM_PROMPT, validate_prompt)
         if success:
-            if is_empty_output(validated):
+            validated = clean_output(validated)
+            if not validated:
                 final_output = None
             else:
                 final_output = validated
