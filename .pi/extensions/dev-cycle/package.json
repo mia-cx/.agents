@@ -1,0 +1,16 @@
+{
+  "name": "dev-cycle",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "vitest"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "devDependencies": {
+    "vitest": "^4.1.1"
+  }
+}
