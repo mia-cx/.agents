@@ -1,0 +1,21 @@
+/* Move ribbon to the right — order only, no layout reversal */
+.workspace-ribbon {
+  order: 999;
+}
+
+.workspace-ribbon.mod-left::before {
+  display: none;
+}
+
+/* Match ribbon area background so toggle sits on top visually */
+.sidebar-toggle-button.mod-right {
+  background-color: var(
+    --background-secondary-alt,
+    var(--background-secondary)
+  );
+  width: var(--ribbon-width);
+  height: var(--header-height);
+  padding: var(--size-4-2);
+  margin: 0 auto;
+  box-sizing: border-box;
+}

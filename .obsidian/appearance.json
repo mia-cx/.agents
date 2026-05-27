@@ -1,0 +1,9 @@
+{
+  "baseFontSize": 12,
+  "baseFontSizeAction": false,
+  "translucency": true,
+  "showRibbon": true,
+  "enabledCssSnippets": [
+    "right-side-ribbon"
+  ]
+}

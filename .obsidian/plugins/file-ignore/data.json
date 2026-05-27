@@ -1,0 +1,9 @@
+{
+  "rules": "node_modules/\ndist/\n.next/\n.cache/\n.DS_Store",
+  "ignoredFiles": [],
+  "debug": false,
+  "rulesHistory": [
+    "node_modules/\ndist/\n.next/\n.cache/\n.DS_Store"
+  ],
+  "lastBatch": null
+}

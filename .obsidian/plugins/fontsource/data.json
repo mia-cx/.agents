@@ -1,0 +1,364 @@
+{
+  "fonts": [
+    {
+      "id": "aleo",
+      "family": "Aleo",
+      "subsets": ["latin", "latin-ext", "vietnamese"],
+      "styles": ["italic", "normal"],
+      "weights": [100, 200, 300, 400, 500, 600, 700, 800, 900],
+      "variable": {
+        "ital": {
+          "default": "0",
+          "min": "0",
+          "max": "1",
+          "step": "1"
+        },
+        "wght": {
+          "default": "400",
+          "min": "100",
+          "max": "900",
+          "step": "1"
+        }
+      },
+      "isActive": true
+    },
+    {
+      "id": "archivo",
+      "family": "Archivo",
+      "subsets": ["latin", "latin-ext", "vietnamese"],
+      "styles": ["italic", "normal"],
+      "weights": [100, 200, 300, 400, 500, 600, 700, 800, 900],
+      "variable": {
+        "ital": {
+          "default": "0",
+          "min": "0",
+          "max": "1",
+          "step": "1"
+        },
+        "wdth": {
+          "default": "100",
+          "min": "62",
+          "max": "125",
+          "step": "0.1"
+        },
+        "wght": {
+          "default": "400",
+          "min": "100",
+          "max": "900",
+          "step": "1"
+        }
+      },
+      "isActive": true
+    },
+    {
+      "id": "archivo-black",
+      "family": "Archivo Black",
+      "subsets": ["latin", "latin-ext"],
+      "styles": ["normal"],
+      "weights": [400],
+      "isActive": true
+    },
+    {
+      "id": "archivo-narrow",
+      "family": "Archivo Narrow",
+      "subsets": ["latin", "latin-ext", "vietnamese"],
+      "styles": ["italic", "normal"],
+      "weights": [400, 500, 600, 700],
+      "variable": {
+        "ital": {
+          "default": "0",
+          "min": "0",
+          "max": "1",
+          "step": "1"
+        },
+        "wght": {
+          "default": "400",
+          "min": "400",
+          "max": "700",
+          "step": "1"
+        }
+      },
+      "isActive": true
+    },
+    {
+      "id": "cairo",
+      "family": "Cairo",
+      "subsets": ["arabic", "latin", "latin-ext"],
+      "styles": ["normal"],
+      "weights": [200, 300, 400, 500, 600, 700, 800, 900],
+      "variable": {
+        "slnt": {
+          "default": "0",
+          "min": "-11",
+          "max": "11",
+          "step": "1"
+        },
+        "wght": {
+          "default": "400",
+          "min": "200",
+          "max": "1000",
+          "step": "1"
+        }
+      },
+      "isActive": true
+    },
+    {
+      "id": "domine",
+      "family": "Domine",
+      "subsets": ["latin", "latin-ext"],
+      "styles": ["normal"],
+      "weights": [400, 500, 600, 700],
+      "variable": {
+        "wght": {
+          "default": "400",
+          "min": "400",
+          "max": "700",
+          "step": "1"
+        }
+      },
+      "isActive": true
+    },
+    {
+      "id": "geist",
+      "family": "Geist",
+      "subsets": ["cyrillic", "latin", "latin-ext"],
+      "styles": ["normal"],
+      "weights": [100, 200, 300, 400, 500, 600, 700, 800, 900],
+      "variable": {
+        "wght": {
+          "default": "400",
+          "min": "100",
+          "max": "900",
+          "step": "1"
+        }
+      },
+      "isActive": true
+    },
+    {
+      "id": "geist-sans",
+      "family": "Geist Sans",
+      "subsets": ["latin"],
+      "styles": ["normal"],
+      "weights": [100, 200, 300, 400, 500, 600, 700, 800, 900],
+      "isActive": true
+    },
+    {
+      "id": "golos-text",
+      "family": "Golos Text",
+      "subsets": ["cyrillic", "cyrillic-ext", "latin", "latin-ext"],
+      "styles": ["normal"],
+      "weights": [400, 500, 600, 700, 800, 900],
+      "variable": {
+        "wght": {
+          "default": "400",
+          "min": "400",
+          "max": "900",
+          "step": "1"
+        }
+      },
+      "isActive": true
+    },
+    {
+      "id": "heebo",
+      "family": "Heebo",
+      "subsets": ["hebrew", "latin", "latin-ext", "math", "symbols"],
+      "styles": ["normal"],
+      "weights": [100, 200, 300, 400, 500, 600, 700, 800, 900],
+      "variable": {
+        "wght": {
+          "default": "400",
+          "min": "100",
+          "max": "900",
+          "step": "1"
+        }
+      },
+      "isActive": true
+    },
+    {
+      "id": "merriweather",
+      "family": "Merriweather",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "latin",
+        "latin-ext",
+        "vietnamese"
+      ],
+      "styles": ["italic", "normal"],
+      "weights": [300, 400, 500, 600, 700, 800, 900],
+      "variable": {
+        "ital": {
+          "default": "0",
+          "min": "0",
+          "max": "1",
+          "step": "1"
+        },
+        "opsz": {
+          "default": "18",
+          "min": "18",
+          "max": "144",
+          "step": "0.1"
+        },
+        "wdth": {
+          "default": "100",
+          "min": "87",
+          "max": "112",
+          "step": "0.1"
+        },
+        "wght": {
+          "default": "400",
+          "min": "300",
+          "max": "900",
+          "step": "1"
+        }
+      },
+      "isActive": true
+    },
+    {
+      "id": "noto-serif",
+      "family": "Noto Serif",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "greek",
+        "greek-ext",
+        "latin",
+        "latin-ext",
+        "math",
+        "vietnamese"
+      ],
+      "styles": ["italic", "normal"],
+      "weights": [100, 200, 300, 400, 500, 600, 700, 800, 900],
+      "variable": {
+        "ital": {
+          "default": "0",
+          "min": "0",
+          "max": "1",
+          "step": "1"
+        },
+        "wdth": {
+          "default": "100",
+          "min": "62.5",
+          "max": "100",
+          "step": "0.1"
+        },
+        "wght": {
+          "default": "400",
+          "min": "100",
+          "max": "900",
+          "step": "1"
+        }
+      },
+      "isActive": true
+    },
+    {
+      "id": "noto-serif-sc",
+      "family": "Noto Serif SC",
+      "subsets": [
+        "chinese-simplified",
+        "cyrillic",
+        "latin",
+        "latin-ext",
+        "vietnamese"
+      ],
+      "styles": ["normal"],
+      "weights": [200, 300, 400, 500, 600, 700, 800, 900],
+      "variable": {
+        "wght": {
+          "default": "400",
+          "min": "200",
+          "max": "900",
+          "step": "1"
+        }
+      },
+      "isActive": true
+    },
+    {
+      "id": "playfair-display",
+      "family": "Playfair Display",
+      "subsets": ["cyrillic", "latin", "latin-ext", "vietnamese"],
+      "styles": ["italic", "normal"],
+      "weights": [400, 500, 600, 700, 800, 900],
+      "variable": {
+        "ital": {
+          "default": "0",
+          "min": "0",
+          "max": "1",
+          "step": "1"
+        },
+        "wght": {
+          "default": "400",
+          "min": "400",
+          "max": "900",
+          "step": "1"
+        }
+      },
+      "isActive": true
+    },
+    {
+      "id": "source-serif-4",
+      "family": "Source Serif 4",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "greek",
+        "latin",
+        "latin-ext",
+        "vietnamese"
+      ],
+      "styles": ["italic", "normal"],
+      "weights": [200, 300, 400, 500, 600, 700, 800, 900],
+      "variable": {
+        "ital": {
+          "default": "0",
+          "min": "0",
+          "max": "1",
+          "step": "1"
+        },
+        "opsz": {
+          "default": "14",
+          "min": "8",
+          "max": "60",
+          "step": "0.1"
+        },
+        "wght": {
+          "default": "400",
+          "min": "200",
+          "max": "900",
+          "step": "1"
+        }
+      },
+      "isActive": true
+    },
+    {
+      "id": "source-serif-pro",
+      "family": "Source Serif Pro",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "greek",
+        "latin",
+        "latin-ext",
+        "vietnamese"
+      ],
+      "styles": ["italic", "normal"],
+      "weights": [200, 300, 400, 600, 700, 900],
+      "isActive": true
+    }
+  ],
+  "interfaceFonts": [
+    {
+      "id": "archivo",
+      "family": "Archivo",
+      "precedence": 0
+    }
+  ],
+  "textFonts": [
+    {
+      "id": "source-serif-4",
+      "family": "Source Serif 4",
+      "precedence": 0
+    }
+  ],
+  "monospaceFonts": []
+}
