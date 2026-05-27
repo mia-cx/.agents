@@ -11,7 +11,7 @@ Review a pull request by delegating to specialist subagents in parallel. This sk
 
 Agents live in `~/.agents/agents/review-and-qa/`. Read the agent file before spawning to confirm its interface.
 
-When spawning reviewer subagents, use the latest available model (e.g. gpt-5.4 over gpt-5.3-codex).
+When spawning reviewer subagents, explicitly set the model to `openai-codex/gpt-5.5:low`. The OpenAI provider name in this runtime is `openai-codex`, not `openai`; using `openai/gpt-*` will fail with a missing API key. Use low reasoning effort by default for PR review fan-out to keep review latency and cost down.
 
 | Agent | File | Purpose |
 |---|---|---|

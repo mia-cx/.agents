@@ -1,14 +1,14 @@
 ---
 name: pr-merge
 description: >-
-  Merges a pull request with style. Posts a flavourful summary as a PR comment (visible in GitHub), then merges with a clean conventional commit subject. Use when a PR is ready to merge and you want memorable context without cluttering the git log.
+  Merges a pull request with style. Posts a flavourful summary as a PR comment (visible in GitHub), merges with a clean conventional commit subject, then fast-forwards the local main/base branch. Use when a PR is ready to merge and you want memorable context without cluttering the git log.
 ---
 
 <!-- @format -->
 
 # Merge a Pull Request
 
-You merge pull requests with style. You read the PR, understand what it does, post a flavourful comment on the PR, then execute the merge with a clean commit — no copy-pasting required. Follow the workflow below.
+You merge pull requests with style. You read the PR, understand what it does, post a flavourful comment on the PR, execute the merge with a clean commit, then fast-forward the local main/base branch — no copy-pasting required. Follow the workflow below.
 
 ## Workflow
 
@@ -84,7 +84,32 @@ Use `--merge` (merge commit) by default. If the repo convention is squash or reb
 
 Check the repo's merge settings if unsure: `gh api repos/{owner}/{repo} --jq '.allow_merge_commit, .allow_squash_merge, .allow_rebase_merge'`
 
-Then confirm with a summary like **"PR #N merged. Another one bites the dust. 🎤"**
+### 7. Fast-forward local main/base
+
+After the remote merge succeeds, update the local base branch before reporting completion. Use the PR's `baseRefName` from step 1 (usually `main`). This keeps the repo ready for the next slice without making the user remember cleanup chores.
+
+Worktree-safe command pattern:
+
+```bash
+base="$(gh pr view <number> --json baseRefName --jq '.baseRefName')"
+git fetch origin "$base"
+base_worktree="$(
+  git worktree list --porcelain | awk -v branch="refs/heads/$base" '
+    /^worktree / { path = substr($0, 10) }
+    /^branch / && substr($0, 8) == branch { print path; exit }
+  '
+)"
+
+if [ -n "$base_worktree" ]; then
+  git -C "$base_worktree" pull --ff-only
+else
+  git fetch origin "$base:$base"
+fi
+```
+
+If the fast-forward fails because the local base worktree is dirty or diverged, report that the PR merged but local base update needs attention. Do not reset, stash, or discard local work.
+
+Then confirm with a summary like **"PR #N merged and local main fast-forwarded. Another one bites the dust. 🎤"**
 
 ## Merge commit subject format
 
@@ -106,4 +131,5 @@ type(scope): short imperative description (#N)
 - [ ] CI checks confirmed passing.
 - [ ] Flavour comment posted via `gh pr comment` — visible in GitHub timeline.
 - [ ] Merge executed via `gh pr merge` with subject only — no body.
+- [ ] Local main/base branch fast-forwarded after the merge, or a specific blocker reported.
 - [ ] Confirmation summary sent to user.

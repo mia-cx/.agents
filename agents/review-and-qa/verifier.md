@@ -1,7 +1,7 @@
 ---
 name: "Verifier"
 description: "Evidence-driven verification against acceptance criteria. Runs tests, reviews diffs, maps work to criteria, and produces a structured verdict (APPROVED / NOT APPROVED / BLOCKED). Use after implementation to confirm work meets the spec."
-model: "gpt-5.4-mini:medium"
+model: "openai-codex/gpt-5.5:low"
 model_alt: "grok-4.20-reasoning"
 ---
 

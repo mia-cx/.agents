@@ -19,7 +19,7 @@ The orchestrator (`scripts/review.py`) runs the full pipeline:
 
 ### Model selection
 
-Per-file reviews are high-volume grunt work - use the cheapest capable model (`claude-haiku-4-5` or `gpt-5.4-mini`). Cross-file synthesis benefits from a stronger model (`claude-sonnet` tier). User-specified model overrides both defaults.
+Use `openai-codex/gpt-5.5` for both per-file reviews and cross-file synthesis. User-specified model overrides this default.
 
 ## Workflow
 
@@ -56,14 +56,14 @@ Present the curated file count and scope to the user. If a single scope has >30 
 **Do not run the script yourself.** Present the command to the user and tell them to run it in their terminal:
 
 ```bash
-python <skill-dir>/scripts/review.py \
+cd /path/to/repo && python3 <skill-dir>/scripts/review.py \
   --output-dir /tmp/code-review \
   --file-list /tmp/review-files.txt \
-  --per-file-model anthropic/claude-haiku-4-5 \
-  --crossfile-model anthropic/claude-sonnet-4
+  --per-file-model openai-codex/gpt-5.5 \
+  --crossfile-model openai-codex/gpt-5.5
 ```
 
-Replace `<skill-dir>` with the resolved absolute path to this skill's directory.
+Replace `<skill-dir>` with the resolved absolute path to this skill's directory. The script must be run from the repo root (or file paths in `--file-list` must be absolute).
 
 Tell the user:
 > Run this in your terminal. The pipeline has a live TUI showing progress per worker. When it finishes, come back and point me at the output directory (`/tmp/code-review`) and I'll process the report.
@@ -90,16 +90,34 @@ Present the deduplicated findings to the user, organized by file.
 
 ### 5. File GitHub issue
 
-If the working directory is a git repo with a GitHub remote and `gh` is available, file the report as a GitHub issue so it can be picked up as a work item:
+If the working directory is a git repo with a GitHub remote and `gh` is available, file the report as a GitHub issue so it can be picked up as a work item.
+
+**Issue types are not labels and `gh issue create --type task` is not valid.** Get the repository id and the actual issue type id first, then create the issue via GraphQL with `issueTypeId`:
 
 ```bash
-gh issue create \
-  --type task \
-  --title "Code review: <N> findings across <M> files" \
-  --body "$REPORT_BODY"
+OWNER_REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+OWNER=${OWNER_REPO%/*}
+REPO=${OWNER_REPO#*/}
+
+REPO_DATA=$(gh api graphql \
+  -f query='query($owner:String!,$repo:String!){ repository(owner:$owner,name:$repo){ id issueTypes(first:20){ nodes{ id name } } } }' \
+  -f owner="$OWNER" \
+  -f repo="$REPO")
+
+REPOSITORY_ID=$(printf '%s' "$REPO_DATA" | jq -r '.data.repository.id')
+ISSUE_TYPE_ID=$(printf '%s' "$REPO_DATA" | jq -r '.data.repository.issueTypes.nodes[] | select(.name == "📋 task" or .name == "task") | .id' | head -n1)
+
+BODY=$(cat /tmp/code-review-issue.md)
+
+gh api graphql \
+  -f query='mutation($repositoryId:ID!,$issueTypeId:ID!,$title:String!,$body:String!){ createIssue(input:{repositoryId:$repositoryId,issueTypeId:$issueTypeId,title:$title,body:$body}){ issue{ number url title issueType{ name } } } }' \
+  -f repositoryId="$REPOSITORY_ID" \
+  -f issueTypeId="$ISSUE_TYPE_ID" \
+  -f title="Code review: <N> findings across <M> files" \
+  -f body="$BODY"
 ```
 
-Use `--type task` (not a label). The issue body is the full report - self-contained so someone can start fixing without re-running the review. Include a worktree setup block:
+If `ISSUE_TYPE_ID` is empty, do not guess; list the available issue type names from `REPO_DATA` and ask the user which one to use. The issue body is the full report - self-contained so someone can start fixing without re-running the review. Include a worktree setup block:
 
 ```markdown
 ## Getting Started

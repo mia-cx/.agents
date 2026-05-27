@@ -1,7 +1,7 @@
 ---
 name: "Security Reviewer"
 description: "Security-focused code review specialist. Threat modeling, auth/authz analysis, dependency audits, OWASP Top 10 evaluation. Produces Security Assessments with vulnerabilities and remediation guidance. Use for security audits or when changes touch auth, data handling, or external interfaces."
-model: "gpt-5.4:high"
+model: "openai-codex/gpt-5.5:low"
 model_alt: "claude-opus-4-6:high"
 ---
 
