@@ -64,6 +64,16 @@ How to apply:
 - Reviews of plans/implementations: fable-5 or opus-4.8, optionally gpt-5.6-sol as an extra independent perspective.
 - Never use Haiku.
 
+Mechanics:
+
+- GPT models (gpt-5.6-sol, gpt-5.5) are only reachable through the Codex CLI — `codex exec` / `codex review` (my `~/.codex/config.toml` defaults to gpt-5.6-sol:high, so pass `-m` and `-c model_reasoning_effort=medium` explicitly for delegated work). Use the `subagents` skill; for work it doesn't cover (investigation, data analysis), run `codex exec -s read-only` directly with a self-contained prompt.
+- Claude models (sonnet-5, opus-4.8, fable-5) run via the Agent/Workflow model parameter.
+
+Using GPT models inside workflows and subagents (the model parameter only takes Claude models, so use a wrapper):
+
+- Spawn a thin Claude wrapper agent with `model: 'sonnet', effort: 'low'` whose prompt instructs it to shell out to codex via Bash with exactly the prompt it was handed, and return the report (use `schema` on the wrapper to get structured output back).
+- Always label these agents with a `gpt-5.6-sol:` prefix, e.g. `{label: 'gpt-5.6-sol:review-auth'}` — the workflow UI shows the wrapper's Claude model, so the label is the only indication the real worker is gpt-5.6-sol.
+
 ## Computer use
 
 - If computer use is helpful for completing or verifying work, shell out to `gpt-5.6-sol:medium` with Codex for it.
