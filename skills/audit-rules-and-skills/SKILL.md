@@ -4,7 +4,8 @@ description: >-
   Audits and improves agent guidance files — memory files (CLAUDE.md,
   AGENTS.md, SYSTEM.md), skills (SKILL.md), rules, and agent definitions —
   keeping tribal knowledge and removing noise. Applies refactoring patterns
-  (Vague→Specific, Negative→Positive, Imprecise→Precise) to tighten guidance.
+  (Vague→Specific, Negative→Positive, Imprecise→Precise, Verbose→High-signal)
+  to tighten guidance.
   Use when the user asks to audit, optimize, clean up, or tighten rules,
   skills, memory files, or agent prompts.
 ---
@@ -49,7 +50,7 @@ For every rule, skill, memory entry, or agent prompt:
 - [ ] **Justify existence**: could this be a rule or skill instead?
 - [ ] **Specialized prompt necessary**: or is it noise around a model choice?
 
-## Three Refactoring Patterns
+## Refactoring Patterns
 
 ### Pattern 1: Vague → Specific
 
@@ -101,6 +102,36 @@ Explain the concept. Keep it short, don't be too descriptive.
 ```text
 Use 2–3 sentences. Target: high school student. Include one concrete example.
 ```
+
+### Pattern 4: Verbose → High-signal
+
+Find the word or verb that already carries the desired behavior, and let it replace the prose. Models have deep priors on precise terms — one well-chosen word steers harder than a paragraph of explanation.
+
+**Before:**
+
+```text
+When you finish making changes, look over the diff and consider whether there might be issues. Be critical of your own implementation rather than assuming it works.
+```
+
+**After:**
+
+```text
+Adversarially review your own diff before reporting done.
+```
+
+**Before:**
+
+```text
+Write the prompt so that the model has everything it needs and doesn't have to ask follow-up questions or look at other files for context.
+```
+
+**After:**
+
+```text
+Write a self-contained prompt.
+```
+
+Words that tend to pull this weight: *adversarially*, *self-contained*, *verbatim*, *atomic*, *idempotent*, *minimal*, *exhaustive*, *only*, *exactly*. The test: if deleting the surrounding prose loses nothing once the word is in place, the word was the signal.
 
 ## Example Cleanups
 
@@ -168,5 +199,5 @@ WorkOS SDK doesn't run in Workers. Use custom REST API instead. See apps/shared/
 2. Ask: **Is this tribal?** (Will the agent encounter it in context anyway — not merely *could* it be found somewhere?) → If it will surface on its own, delete or move; when unsure, keep.
 3. Ask: **Is this focused?** (< limit?) → If no, extract to references.
 4. Ask: **Does it explain why?** (Constraint, gotcha, non-obvious choice?) → If no, add it.
-5. Apply refactoring patterns: Vague→Specific, Negative→Positive, Imprecise→Precise.
+5. Apply refactoring patterns: Vague→Specific, Negative→Positive, Imprecise→Precise, Verbose→High-signal.
 6. Commit.
