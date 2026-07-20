@@ -41,7 +41,7 @@ When a file spans two concerns, assign it to the dominant one and note the mix i
 
 ### 4. Execute and push
 
-For each commit in order: `git add <paths>`, then `git commit` with subject, flavourful body, issue refs, and a `Co-Authored-By` trailer with your actual model name (e.g. `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` — whatever model you actually are).
+For each commit in order: `git add <paths>`, then `git commit` with subject, flavourful body, issue refs, and a `Co-Authored-By` trailer with your actual model name (e.g. `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` — whatever model you actually are). Execute every commit via Bash — printing the commands is not committing.
 
 After the final commit: `git push`. Confirm with a summary table of what landed.
 
@@ -84,10 +84,3 @@ Fixes #12
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 ```
-
-## Checklist before finishing
-
-- [ ] Issues checked; fixing commits reference `Fixes #N` / `Closes #N`.
-- [ ] All commits executed via Bash — not just printed.
-- [ ] Every body has real content + a touch of flavour.
-- [ ] `git push` run after the final commit; summary sent.
