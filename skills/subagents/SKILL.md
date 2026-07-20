@@ -11,11 +11,13 @@ description: >-
 All subagent work runs through the Codex CLI with `gpt-5.6-sol` at `medium` reasoning effort. Claude subagents are reserved for the one wrapper pattern described under "Workflows" — every other delegation shells out to Codex:
 
 ```bash
-codex exec -m gpt-5.6-sol -c model_reasoning_effort=medium -s workspace-write "<task>"
+codex exec -m gpt-5.6-sol -c model_reasoning_effort=medium -s workspace-write "<task>" </dev/null
 ```
 
+- **Close stdin** (`</dev/null`): with piped stdin, codex blocks on "reading additional input" instead of running the prompt.
+- **Untrusted directories**: outside a trusted git repo, codex exits early with a cwd reset — add `--skip-git-repo-check` (or `git init` the scratch dir) when dispatching outside tracked projects.
 - **Parallel tasks**: launch multiple `codex exec` calls via background Bash — one per task.
-- **Follow-ups to the same worker**: `codex exec resume --last -m gpt-5.6-sol -c model_reasoning_effort=medium "<feedback>"` preserves that worker's context.
+- **Follow-ups to the same worker**: `codex exec resume --last -m gpt-5.6-sol -c model_reasoning_effort=medium "<feedback>" </dev/null` preserves that worker's context.
 - **Read-only work** (investigation, analysis, review): use `-s read-only` instead of `workspace-write`.
 - **Visibility**: prefix delegated-work labels and log lines with `gpt-5.6-sol:` so codex-backed runs are identifiable at a glance.
 
