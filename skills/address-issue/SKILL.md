@@ -1,5 +1,5 @@
 ---
-name: address
+name: address-issue
 description: >-
   Addresses a provided GitHub issue end-to-end in the workspace supplied by the
   harness, planning the work, executing TODOs with one commit per completed
@@ -8,7 +8,7 @@ description: >-
   issue.
 ---
 
-# Address
+# Address Issue
 
 Implement a provided issue end-to-end in the workspace and Git context supplied
 by the harness or user. Keep the plan visible and history tidy: understand the
@@ -20,9 +20,8 @@ TODO, then file a PR.
 ### 1. Identify the issue and repo state
 
 - Parse the provided issue number or URL. If ambiguous, ask for the issue.
-- Treat the repository location, worktree, branch, and base branch supplied by
-  the harness or user as authoritative. Do not create, remove, relocate, or
-  switch worktrees or branches unless the user explicitly requests it.
+- The harness-supplied repository location, worktree, branch, and base branch
+  are authoritative — change them only on explicit user request.
 - From the supplied repository root, confirm the working tree is safe:
 
 ```bash
@@ -88,17 +87,16 @@ For each TODO:
 git status --short
 git diff
 git add <paths>
-git commit -m "<type>(<scope>): <complete this TODO>" -m "Implements TODO: <exact TODO text>.\n\nRefs #<issue-number>"
+git commit -m "<type>(<scope>): <complete this TODO>" -m "Implements TODO: <exact TODO text>." -m "Refs #<issue-number>"
 ```
 
 Commit guidelines:
 
 - One completed TODO per commit, unless a TODO was split; then commit each split
   item separately.
-- Keep commits buildable. Do not commit knowingly broken intermediate states.
+- Keep commits buildable.
 - Include `Refs #<issue-number>` in intermediate commits. Use `Closes #<issue-number>`
   only in the final implementation commit or PR body.
-- Never batch several completed TODOs into one commit just to save time.
 
 ### 4. Final validation
 
@@ -150,12 +148,9 @@ Report the PR URL, current branch, completed TODOs, and validation.
 
 ## Rules
 
-- Leave workspace, worktree, branch, and base-branch selection to the harness or
-  explicit user instructions.
-- Do not create or switch worktrees or branches as an implementation step.
-- Read the issue and relevant code before drafting TODOs.
-- Keep the plan current while working; the plan is the source of truth.
-- Commit after each completed TODO.
-- Do not file the PR until all required TODOs are complete or explicitly marked
-  as deferred with a reason.
+- Workspace, worktree, branch, and base-branch selection belongs to the harness
+  or explicit user instruction.
+- The plan file is the source of truth — keep it current while working.
+- File the PR only when all TODOs are complete or explicitly deferred with a
+  reason.
 - Prefer existing repo conventions over this skill's defaults.
