@@ -25,22 +25,22 @@ Audit and improve existing agent guidance by focusing on **tribal knowledge** (n
 
 For every rule, skill, memory entry, or agent prompt:
 
-- [ ] **Tribal, not inferrable**: Can agents discover this in code, tests, or docs? If yes, delete or move.
+- [ ] **Tribal, not inferrable**: Will the agent encounter this in context anyway — not merely *could* it be found somewhere? If it will surface on its own, delete or move; when unsure, keep.
 - [ ] **Focused, not comprehensive**: <50 lines for rules and memory sections; 2–3 core concepts for skills. If longer, extract to references.
 - [ ] **Explains the "why"**: Is there a constraint or gotcha? Not just "use X" — "use X because Y constraint."
 
 ## Type-Specific Checks
 
-### Memory files (CLAUDE.md / AGENTS.md / SYSTEM.md)
+### Memory files (CLAUDE.md / AGENTS.md)
 
-- [ ] **Right file for the audience**: harness-agnostic guidance in the shared file (AGENTS.md/SYSTEM.md); harness-specific mechanics in that harness's file (CLAUDE.md). Duplicated content drifts.
-- [ ] **Remove content inferred in context**: delete rules the agent *will* encounter anyway while doing the applicable work — visible in the files being edited, or surfaced by typecheck/lint/tests. "When working on X, do Y" is suspect: Y is often self-evident once inside X. But *can* be inferred ≠ *will* be inferred — facts buried in obscure corners of the codebase stay written down. When unsure, keep the rule.
+- [ ] **Right file for the audience**: harness-agnostic guidance in the shared file (AGENTS.md); harness-specific mechanics in that harness's file (CLAUDE.md). Duplicated content drifts.
+- [ ] **Remove content inferred in context**: delete rules the agent *will* encounter while doing the applicable work (visible in the edited files, or surfaced by typecheck/lint/tests). "When working on X, do Y" is suspect — Y is often self-evident inside X. *Can* ≠ *will*: facts in obscure corners stay written down.
 - [ ] **No stale facts**: paths, model names, and tool flags rot — verify each still exists.
 
 ### Skills (`SKILL.md`)
 
 - [ ] **Description carries the trigger**: it must state when to invoke, in the words a user would use — the model sees nothing else when deciding.
-- [ ] **Remove bloat**: cut motivational prose about why the *topic* matters — it persuades a reader, not an agent. Keep the one-clause "because Y constraint" on individual rules (that's the "Explains the why" check, not bloat).
+- [ ] **Remove bloat**: cut motivational prose about why the *topic* matters — it persuades readers, not agents. One-clause "because Y" constraints on individual rules stay.
 - [ ] **Keep examples concrete**: runnable/adaptable, not generic.
 - [ ] **Remove redundancy**: if external docs or another skill cover it, link instead.
 - [ ] **Task-class applicable**: works for a family of tasks, not one instance.
@@ -135,69 +135,11 @@ Words that tend to pull this weight: *adversarially*, *self-contained*, *verbati
 
 ## Example Cleanups
 
-**Coding convention → Delete**
-
-```markdown
-# Svelte Patterns
-
-- Use const arrow functions, not function declarations
-- Prefer reactive declarations ($derived)
-```
-
-↳ Discoverable from code and linting config.
-
-**Comprehensive skill → Focused reference**
-
-```markdown
-Before: 9 sections (History, Concepts, Setup, Writing, Testing, Deployment, Troubleshooting, Tuning, Rollbacks)
-
-After:
-
-# Drizzle Migration Workflow
-
-1. Update schema in src/schema.ts
-2. Run `drizzle-kit generate:pg`
-3. Review generated SQL
-4. Run `drizzle-kit migrate:pg`
-
-**Gotcha**: Regenerate migrations from schema instead of editing them by hand.
-```
-
-↳ Move detailed sections to external docs.
-
-**Missing "why" → Add constraint**
-
-```markdown
-Before: Use openpyxl for Excel, not xlrd.
-
-After: Use openpyxl for Excel, not xlrd. Reason: xlrd only supports .xls (legacy); doesn't support .xlsx.
-```
-
-**Mixed tribal + inferrable → Keep tribal only**
-
-```markdown
-Before:
-
-# Authentication
-
-- Use WorkOS for user management
-- Store session tokens in cookies
-- Set HttpOnly flag on cookies
-- Implement refresh token rotation
-- Use RSA for signing tokens
-
-After:
-
-# WorkOS + Cloudflare Workers
-
-WorkOS SDK doesn't run in Workers. Use custom REST API instead. See apps/shared/auth/workos-rest.ts for endpoints and request format. (Token storage, signing, rotation are discoverable from code/tests.)
-```
+Worked before/afters (convention deletion, skill slimming, missing-why, tribal-only rewrite): [references/examples.md](references/examples.md).
 
 ## Workflow
 
 1. Read the rule/skill/memory file.
-2. Ask: **Is this tribal?** (Will the agent encounter it in context anyway — not merely *could* it be found somewhere?) → If it will surface on its own, delete or move; when unsure, keep.
-3. Ask: **Is this focused?** (< limit?) → If no, extract to references.
-4. Ask: **Does it explain why?** (Constraint, gotcha, non-obvious choice?) → If no, add it.
-5. Apply refactoring patterns: Vague→Specific, Negative→Positive, Imprecise→Precise, Verbose→High-signal.
-6. Commit.
+2. Run the Quick Checklist, then the type-specific checks; delete, move, or add per each failed check.
+3. Apply refactoring patterns: Vague→Specific, Negative→Positive, Imprecise→Precise, Verbose→High-signal.
+4. Commit.
