@@ -15,7 +15,7 @@ Audit and improve existing agent guidance by focusing on **tribal knowledge** (n
 
 ## Targets
 
-- **Memory files**: CLAUDE.md, AGENTS.md, SYSTEM.md — loaded every session; every line costs tokens forever.
+- **Memory files**: CLAUDE.md, AGENTS.md — loaded every session; every line costs tokens forever.
 - **Skills**: `skills/*/SKILL.md` — loaded on trigger; the description is all the model sees until invocation.
 - **Rules**: standalone rule files, whatever the harness calls them.
 - **Agent definitions**: subagent/agent prompt files (`agents/*.md`).
@@ -33,7 +33,7 @@ For every rule, skill, memory entry, or agent prompt:
 ### Memory files (CLAUDE.md / AGENTS.md / SYSTEM.md)
 
 - [ ] **Right file for the audience**: harness-agnostic guidance in the shared file (AGENTS.md/SYSTEM.md); harness-specific mechanics in that harness's file (CLAUDE.md). Duplicated content drifts.
-- [ ] **Remove inferrable content**: discoverable from code, tests, or linting config → delete.
+- [ ] **Remove content inferred in context**: delete rules the agent *will* encounter anyway while doing the applicable work — visible in the files being edited, or surfaced by typecheck/lint/tests. "When working on X, do Y" is suspect: Y is often self-evident once inside X. But *can* be inferred ≠ *will* be inferred — facts buried in obscure corners of the codebase stay written down. When unsure, keep the rule.
 - [ ] **No stale facts**: paths, model names, and tool flags rot — verify each still exists.
 
 ### Skills (`SKILL.md`)
@@ -165,7 +165,7 @@ WorkOS SDK doesn't run in Workers. Use custom REST API instead. See apps/shared/
 ## Workflow
 
 1. Read the rule/skill/memory file.
-2. Ask: **Is this tribal?** (Discoverable from code/tests/external docs?) → If no, delete or move.
+2. Ask: **Is this tribal?** (Will the agent encounter it in context anyway — not merely *could* it be found somewhere?) → If it will surface on its own, delete or move; when unsure, keep.
 3. Ask: **Is this focused?** (< limit?) → If no, extract to references.
 4. Ask: **Does it explain why?** (Constraint, gotcha, non-obvious choice?) → If no, add it.
 5. Apply refactoring patterns: Vague→Specific, Negative→Positive, Imprecise→Precise.
