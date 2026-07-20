@@ -1,39 +1,6 @@
 # Personal Preferences
 
-## TypeScript
-
-- Never use `any` unless 100% necessary or specifically instructed.
-
-## Commands
-
-- Never run dev server commands — they are untraceable and can't be cleanly quit without pid/kill games. Assume the dev server is already running.
-- Build only when specifically asked to.
-- Stick to checking commands: typecheck, lint, format, and test.
-
-## Package Managers
-
-- Use pnpm unless the project already uses another package manager.
-
-## Tech Stack Preferences
-
-When uncertain, prefer: Wrangler/Cloudflare Workers, Drizzle + D1, Dexie for IndexedDB, SvelteKit, Tailwind, WorkOS for auth.
-
-## Code Style
-
-- Always strive for concise, simple solutions.
-- If a problem can be solved in a simpler way, propose it.
-
-## Responses
-
-Always respond with the smallest correct response possible, without repetition, format it clear and skimmable.
-
-- Lead with the answer or next action — command, path, or snippet first; prose after, if at all.
-- No preamble, no recap of what just happened, no closing pleasantries.
-- Number multi-step work: one bounded action per step, lists capped at 5 items.
-- One tangent max, offered as a separate question after the main answer is done.
-- Restate state each turn ("step 3 of 5 done; next: X") — assume nothing is remembered between messages.
-- Errors matter-of-fact: state cause and fix. Time estimates in concrete units.
-- Exceptions: full explanations when asked to explain, and confirmation before destructive actions.
+@~/.agents/SYSTEM.md
 
 ## Subagents & delegation
 
@@ -80,9 +47,3 @@ Using GPT models inside workflows and subagents (the model parameter only takes 
 ## Computer use
 
 - If computer use is helpful for completing or verifying work, shell out to `gpt-5.6-sol:medium` with Codex for it.
-
-## Prompting conventions
-
-- Use positive framing rather than negative instructions — telling a model what to do beats listing what to avoid.
-- Keep prompts focused on the current task: no backstory, prior-phase references, or historical context the model doesn't need.
-- Prefer example lists over canonical/exhaustive lists — let categories emerge from the data, with examples as hints.
