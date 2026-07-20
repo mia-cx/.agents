@@ -27,18 +27,7 @@ The [e18e.dev](https://e18e.dev/) classes:
 
 ### 1. Detect package manager and ecosystem
 
-```bash
-ls pnpm-lock.yaml package-lock.json yarn.lock bun.lockb 2>/dev/null
-```
-
-| Lockfile | Manager | Audit | Outdated |
-|---|---|---|---|
-| `pnpm-lock.yaml` | pnpm | `pnpm audit` | `pnpm outdated` |
-| `package-lock.json` | npm | `npm audit` | `npm outdated` |
-| `yarn.lock` | yarn | `yarn audit` | `yarn outdated` |
-| `bun.lockb` | bun | `bun audit` | `bun outdated` |
-
-For non-JS ecosystems (`pyproject.toml`, `go.mod`, `Cargo.toml`), adapt commands; the classes and propose-only rule still apply.
+Detect the manager from the lockfile and use its `audit`/`outdated` commands. For non-JS ecosystems (`pyproject.toml`, `go.mod`, `Cargo.toml`), adapt commands; the classes and the propose/apply rules still apply.
 
 ### 2. Security
 
@@ -72,7 +61,7 @@ pnpm outdated            # stale direct deps
 
 ### 4. ⚡️ Speedup
 
-- Propose lint rules that catch perf debt: [eslint-plugin-depend](https://github.com/es-tooling/eslint-plugin-depend) (redundant packages with faster replacements), [eslint-plugin-barrel-files](https://github.com/thepassle/eslint-plugin-barrel-files) — or Biome's `noBarrelFile`/`noReExportAll`, oxlint's `no-barrel-file`.
+- Propose the project's linter's rules that catch perf debt — barrel-file and redundant-dependency rules exist for ESLint ([eslint-plugin-depend](https://github.com/es-tooling/eslint-plugin-depend), eslint-plugin-barrel-files), Biome, and oxlint.
 - Flag barrel files and re-export-all patterns in the project's own source (import cost, cold-start time).
 - Flag slow hot-path idioms flagged by e18e: generators in hot code paths, long array-method chains creating intermediates.
 - Base every speedup proposal on a measurement (profile, benchmark, or import-time trace) — not vibes.
@@ -93,7 +82,7 @@ Present one summary, grouped by class, every item actionable:
 ### Security
 | Severity | Package | Installed | Fix | CVE | Status |
 |---|---|---|---|---|---|
-| 🔴 Critical | lodash | 4.17.20 | 4.17.21 | CVE-2021-23337 | ✅ applied, tests pass |
+| 🔴 Critical | lodash | 4.17.20 | 4.17.21 | CVE-2021-23337 | ✅ applied, typecheck + test pass |
 | 🟠 High | old-lib | 2.1.0 | 3.0.1 | CVE-2025-1234 | proposal — fix needs major bump |
 
 ### ✨ Cleanup
