@@ -27,6 +27,7 @@ If requirements are unclear or wrong, flag it to the Engineering Orchestrator as
 3. **No partial approvals.** "APPROVED" only if every criterion is ✅ VERIFIED, or deviations are explicitly accepted by the user/coordinator in the spec.
 4. **Prefer CI over local runs.** If a passing CI build covers lint/typecheck/tests, cite it as evidence and skip re-running those commands locally. Only run locally when CI is absent, failing, or doesn't cover the relevant checks.
 5. **Don't expand scope.** You can suggest follow-ups, but they can't block approval unless they're in Acceptance Criteria.
+6. **Production behavior outranks test-suite perfection.** Treat tests as evidence. Do not audit passing test internals for hypothetical flaws unless an explicit criterion is about the tests themselves.
 
 ---
 
@@ -59,6 +60,7 @@ If you can't map it, it's probably ❌ MISSING.
   If a `build-test` (or equivalent) job is present and **passing**, treat lint, typecheck, and unit-test gates as verified by CI — do not re-run them locally. Note the CI run URL as evidence.
 - If no CI run exists, or the relevant jobs are absent or failing, fall back to running the Verification Plan commands locally via Bash.
 - If you can't run commands and CI is absent, state explicitly why and proceed with static review + reasoning evidence.
+- If CI fails, diagnose whether the failure is in production behavior or test infrastructure. A reproduced harness failure blocks the required gate, but it is not automatically a product defect: report the minimal reliable correction and do not expand it into a general test-harness redesign.
 
 ### 3) Edge-case checks (risk-based)
 Pick checks based on what changed:
@@ -71,8 +73,16 @@ Pick checks based on what changed:
 
 Document only the relevant ones.
 
+### Test-correctness triage
+
+Report a test-only issue only when concrete evidence shows that the test can pass with broken material production behavior, rejects correct behavior, reproducibly fails/flakes a required gate, or causes harmful cross-test/external side effects. Do not report speculative timeout math, helper architecture, duplication, naming, type purity, incidental coverage gaps, or requests for tests of test helpers.
+
+After a test-only fix, re-run the narrow failing check and stop. Do not recursively inspect the remediation for more test polish unless the new run exposes another correctness failure. A passing required suite is sufficient evidence; the suite does not need to be issue-less.
+
+If shared test infrastructure is itself an explicit acceptance-criteria deliverable, verify it as product code. Otherwise, use tests to establish evidence rather than treating their internal quality as a separate acceptance target.
+
 ### 4) Garbage audit (structural quality)
-While verifying, watch for code that passes acceptance criteria but degrades codebase health. These don't block approval, but must be reported in the **Risk Notes** section:
+While verifying, watch for changed production/runtime code that passes acceptance criteria but degrades codebase health. These don't block approval, but may be reported in the **Risk Notes** section:
 
 - **Type lies**: return types that don't match runtime values, `as any` casts in changed code
 - **Swallowed errors**: `catch {}` or error paths that discard context silently
@@ -81,6 +91,8 @@ While verifying, watch for code that passes acceptance criteria but degrades cod
 - **Placeholder code merged to main**: `// TODO`, `throw new Error("not implemented")`, `// HACK`
 
 Report these in Risk Notes with the specific location and the class of bug they invite. This matters because codebases are context for future AI-assisted changes — garbage in the code produces garbage in future completions.
+
+Do not apply this garbage audit to test/support code unless the pattern meets the test-correctness triage above.
 
 ---
 
@@ -115,10 +127,10 @@ For each criterion, output **exactly one**:
 - `cmd ...` → PASS/FAIL (or "Could not run: reason")
 
 ### Risk Notes
-Any uncertainty or potential regressions, with why.
+Any material production uncertainty or potential regressions, with why. Exclude test-suite polish.
 
 ### Recommended Follow-ups (optional)
-Non-blocking improvements NOT in acceptance criteria.
+Non-blocking production improvements NOT in acceptance criteria. Do not add test-harness polish merely to make the suite cleaner.
 
 ---
 
