@@ -4,16 +4,13 @@ description: >-
   Audits project dependencies — security (CVEs) plus the e18e.dev classes:
   cleanup (dependency-tree debt), speedup (runtime performance), levelup
   (modern lean alternatives) — and proposes fixes without applying them.
-  Prefers the shallowest possible dependency graph. Use when the user asks to
-  audit or check dependencies, or mentions outdated packages, vulnerabilities,
-  CVEs, dependency bloat, install size, or upgrades.
+  Use when the user asks to audit or check dependencies, or mentions outdated
+  packages, vulnerabilities, CVEs, dependency bloat, install size, or upgrades.
 ---
 
 # Audit Dependencies
 
 Audit dependencies and **propose** fixes — never apply them. Every finding, in every class, becomes a proposal (finding + suggested fix + risk + effort); the user picks what to act on.
-
-**Prefer the shallowest possible dependency graph.** Every dependency brings its own subtree; fewer, flatter deps beat convenience wrappers. This preference steers all three e18e classes below.
 
 ## Classes
 
@@ -21,7 +18,7 @@ Audit dependencies and **propose** fixes — never apply them. Every finding, in
 
 The [e18e.dev](https://e18e.dev/) classes:
 
-- ✨ **Cleanup** — debt in the dependency tree: packages that are redundant, bloated, unused, or no longer maintained. Fix by removing, or migrating to lighter/faster alternatives and platform built-ins.
+- ✨ **Cleanup** — debt in the dependency tree: packages that are redundant, bloated, unused, or no longer maintained. Prefer the shallowest possible graph — fix by removing, or migrating to lighter/faster alternatives and platform built-ins.
 - ⚡️ **Speedup** — runtime performance of the packages and code in use: lint-detectable patterns (barrel files, redundant re-exports) and slow hot-path idioms. Profile before proposing.
 - 🧩 **Levelup** — adopting modern, lean, focused alternatives to heavyweight established tools (the esbuild-vs-webpack archetype; see [tinylibs](https://github.com/tinylibs), [unjs](https://github.com/unjs), [es-tooling](https://github.com/es-tooling)).
 
