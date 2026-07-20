@@ -1,14 +1,14 @@
 ---
-name: subagents
+name: codex-subagents
 description: >-
   Dispatch subagent work to GPT models via the Codex CLI — directly for
   regular subagents, or through thin Sonnet wrapper agents inside Workflows.
-  Use before spawning any subagent, launching parallel work, using the Agent
-  tool, or authoring a Workflow. Model choice is covered by CLAUDE.md's
+  Use when spawning subagents with codex models (gpt-5.6-sol, gpt-5.5),
+  including inside Workflows. Model choice is covered by CLAUDE.md's
   "Picking the right models".
 ---
 
-# Subagents
+# Codex Subagents
 
 Two dispatch mechanisms. Model choice and when-to-escalate live in CLAUDE.md.
 
