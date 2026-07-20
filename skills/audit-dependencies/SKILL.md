@@ -1,26 +1,29 @@
 ---
 name: audit-dependencies
 description: >-
-  Audits project dependencies across four classes — security (CVEs), cleanup
-  (redundant deps, modern alternatives), speedup (heavy or slow packages),
-  levelup (outdated packages) — and proposes fixes without applying them.
-  Prefers the shallowest possible dependency graph, applying e18e.dev concepts.
-  Use when the user asks to audit or check dependencies, or mentions outdated
-  packages, vulnerabilities, CVEs, dependency bloat, install size, or upgrades.
+  Audits project dependencies — security (CVEs) plus the e18e.dev classes:
+  cleanup (dependency-tree debt), speedup (runtime performance), levelup
+  (modern lean alternatives) — and proposes fixes without applying them.
+  Prefers the shallowest possible dependency graph. Use when the user asks to
+  audit or check dependencies, or mentions outdated packages, vulnerabilities,
+  CVEs, dependency bloat, install size, or upgrades.
 ---
 
 # Audit Dependencies
 
 Audit dependencies and **propose** fixes — never apply them. Every finding, in every class, becomes a proposal (finding + suggested fix + risk + effort); the user picks what to act on.
 
-## Principles
+**Prefer the shallowest possible dependency graph.** Every dependency brings its own subtree; fewer, flatter deps beat convenience wrappers. This preference steers all three e18e classes below.
 
-- **Prefer the shallowest possible dependency graph.** Every dependency brings its own subtree; fewer, flatter deps beat convenience wrappers. Weigh each dep against platform built-ins and the runtime's standard library.
-- Classify findings using [e18e.dev](https://e18e.dev/) classes:
-  - **security** — vulnerabilities and CVEs.
-  - ✨ **cleanup** — redundant dependencies; replace with platform built-ins or modern alternatives.
-  - ⚡️ **speedup** — packages that are heavy to install, load, or run; transitive bloat.
-  - 🧩 **levelup** — outdated packages; propose the modern alternative or upgrade path.
+## Classes
+
+**Security** (generic, not e18e): vulnerabilities and CVEs, covered by the ecosystem's audit commands.
+
+The [e18e.dev](https://e18e.dev/) classes:
+
+- ✨ **Cleanup** — debt in the dependency tree: packages that are redundant, bloated, unused, or no longer maintained. Fix by removing, or migrating to lighter/faster alternatives and platform built-ins.
+- ⚡️ **Speedup** — runtime performance of the packages and code in use: lint-detectable patterns (barrel files, redundant re-exports) and slow hot-path idioms. Profile before proposing.
+- 🧩 **Levelup** — adopting modern, lean, focused alternatives to heavyweight established tools (the esbuild-vs-webpack archetype; see [tinylibs](https://github.com/tinylibs), [unjs](https://github.com/unjs), [es-tooling](https://github.com/es-tooling)).
 
 ## Workflow
 
@@ -49,38 +52,36 @@ Per vulnerability: package, installed version, patched version, CVE, direct or t
 
 For transitive vulnerabilities, propose one of: bump the direct dep that pulls in the fix; a documented override (`pnpm.overrides`) linking the upstream issue; or a written risk acceptance when the vulnerable path is unreachable.
 
-### 3. Cleanup
+### 3. ✨ Cleanup
 
-Find dependencies the project can shed:
+Discover the state of the tree, then flag debt:
 
 ```bash
 npx knip                 # unused deps and exports
 pnpm dedupe --check      # duplicate versions in the graph
 pnpm why <package>       # who pulls in a suspect package
+pnpm outdated            # stale direct deps
 ```
 
-- Flag deps replaceable by platform built-ins (`fetch`, `structuredClone`, `node:` stdlib, `Intl`, native `Array`/`Object` methods) — the [module-replacements](https://github.com/es-tooling/module-replacements) list covers the common offenders.
-- Flag single-use micro-deps and convenience wrappers whose job is a few lines of code.
+- Visualize suspects with [npmgraph](https://npmgraph.js.org/) (tree complexity) and [pkg-size.dev](https://pkg-size.dev) (install size).
+- Flag deps pulling in large subtrees not used elsewhere — with e18e's caveat: some depth exists for good reasons (older Node support, shared modules); check before proposing removal.
+- Flag duplicated functionality: multiple versions of one package, or separate packages doing the same job (e.g. `glob` + `fast-glob`) — propose standardizing on the better one.
+- Flag redundant deps replaceable by platform built-ins (`fetch`, `structuredClone`, `node:` stdlib, `Intl`) — the [module-replacements](https://github.com/e18e/module-replacements) list covers the common offenders.
+- Flag unmaintained packages (no releases/commits in years) and single-use micro-deps whose job is a few lines of code.
+- For outdated packages: patch/minor bumps are batchable low-risk proposals; majors get a per-package migration plan (never batched — each carries its own breaking changes).
 
-### 4. Speedup
+### 4. ⚡️ Speedup
 
-- Measure the graph: `pnpm ls --depth Infinity | wc -l` before/after view per proposal.
-- Flag the heaviest subtrees (install size, dep count) — `npx howfat <package>` or [pkg-size.dev](https://pkg-size.dev) per suspect.
-- Flag deps with lighter modern equivalents doing the same job.
+- Propose lint rules that catch perf debt: [eslint-plugin-depend](https://github.com/es-tooling/eslint-plugin-depend) (redundant packages with faster replacements), [eslint-plugin-barrel-files](https://github.com/thepassle/eslint-plugin-barrel-files) — or Biome's `noBarrelFile`/`noReExportAll`, oxlint's `no-barrel-file`.
+- Flag barrel files and re-export-all patterns in the project's own source (import cost, cold-start time).
+- Flag slow hot-path idioms flagged by e18e: generators in hot code paths, long array-method chains creating intermediates.
+- Base every speedup proposal on a measurement (profile, benchmark, or import-time trace) — not vibes.
 
-### 5. Levelup
+### 5. 🧩 Levelup
 
-```bash
-pnpm outdated --format json 2>/dev/null || pnpm outdated
-```
-
-| Bump | Example | Risk |
-|---|---|---|
-| Patch | `1.2.3` → `1.2.5` | Low — batchable |
-| Minor | `1.2.3` → `1.4.0` | Low-medium — check changelog |
-| Major | `1.2.3` → `2.0.0` | High — needs a migration plan |
-
-Where a package is outdated *and* has a stronger modern successor, propose the successor instead of the version bump.
+- Where an established heavyweight dep is in use, check for a modern lean alternative that covers the project's actual usage (most projects use a fraction of the API surface).
+- Where a package is outdated *and* has a stronger modern successor, propose the successor instead of the version bump.
+- State what's lost in the trade (customizability, ecosystem plugins) alongside what's gained (size, speed, fewer transitive deps).
 
 ### 6. Propose
 
@@ -98,28 +99,29 @@ Present one summary, grouped by class, every item actionable:
 | Package | Reason | Proposal | Graph impact |
 |---|---|---|---|
 | node-fetch | native `fetch` since Node 18 | remove, use global fetch | −12 transitive deps |
+| svelte 4.2.0 | major behind (5.55.0) | migration plan (runes) — separate issue | — |
 
 ### ⚡️ Speedup
-| Package | Weight | Proposal | Risk |
-|---|---|---|---|
-| moment | 4.2 MB, locale bloat | replace with `Intl` / date-fns | Medium — API differs |
+| Finding | Evidence | Proposal |
+|---|---|---|
+| barrel file `src/index.ts` re-exports 40 modules | +180ms import time | split imports; adopt `noBarrelFile` rule |
 
 ### 🧩 Levelup
-| Package | Current | Latest | Bump | Proposal |
-|---|---|---|---|---|
-| svelte | 4.2.0 | 5.55.0 | Major | migration plan (runes) — separate issue |
+| Package | Alternative | Gained | Lost |
+|---|---|---|---|
+| webpack | vite/esbuild | 10× faster builds, −200 deps | custom loader X needs replacement |
 
 ### Suggested order
 1. Security patches (commands above, low risk)
 2. Cleanup quick wins (largest graph reduction first)
-3. Majors/levelups — one issue per package, coupled packages grouped
+3. Majors and levelups — one issue per package, coupled packages grouped
 ```
 
-For approved majors, draft a `gh issue create` with: why, breaking changes, worktree setup, upgrade steps, and acceptance criteria (typecheck, lint, test pass; affected features verified).
+For approved majors and levelups, draft a `gh issue create` with: why, breaking changes, worktree setup, upgrade steps, and acceptance criteria (typecheck, lint, test pass; affected features verified).
 
 ## Rules
 
 - **Propose, never apply.** All classes — security included. Execution starts only after the user picks proposals.
 - **One proposal per concern.** Each major bump and each replacement carries its own risk; keep them separately acceptable.
-- **Quantify graph impact.** Every cleanup/speedup proposal states the dependency-count or size delta.
+- **Quantify graph impact.** Every cleanup/levelup proposal states the dependency-count or size delta; every speedup proposal cites a measurement.
 - **Overrides are documented loans.** Any proposed override links the upstream issue and names its removal condition.
