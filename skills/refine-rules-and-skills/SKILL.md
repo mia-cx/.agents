@@ -6,9 +6,9 @@ description: >-
   Use when authoring new skills and editing skills to ensure they don't need to be audited after.
 ---
 
-# Audit Rules & Skills
+# Refine Rules & Skills
 
-Audit and improve existing agent guidance by focusing on **tribal knowledge** (non-obvious facts agents can't infer from code) and removing noise, redundancy, and inferrable content.
+Refine agent guidance — while authoring it or auditing it later — by focusing on **tribal knowledge** (non-obvious facts agents can't infer from code) and removing noise, redundancy, and inferrable content.
 
 ## Targets
 
