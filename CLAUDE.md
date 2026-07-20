@@ -39,27 +39,34 @@ Always respond with the smallest correct response possible, without repetition, 
 
 - Claude Fable orchestrates: tasks are defined with acceptance criteria and outputs are verified against them before acceptance. See the `subagents` skill for the workflow and exact commands.
 
-## Glossary
-
-- **Intelligence**: how hard a problem the model can handle unsupervised.
-- **Taste**: UI/UX, code quality, API design, and copy.
-
 ## Picking the right models
 
-Rankings, higher = better. Cost reflects what I actually pay (the Codex sub is near-free at my usage), not list price. Intelligence and taste as defined in the glossary.
+Higher ranking is better
 
-| model | cost | intelligence | taste |
-|---|---|---|---|
-| gpt-5.6-sol | 9 | 8 | 5 |
-| sonnet-5 | 5 | 5 | 7 |
-| opus-4.8 | 4 | 7 | 8 |
-| fable-5 | 2 | 9 | 9 |
+- **Cost**: reflects what I actually pay, as well as token efficiency, not list price. The Codex subscription is near-free at my usage.
+- **Intelligence**: how hard a problem the model can handle unsupervised.
+- **Taste**: Everything user-facing. UI/UX, copy, code quality and API design.
+
+| model       | cost | intelligence | taste |
+| ----------- | ---- | ------------ | ----- |
+| gpt-5.6-sol | 8    | 8            | 4     |
+| gpt-5.5     | 9    | 7            | 4     |
+| sonnet-5    | 5    | 4            | 7     |
+| opus-4.8    | 4    | 6.5          | 8     |
+| fable-5     | 2    | 9            | 9     |
 
 - **fable-5**: orchestrator, verification, final integration. Run at `high` reasoning effort or below — effort applies per tool call, so xhigh/max overthink every step at much higher cost.
 - **gpt-5.6-sol:medium**: default for all delegated work, via `codex exec` — effectively free, delegate liberally.
 - **sonnet-5**: workflow wrapper shells only (see the `subagents` skill).
 
-These are defaults, not limits. You have standing permission to redo delegated work at a higher tier — including doing it yourself — when output misses the acceptance bar. Judge the output, not the price tag. Use cheap dispatches to gather information before committing expensive work.
+How to apply:
+
+- These are defaults, not limits. You have standing permission to override them: if a cheaper model's output doesn't meet the bar, rerun or redo the work with a smarter model without asking. Judge the output, not the price tag. Escalating costs less than shipping mediocre work.
+- Cost is a tie-breaker only; when axes conflict for anything that ships, intelligence > taste > cost. Use cheaper options to gather information and try things before moving work to a more expensive option.
+- Bulk/mechanical work (clear-spec implementation, data analysis, migrations): gpt-5.5 — it's effectively free.
+- Anything user-facing (UI, copy, API design) needs taste ≥ 7.
+- Reviews of plans/implementations: fable-5 or opus-4.8, optionally gpt-5.6-sol as an extra independent perspective.
+- Never use Haiku.
 
 ## Computer use
 
