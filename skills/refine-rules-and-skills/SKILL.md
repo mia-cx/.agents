@@ -1,13 +1,9 @@
 ---
-name: audit-rules-and-skills
+name: refine-rules-and-skills
 description: >-
-  Audits and improves agent guidance files — memory files (CLAUDE.md,
-  AGENTS.md, SYSTEM.md), skills (SKILL.md), rules, and agent definitions —
-  keeping tribal knowledge and removing noise. Applies refactoring patterns
-  (Vague→Specific, Negative→Positive, Imprecise→Precise, Verbose→High-signal)
-  to tighten guidance.
-  Use when the user asks to audit, optimize, clean up, or tighten rules,
-  skills, memory files, or agent prompts.
+  Audits and refines agent guidance files — memory files (CLAUDE.md, AGENTS.md, SYSTEM.md), skills (SKILL.md), rules, and agent definitions — keeping tribal knowledge and removing noise. Applies refactoring patterns (Vague→Specific, Negative→Positive, Imprecise→Precise, Verbose→High-signal) to tighten guidance.
+  Use when the user asks to audit, optimize, refine, clean up, or tighten rules, skills, memory files, or agent prompts.
+  Use when authoring new skills and editing skills to ensure they don't need to be audited after.
 ---
 
 # Audit Rules & Skills
