@@ -55,8 +55,10 @@ Prioritize findings over summary. For each finding include:
 - concrete failure mode
 - suggested fix direction
 
-If there are no substantive findings, say so and name any residual test gaps.
+Do not edit files. If there are no substantive findings, say so and name any residual test gaps.
 ```
+
+Keep "Do not edit files" — the 5.6 models (sol especially) are eager to start fixing what they review.
 
 Add task-specific context when useful: requirements, risky areas, expected behavior, relevant tests, or files you are unsure about.
 
