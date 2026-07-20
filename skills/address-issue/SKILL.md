@@ -1,0 +1,161 @@
+---
+name: address
+description: >-
+  Addresses a provided GitHub issue end-to-end in the workspace supplied by the
+  harness, planning the work, executing TODOs with one commit per completed
+  TODO, and filing a PR. Use when the user says "address issue", asks to work an
+  issue end-to-end, implement an issue with TODO commits, or file a PR for an
+  issue.
+---
+
+# Address
+
+Implement a provided issue end-to-end in the workspace and Git context supplied
+by the harness or user. Keep the plan visible and history tidy: understand the
+issue, draft concrete TODOs, update them as work progresses, commit after each
+TODO, then file a PR.
+
+## Workflow
+
+### 1. Identify the issue and repo state
+
+- Parse the provided issue number or URL. If ambiguous, ask for the issue.
+- Treat the repository location, worktree, branch, and base branch supplied by
+  the harness or user as authoritative. Do not create, remove, relocate, or
+  switch worktrees or branches unless the user explicitly requests it.
+- From the supplied repository root, confirm the working tree is safe:
+
+```bash
+git rev-parse --show-toplevel
+git status --short
+gh issue view <issue-number> --json number,title,body,labels,state
+```
+
+If the issue is closed, stop unless the user explicitly asked to reopen or work
+closed issues. If local uncommitted changes exist outside `.plans/`, avoid mixing
+work: ask the user how to handle it. Do not move the task elsewhere as a
+workaround.
+
+### 2. Read, understand, and draft the plan
+
+Read the full issue body and relevant code before editing. Search for existing
+patterns, tests, and project conventions.
+
+Create or update a plan file at `.plans/<number>-<slug>.md` when plans are part
+of the repository's conventions:
+
+```markdown
+# #<number> <issue title>
+
+## Summary
+<What the issue asks for in your own words.>
+
+## Acceptance criteria
+- [ ] <Observable outcome from the issue>
+
+## TODOs
+- [ ] <Small concrete implementation step>
+- [ ] <Small concrete test/validation step>
+
+## Notes
+- Decisions, discoveries, and commands run.
+```
+
+Rules for TODOs:
+
+- Make each TODO independently committable.
+- Include tests/validation as TODOs, not afterthoughts.
+- Prefer 3–8 TODOs. Split vague TODOs before starting.
+- If requirements are unclear, add questions under Notes and ask before coding.
+
+Commit the initial plan if it is part of the repo's normal workflow. If `.plans/`
+is ignored or repo-local only, keep it updated without committing.
+
+### 3. Execute one TODO at a time
+
+For each TODO:
+
+1. Mark it in progress in the plan (`- [~]`) or add a short Notes entry.
+2. Make the smallest code/test/doc changes needed.
+3. Run focused validation for that TODO.
+4. Update the plan:
+   - Mark the TODO complete (`- [x]`).
+   - Record validation commands and results.
+   - Add or revise TODOs when discoveries change the plan.
+5. Commit immediately before starting the next TODO:
+
+```bash
+git status --short
+git diff
+git add <paths>
+git commit -m "<type>(<scope>): <complete this TODO>" -m "Implements TODO: <exact TODO text>.\n\nRefs #<issue-number>"
+```
+
+Commit guidelines:
+
+- One completed TODO per commit, unless a TODO was split; then commit each split
+  item separately.
+- Keep commits buildable. Do not commit knowingly broken intermediate states.
+- Include `Refs #<issue-number>` in intermediate commits. Use `Closes #<issue-number>`
+  only in the final implementation commit or PR body.
+- Never batch several completed TODOs into one commit just to save time.
+
+### 4. Final validation
+
+After all TODOs are complete:
+
+```bash
+git status --short
+# Run the repo's relevant checks, e.g.:
+pnpm test
+pnpm lint
+pnpm check
+```
+
+Use the project's actual scripts. If a command fails, diagnose and either fix it
+or record the residual risk clearly before filing the PR.
+
+### 5. Push and file the PR
+
+Push the harness-provided current branch without renaming or replacing it:
+
+```bash
+git push -u origin HEAD
+```
+
+Use the target base supplied by the harness or user. If neither specifies one,
+follow the repository's established default. Use the repo PR template if
+present; otherwise use:
+
+```markdown
+## Closes #<issue-number>
+
+<Short summary.>
+
+### Plan executed
+- [x] <TODO 1>
+- [x] <TODO 2>
+
+### Tests
+- `<command>` — pass/fail with brief result
+```
+
+Create the PR:
+
+```bash
+gh pr create --base <base> --head <current-branch> --title "<type>(<scope>): <summary>" --body-file <body-file>
+```
+
+Report the PR URL, current branch, completed TODOs, and validation.
+
+## Rules
+
+- Leave workspace, worktree, branch, and base-branch selection to the harness or
+  explicit user instructions.
+- Do not create or switch worktrees or branches as an implementation step.
+- Read the issue and relevant code before drafting TODOs.
+- Keep the plan current while working; the plan is the source of truth.
+- Commit after each completed TODO.
+- Do not file the PR until all required TODOs are complete or explicitly marked
+  as deferred with a reason.
+- Prefer existing repo conventions over this skill's defaults.
