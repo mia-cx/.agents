@@ -54,6 +54,15 @@
       "skillFolderHash": "cea8b52c2cec6930c72ebbdfdd6c65d0383a39e6",
       "installedAt": "2026-04-11T11:16:46.037Z",
       "updatedAt": "2026-04-11T11:16:46.037Z"
+    },
+    "interface-design": {
+      "source": "dammyjay93/interface-design",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/dammyjay93/interface-design.git",
+      "skillPath": ".claude/skills/interface-design/SKILL.md",
+      "skillFolderHash": "60daa768b428f42a2346c757ed9049602f5cbaa0",
+      "installedAt": "2026-07-18T21:43:14.229Z",
+      "updatedAt": "2026-07-18T21:43:14.229Z"
     }
   },
   "dismissed": {
@@ -62,15 +71,18 @@
   "lastSelectedAgents": [
     "amp",
     "antigravity",
+    "antigravity-cli",
     "cline",
     "codex",
     "cursor",
     "deepagents",
-    "firebender",
     "gemini-cli",
     "github-copilot",
-    "kimi-cli",
+    "kimi-code-cli",
     "opencode",
-    "warp"
+    "warp",
+    "zed",
+    "pi",
+    "claude-code"
   ]
 }
