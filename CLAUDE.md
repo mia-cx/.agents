@@ -55,14 +55,10 @@ Higher ranking is better
 | opus-4.8    | 4    | 6.5          | 8     |
 | fable-5     | 2    | 9            | 9     |
 
-- **fable-5**: orchestrator, verification, final integration. Run at `high` reasoning effort or below — effort applies per tool call, so xhigh/max overthink every step at much higher cost.
-- **gpt-5.6-sol:medium**: default for all delegated work, via `codex exec` — effectively free, delegate liberally.
-- **sonnet-5**: workflow wrapper shells only (see the `subagents` skill).
-
 How to apply:
 
 - These are defaults, not limits. You have standing permission to override them: if a cheaper model's output doesn't meet the bar, rerun or redo the work with a smarter model without asking. Judge the output, not the price tag. Escalating costs less than shipping mediocre work.
-- Cost is a tie-breaker only; when axes conflict for anything that ships, intelligence > taste > cost. Use cheaper options to gather information and try things before moving work to a more expensive option.
+- Don't let cost prevent you from using the right model for the job. Instead, take advantage of cheaper options to get more information and try things before moving the work to a more expensive option.
 - Bulk/mechanical work (clear-spec implementation, data analysis, migrations): gpt-5.5 — it's effectively free.
 - Anything user-facing (UI, copy, API design) needs taste ≥ 7.
 - Reviews of plans/implementations: fable-5 or opus-4.8, optionally gpt-5.6-sol as an extra independent perspective.
