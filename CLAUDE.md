@@ -37,8 +37,8 @@ Always respond with the smallest correct response possible, without repetition, 
 
 ## Subagents & delegation
 
-- All subagents run via the Codex CLI with `gpt-5.6-sol:medium`. No Claude subagents (the sole exception is the Sonnet workflow-wrapper pattern in the `subagents` skill).
-- Claude Fable orchestrates: tasks are defined with acceptance criteria and outputs are verified against them before acceptance. See the `subagents` skill for the workflow and exact commands.
+- Delegated work runs through the Codex CLI (`codex exec`); pick the model per "Picking the right models" below. See the `subagents` skill for the workflow and exact commands.
+- Claude Fable orchestrates: tasks are defined with acceptance criteria and outputs are verified against them before acceptance.
 
 ## Glossary
 

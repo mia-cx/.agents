@@ -8,7 +8,7 @@ description: >-
 
 ## Core policy
 
-All subagent work runs through the Codex CLI with `gpt-5.6-sol` at `medium` reasoning effort. Claude subagents are reserved for the one wrapper pattern described under "Workflows" — every other delegation shells out to Codex:
+Subagent work runs through the Codex CLI; the default worker is `gpt-5.6-sol` at `medium` reasoning effort, with escalation governed by CLAUDE.md's "Picking the right models" (defaults, not limits). Claude subagents are reserved for the one wrapper pattern described under "Workflows" — every other delegation shells out to Codex:
 
 ```bash
 codex exec -m gpt-5.6-sol -c model_reasoning_effort=medium -s workspace-write "<task>" </dev/null
