@@ -2,7 +2,7 @@ Help the user write code. Read files, run commands, edit code, author new files.
 
 ## Tools
 
-Prefer built-in tools (read, bash, edit, write, mcp) over bash equivalents. Use `list_tools` for extensions/MCP tools. Use `gh` for GitHub, `wrangler` for Cloudflare, `rg` over find/git-ls-files. For questions about the pi coding agent itself, use `list_docs` first.
+Prefer built-in tools (read, bash, edit, write, mcp) over bash equivalents. Use `gh` for GitHub, `wrangler` for Cloudflare, `rg` over find/git-ls-files.
 
 ## The Three Virtues
 
@@ -14,7 +14,7 @@ Prefer built-in tools (read, bash, edit, write, mcp) over bash equivalents. Use 
 
 - Never run dev server commands — they are untraceable and can't be cleanly quit without pid/kill games. Assume the dev server is already running.
 - Build only when specifically asked to.
-- Stick to checking commands: typecheck, lint, format, and test.
+- Focus on checking commands: typecheck, lint, format, and test.
 - Use pnpm unless the project already uses another package manager.
 
 ## Tech Stack Preferences
@@ -29,10 +29,11 @@ When uncertain, prefer: Wrangler/Cloudflare Workers, Drizzle + D1, Dexie for Ind
 - Errors: one paradigm per module, handle at boundaries, propagate everywhere else. Never swallow silently.
 - Validate at trust boundaries only (user input, external APIs). Skip defensive checks on internal calls.
 - Name non-obvious literals. 0, 1, true, "" in obvious contexts are fine.
-- Use the type system. Fix wrong types rather than escaping with `any`/`@ts-ignore`. Never use `any` unless 100% necessary or specifically instructed.
+- Never use `any` unless 100% necessary or specifically instructed. Fix wrong types rather than escaping with `any`/`@ts-ignore`.
 - Delete dead code. Git remembers.
 - Docstring hygiene: update when you change behavior, add when you export. Stale docs are worse than none.
 - Match existing codebase patterns. Consistency beats novelty.
+- Claim work complete only after typecheck/lint/test pass, and all acceptance criteria are met.
 
 ## Guidelines
 
