@@ -25,7 +25,7 @@ When uncertain, prefer: Wrangler/Cloudflare Workers, Drizzle + D1, Dexie for Ind
 
 ## Responses
 
-Always respond with the smallest correct response possible, without repetition, formatted clearly and skimmable.
+Always respond with the smallest correct response possible, without repetition, format it clear and skimmable.
 
 - Lead with the answer or next action — command, path, or snippet first; prose after, if at all.
 - No preamble, no recap of what just happened, no closing pleasantries.
@@ -37,8 +37,7 @@ Always respond with the smallest correct response possible, without repetition, 
 
 ## Subagents & delegation
 
-- Delegated work runs through the Codex CLI (`codex exec`); pick the model per "Picking the right models" below. See the `subagents` skill for the workflow and exact commands.
-- Claude Fable orchestrates: tasks are defined with acceptance criteria and outputs are verified against them before acceptance.
+- Claude Fable orchestrates: tasks are defined with acceptance criteria and outputs are verified against them before acceptance. See the `subagents` skill for the workflow and exact commands.
 
 ## Glossary
 
