@@ -127,6 +127,15 @@ gh api graphql -f query='
 
 Organize fixes into logical commits (one per concern, not one per thread). Use conventional commit messages. Push to the PR branch.
 
+After every successful push produced by a discussion-resolution run, request fresh reviews from both Codex and CodeRabbit. Post separate comments so each integration receives an unambiguous trigger:
+
+```bash
+gh pr comment <number> --body '@codex review'
+gh pr comment <number> --body '@coderabbit review'
+```
+
+Do this after every resolution push, including later pushes in a repeated review/resolve loop. Do not post the triggers when the run made no changes and pushed nothing.
+
 Present a summary table:
 
 | Thread | File | Classification | Action | Commit |

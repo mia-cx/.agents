@@ -1,14 +1,22 @@
 ---
 name: pr-merge
 description: >-
-  Merges a pull request with style. Posts a flavourful summary as a PR comment (visible in GitHub), merges with a clean conventional commit subject, then fast-forwards the local main/base branch. Use when a PR is ready to merge and you want memorable context without cluttering the git log.
+  Merges a pull request with style. Posts a flavourful summary, merges with a
+  clean conventional commit subject, closes directly linked issues, then
+  fast-forwards the local base branch. Use when a PR is ready to merge and you
+  want memorable context without cluttering the git log.
 ---
 
 <!-- @format -->
 
 # Merge a Pull Request
 
-You merge pull requests with style. You read the PR, understand what it does, post a flavourful comment on the PR, execute the merge with a clean commit, then fast-forward the local main/base branch — no copy-pasting required. Follow the workflow below.
+You merge pull requests with style. You read the PR, understand what it does, post a flavourful comment on the PR, execute the merge with a clean commit, close its linked issues, then fast-forward the local main/base branch — no copy-pasting required. Follow the workflow below.
+
+The user's request to merge is authoritative confirmation that required human
+validation is complete. Do not leave a PR or linked issue open because a human
+validation checkbox, issue checklist, or validation comment was not separately
+updated before the merge request.
 
 ## Workflow
 
@@ -27,7 +35,12 @@ You merge pull requests with style. You read the PR, understand what it does, po
 
 - Scan the PR body and commits for issue references (`#N`, `Fixes #N`, `Closes #N`).
 - Run `gh issue view <N> --json title,body,labels` for any linked issues to understand the full context.
-- Note which issues should be closed by this merge.
+- Record every open issue directly referenced by the PR body or commits so it
+  can be closed after a successful merge. Do not recursively close parent,
+  dependency, or related issues mentioned only inside those linked issues.
+- Treat the merge request as confirmation that human-validation requirements
+  on those directly linked issues have passed, even when their checkboxes have
+  not yet been updated.
 
 ### 4. Check merge readiness
 
@@ -111,6 +124,22 @@ If the fast-forward fails because the local base worktree is dirty or diverged, 
 
 Then confirm with a summary like **"PR #N merged and local main fast-forwarded. Another one bites the dust. 🎤"**
 
+### 8. Close linked issues
+
+After the remote merge succeeds, close every still-open issue recorded in step
+3 as completed. Link the merged PR or merge commit in the closing comment so
+the issue timeline contains the completion evidence:
+
+```bash
+gh issue close <issue-number> --reason completed \
+  --comment "Completed by #<pr-number> (<merge-commit>)."
+```
+
+Close issues whether they were linked with `Refs`, `Fixes`, or `Closes`; GitHub
+may already have auto-closed `Fixes`/`Closes` references, so check current state
+and skip an issue that is already closed. Only leave a directly linked issue
+open when the user explicitly asks to do so.
+
 ## Merge commit subject format
 
 Clean and professional — conventional commit style:
@@ -131,5 +160,6 @@ type(scope): short imperative description (#N)
 - [ ] CI checks confirmed passing.
 - [ ] Flavour comment posted via `gh pr comment` — visible in GitHub timeline.
 - [ ] Merge executed via `gh pr merge` with subject only — no body.
+- [ ] Every directly linked open issue closed as completed, unless the user explicitly requested otherwise.
 - [ ] Local main/base branch fast-forwarded after the merge, or a specific blocker reported.
 - [ ] Confirmation summary sent to user.
