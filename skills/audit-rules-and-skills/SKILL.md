@@ -39,7 +39,7 @@ For every rule, skill, memory entry, or agent prompt:
 ### Skills (`SKILL.md`)
 
 - [ ] **Description carries the trigger**: it must state when to invoke, in the words a user would use — the model sees nothing else when deciding.
-- [ ] **Remove bloat**: skip "why this matters" essays — focus on steps.
+- [ ] **Remove bloat**: cut motivational prose about why the *topic* matters — it persuades a reader, not an agent. Keep the one-clause "because Y constraint" on individual rules (that's the "Explains the why" check, not bloat).
 - [ ] **Keep examples concrete**: runnable/adaptable, not generic.
 - [ ] **Remove redundancy**: if external docs or another skill cover it, link instead.
 - [ ] **Task-class applicable**: works for a family of tasks, not one instance.
