@@ -46,10 +46,18 @@ Always respond with the smallest correct response possible, without repetition, 
 
 ## Picking the right models
 
-| model | role |
-|---|---|
-| claude-fable-5 | Orchestrator, verification, final integration. Run at `high` reasoning effort or below — effort applies per tool call, so xhigh/max overthink every step at much higher cost. |
-| gpt-5.6-sol:medium | All subagent/delegated work, via `codex exec`. Generous Codex sub usage makes it effectively free — delegate liberally. |
+Rankings, higher = better. Cost reflects what I actually pay (the Codex sub is near-free at my usage), not list price. Intelligence and taste as defined in the glossary.
+
+| model | cost | intelligence | taste |
+|---|---|---|---|
+| gpt-5.6-sol | 9 | 8 | 5 |
+| sonnet-5 | 5 | 5 | 7 |
+| opus-4.8 | 4 | 7 | 8 |
+| fable-5 | 2 | 9 | 9 |
+
+- **fable-5**: orchestrator, verification, final integration. Run at `high` reasoning effort or below — effort applies per tool call, so xhigh/max overthink every step at much higher cost.
+- **gpt-5.6-sol:medium**: default for all delegated work, via `codex exec` — effectively free, delegate liberally.
+- **sonnet-5**: workflow wrapper shells only (see the `subagents` skill).
 
 These are defaults, not limits. You have standing permission to redo delegated work at a higher tier — including doing it yourself — when output misses the acceptance bar. Judge the output, not the price tag. Use cheap dispatches to gather information before committing expensive work.
 
