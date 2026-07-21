@@ -15,10 +15,11 @@ Two dispatch mechanisms. Model choice and when-to-escalate live in CLAUDE.md.
 ## Regular subagents: codex CLI
 
 ```bash
-codex exec -m gpt-5.6-sol -c model_reasoning_effort=medium -s workspace-write "<task>" </dev/null
+TASK_FILE=/path/to/task.md
+codex exec -m gpt-5.6-sol -c model_reasoning_effort=medium -s workspace-write - < "$TASK_FILE"
 ```
 
-- **Close stdin** (`</dev/null`): piped stdin makes codex block on "reading additional input" instead of running.
+- **Prompt transport**: write dynamic or untrusted task text to `TASK_FILE` with the Write tool, then pass the file on stdin. Keep task text out of the Bash command so it cannot alter shell syntax.
 - **Sandbox**: `-s workspace-write` for implementation, `-s read-only` for investigation and review.
 - **Untrusted directories**: outside a trusted git repo codex exits early — add `--skip-git-repo-check` or `git init` the scratch dir.
 - **Parallel**: one background Bash call per task. Parallel implementation tasks get separate worktrees so edits don't collide.
@@ -31,8 +32,16 @@ Workflow/Agent `model` parameters only take Claude models. To use a GPT model in
 
 ```js
 agent(
-  `Run this exact command via Bash and return its output verbatim, adding no analysis:
-codex exec -m gpt-5.6-sol -c model_reasoning_effort=medium -s read-only "<task>" </dev/null`,
+  `Delegate the task between the tags to Codex. Create a temporary file with
+mktemp, save only the tagged task text to it with the Write tool, then pass the
+file on stdin to this fixed command (substitute only the shell-quoted temp path):
+codex exec -m gpt-5.6-sol -c model_reasoning_effort=medium -s read-only - < <temp-path>
+
+Return Codex's output verbatim, adding no analysis.
+
+<task>
+${task}
+</task>`,
   { model: 'sonnet', effort: 'low', label: 'gpt-5.6-sol:review-auth', schema: REPORT }
 )
 ```

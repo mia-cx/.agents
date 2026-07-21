@@ -35,8 +35,11 @@ Capability depends on where this runs — check before dispatching:
 ARTIFACT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/codex-verify.XXXXXX")"
 
 codex exec -m gpt-5.6-sol -c model_reasoning_effort=medium -s workspace-write \
+  -C "$ARTIFACT_DIR" --skip-git-repo-check \
   - < "$ARTIFACT_DIR/prompt.md" > "$ARTIFACT_DIR/log.md"
 ```
+
+Set the Codex working root to the temporary artifact directory. This keeps `workspace-write` available for screenshots and the report without making the source repository writable.
 
 Computer-use runs are long: pass an explicit Bash timeout, or run in the background and poll for `$ARTIFACT_DIR/report.md`.
 

@@ -17,8 +17,8 @@ Use Codex as an independent reviewer when the user wants a second-pass review or
 ## Workflow
 
 1. Identify the review target: uncommitted changes, base branch, commit SHA, PR checkout, or specific files.
-2. Create a temporary artifact directory for the prompt and report.
-3. Run `codex review` from the repo root with a focused review prompt.
+2. Create a temporary artifact directory for the report and, for a custom review, the prompt.
+3. Run `codex review` from the repo root with either a built-in target or a custom prompt.
 4. Read the report and verify important claims against the code before presenting them.
 
 Command shapes:
@@ -29,22 +29,26 @@ REPORT="$ARTIFACT_DIR/report.md"
 PROMPT="$ARTIFACT_DIR/prompt.md"
 
 # Review staged, unstaged, and untracked changes.
-codex review --uncommitted - < "$PROMPT" > "$REPORT"
+codex review --uncommitted > "$REPORT"
 
 # Review current branch against a base branch.
-codex review --base main - < "$PROMPT" > "$REPORT"
+codex review --base main > "$REPORT"
 
 # Review a single commit.
-codex review --commit <sha> - < "$PROMPT" > "$REPORT"
+codex review --commit <sha> > "$REPORT"
+
+# Use custom instructions instead of a built-in target.
+codex review - < "$PROMPT" > "$REPORT"
 ```
 
 - The model comes from `~/.codex/config.toml` (gpt-5.6-sol:high — the right tier for review depth); override with `-c model="..."` when the rubric says otherwise.
-- Stdin carries the prompt here, so `</dev/null` does not apply.
+- `--uncommitted`, `--base`, and `--commit` are mutually exclusive with a custom `PROMPT`. Use one of the first three command shapes for a built-in target; use the final shape when custom instructions matter more.
+- Stdin carries only the custom prompt in the final shape, so `</dev/null` does not apply there.
 - Long reviews can exceed Bash's 10-minute timeout: pass an explicit timeout, or run in the background and poll for `$REPORT`.
 
 ## Review Prompt
 
-Keep it simple and self-contained — Codex needs no Claude-style scaffolding:
+For a custom-prompt review, keep the prompt simple and self-contained — Codex needs no Claude-style scaffolding:
 
 ```text
 Review these changes for bugs, regressions, missing tests, security issues, and requirement mismatches.

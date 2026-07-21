@@ -13,7 +13,7 @@ Refine agent guidance — while authoring it or auditing it later — by focusin
 ## Targets
 
 - **Memory files**: CLAUDE.md, AGENTS.md — loaded every session; every line costs tokens forever.
-- **Skills**: `skills/*/SKILL.md` — loaded on trigger; the description is all the model sees until invocation.
+- **Skills**: `skills/**/SKILL.md` — discovered recursively, including namespaced skills, and loaded on trigger; the description is all the model sees until invocation.
 - **Rules**: standalone rule files, whatever the harness calls them.
 - **Agent definitions**: subagent/agent prompt files (`agents/*.md`).
 
@@ -143,4 +143,4 @@ Worked before/afters (convention deletion, skill slimming, missing-why, tribal-o
 3. Apply refactoring patterns: Vague→Specific, Negative→Positive, Imprecise→Precise, Verbose→High-signal.
 4. Commit.
 
-This skill is the static audit. When a skill's quality is contested or hard to judge by reading — or its description mis-triggers in practice — hand off to the `skill-creator` skill for the empirical loop: test prompts, with/without-skill baseline runs, and script-backed description-trigger optimization.
+This skill is the static audit. When a skill's quality is contested or hard to judge by reading — or its description mis-triggers in practice — add an empirical loop: run representative test prompts with and without the skill, compare results, and optimize description triggering with a repeatable script when needed.
