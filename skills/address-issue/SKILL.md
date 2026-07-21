@@ -3,9 +3,9 @@ name: address-issue
 description: >-
   Addresses a provided GitHub issue end-to-end in the workspace supplied by the
   harness, planning the work, executing TODOs with one commit per completed
-  TODO, and filing a PR. Use when the user says "address issue", asks to work an
-  issue end-to-end, implement an issue with TODO commits, or file a PR for an
-  issue.
+  TODO, and filing a PR when the issue needs a code change. Use when the user
+  says "address issue", asks to work an issue end-to-end, implement an issue
+  with TODO commits, or file a PR for an issue.
 ---
 
 # Address Issue
@@ -39,6 +39,12 @@ workaround.
 
 Read the full issue body and relevant code before editing. Search for existing
 patterns, tests, and project conventions.
+
+Not every issue needs an implementation fix. If investigation shows no code
+change is warranted — a question to answer, a duplicate, already fixed, or
+works-as-intended — post the findings as an issue comment, close with the
+matching reason (`gh issue close <n> --reason "not planned"` or `completed`),
+and stop. No branch, no PR.
 
 Create or update a plan file at `.plans/<number>-<slug>.md` when plans are part
 of the repository's conventions:

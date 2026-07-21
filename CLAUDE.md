@@ -10,17 +10,20 @@
 
 Higher ranking is better
 
-- **Cost**: reflects what I actually pay, as well as token efficiency, not list price. The Codex subscription is near-free at my usage.
-- **Intelligence**: how hard a problem the model can handle unsupervised.
+- **Cost**: what a task actually costs me, not per-token list price — a low token price means nothing when the model burns millions of tokens per request (why sonnet-5 ranks low despite cheap tokens). Scores follow Artificial Analysis cost-per-task at the effort we run; the near-free Codex subscription lifts GPT models into the top band.
+- **Intelligence**: how hard a problem the model can handle unsupervised. Rescaled 0–10 from Artificial Analysis max-reasoning-effort scores — the model's ceiling. Still always run at high reasoning effort (token efficiency); bridge the gap to the ceiling with tools, skills, and prompt engineering.
 - **Taste**: Everything user-facing. UI/UX, copy, code quality and API design.
 
-| model       | cost | intelligence | taste |
-| ----------- | ---- | ------------ | ----- |
-| gpt-5.6-sol | 8    | 8            | 4     |
-| gpt-5.5     | 9    | 7            | 4     |
-| sonnet-5    | 5    | 4            | 7     |
-| opus-4.8    | 4    | 6.5          | 8     |
-| fable-5     | 2    | 9            | 9     |
+| model         | cost | intelligence | taste |
+| ------------- | ---- | ------------ | ----- |
+| fable-5       | 2    | 10           | 9     |
+| gpt-5.6-sol   | 9    | 9.5          | 4     |
+| opus-4.8      | 4.5  | 8            | 8     |
+| gpt-5.6-terra | 9.5  | 7.5          | 4     |
+| gpt-5.5       | 8.5  | 7            | 4     |
+| sonnet-5      | 5.5  | 6.5          | 7     |
+| gpt-5.6-luna  | 10   | 5.5          | 3     |
+| sonnet-4.6    | 6.5  | 3.5          | 7.5   |
 
 How to apply:
 
