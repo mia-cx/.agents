@@ -101,8 +101,9 @@ Commit guidelines:
 - One completed TODO per commit, unless a TODO was split; then commit each split
   item separately.
 - Keep commits buildable.
-- Include `Refs #<issue-number>` in intermediate commits. Use `Closes #<issue-number>`
-  only in the final implementation commit or PR body.
+- Include `Refs #<issue-number>` in intermediate commits. `Closes #<issue-number>`
+  appears only in the final implementation commit or PR body, and only when the
+  issue is fully resolved.
 
 ### 4. Final validation
 
@@ -128,23 +129,43 @@ git push -u origin HEAD
 ```
 
 Use the target base supplied by the harness or user. If neither specifies one,
-follow the repository's established default. Use the repo PR template if
-present; otherwise use:
+follow the repository's established default. Check repo conventions before
+building the body: a `.github/PULL_REQUEST_TEMPLATE.md` is the body skeleton
+when present, and PR rules in CONTRIBUTING.md (required sections, title format)
+win over this skill's defaults. Default body:
 
 ```markdown
-## Closes #<issue-number>
+<Flavour opener: 1-3 sentences summarizing the PR's impact with personality —
+same voice as the pr-merge comment and git-commit-and-push bodies. Dry wit, a
+pun, a lyric all work; the substance always comes through.>
 
-<Short summary.>
+Closes #<n>
+Refs #<m> — addresses <scope covered>; still open: <what remains>
 
-### Plan executed
-- [x] <TODO 1>
-- [x] <TODO 2>
+### Acceptance criteria
+- [x] <Observable outcome from the plan file or issue>
+
+### What's in this PR
+- <What was built, key decisions, notable APIs>
 
 ### Tests
-- `<command>` — pass/fail with brief result
+- `<command>` — actual result (e.g. 42/42 passing)
 ```
 
-Create the PR:
+Body rules:
+
+- Link every issue the PR addresses, and choose the keyword deliberately:
+  `Closes #n` only when the PR fully resolves the issue; otherwise `Refs #n`
+  with one line on the scope covered and what remains. This is what `pr-merge`
+  reads to decide which issues to close.
+- Acceptance criteria come from the plan file or issue. All checked — or the
+  PR isn't ready; explicitly deferred criteria stay unchecked under a `Refs`
+  issue with the deferral noted.
+- Tests reflect what was actually run, with real results.
+- No `Co-Authored-By` trailers in the PR body.
+
+Create the PR — title in conventional style, under ~72 chars, no trailing
+period, no PR number:
 
 ```bash
 gh pr create --base <base> --head <current-branch> --title "<type>(<scope>): <summary>" --body-file <body-file>
