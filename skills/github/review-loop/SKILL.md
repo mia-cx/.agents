@@ -2,46 +2,64 @@
 name: review-loop
 description: >-
   Drives a pull request to merge-readiness by looping parallel adversarial
-  reviews (a Claude and a GPT reviewer per aspect: correctness, security,
-  coverage), fixing real findings, resolving discussion threads, and
-  re-triggering PR review bots until no real issues remain. Use when the user
-  asks for a review loop, a PR review, to address review comments or resolve
-  discussions, or to get a PR merge-ready.
+  reviews across correctness, security, and coverage, fixing real findings,
+  resolving discussion threads, and re-triggering supported PR review bots
+  until no real issues remain. Uses GPT-only review when invoked from Codex
+  and mixed Claude/GPT review otherwise. Use when the user asks for a review
+  loop, a PR review, to address review comments or resolve discussions, or to
+  get a PR merge-ready.
 ---
 
 # Review Loop
 
 Drive the PR for the current branch to merge-readiness: run adversarial reviews, fix what is real, resolve discussions, re-trigger review bots, repeat on the new head until clean. Do not merge — that is a separate, explicit request.
 
+## Runtime gate
+
+Classify the runner once at loop start and keep that mode for every cycle:
+
+- **Codex-native** when `REVIEW_LOOP_RUNNER=codex`, `CODEX_THREAD_ID` is set, or `CODEX_CI` is set. Run only the GPT reviewer for each aspect: three reviewers total.
+- **Mixed** otherwise. Run one Claude and one GPT reviewer for each aspect: six reviewers total.
+
+Workflow wrappers that do not preserve Codex's environment set `REVIEW_LOOP_RUNNER=codex` before invoking this skill. Record the selected mode and evidence in the final report.
+
 ## Reviewer matrix
 
-Three aspects, each reviewed by two independent adversaries — one Claude agent and one GPT run via codex — six reviewers in parallel, every one at high reasoning effort. Resolve concrete models from CLAUDE.md "Picking the right models" at loop start, per side (one Claude, one GPT):
+Review three aspects in parallel at high reasoning effort. Always run the GPT side; add the Claude side only in mixed mode. Resolve concrete models from CLAUDE.md "Picking the right models" at loop start:
 
-| Aspect | Hunts for | Model pick per side |
+| Aspect | Hunts for | Model pick |
 | --- | --- | --- |
 | Correctness | Behavior that deviates from the acceptance criteria, wrong results, broken edge cases, contract violations | Top intelligence, stepping down one tier when that buys ≥2 cost points and intelligence stays ≥6.5 |
 | Security | Glaring exploitable issues: injection, authz gaps, secret leaks, unsafe input handling | Top intelligence, cost ignored |
-| Coverage | Failing tests, and changed behavior in this PR that has no unit test though it is testable | Claude: best cost. GPT: subscription costs are near-uniform, so best cost with intelligence ≥6 |
+| Coverage | Failing tests, and changed behavior in this PR that has no unit test though it is testable | GPT: best cost with intelligence ≥6. Claude when enabled: best cost |
 
 Mechanics:
 
-- **Claude reviewers**: spawn via the Agent tool (or Workflow `agent()`), read-only mandate, model per the pick, high effort.
+- **Claude reviewers in mixed mode**: spawn via the Agent tool (or Workflow `agent()`), read-only mandate, model per the pick, high effort.
 - **GPT reviewers**: the `codex-review` skill, at the picked model and high reasoning effort.
+
+### Cursor reviewers (opt-in)
+
+Only when the user asks for cursor reviews. Adds a third reviewer per aspect — same three aspects, same brief — via the Cursor CLI on `auto`:
+
+```bash
+agent -p --model auto --mode plan "<same aspect brief>" > "$ARTIFACT_DIR/cursor-<aspect>.md"
+```
+
+`--mode plan` keeps the reviewer read-only. Run all three in parallel alongside the gate-selected reviewers, feed their findings through the same verification in step 3, and report the cursor reviewer count in the final report.
 
 Each reviewer gets the same brief: the PR diff target, the acceptance criteria, its single aspect, and an adversarial mandate — actively try to break the change; report only findings with a concrete failure mode (input/state → wrong outcome) and file:line; if nothing is found, say so and name what was inspected.
 
 ## Loop
 
 1. **Gather context.** `gh pr view --json number,title,body,headRefName,baseRefName,url`, `gh pr diff`, acceptance criteria from the PR body / linked issue / plan file, and unresolved review threads (query below). Record the head SHA.
-2. **Spawn all six reviewers in parallel** against that head.
+2. **Spawn the mode-selected reviewers in parallel** against that head: three in Codex-native mode, six in mixed mode, plus three more when cursor reviews are opted in.
 3. **Verify findings yourself.** Read the cited code before acting; dedupe across reviewers. A finding survives only with a concrete failure mode — see "What counts as real". Agreement between both sides of an aspect is strong signal, but a single verified finding is enough.
 4. **Fix real findings at the right level.** Prefer making the bug class unrepresentable (types, ownership, API shape) over spot-patches; check for sibling instances of the same bug; add a test proving the fix. Same standard for findings from external threads.
 5. **Resolve discussions.** For each unresolved thread: fixed → reply with the commit SHA and rationale; false positive or already handled → reply with the evidence (exact code path). Then resolve the thread.
-6. **Commit and push** (conventional commits, one per concern), then **re-trigger every review bot already in the PR conversation** — and only if something was pushed:
+6. **Commit and push** (conventional commits, one per concern), then **re-trigger supported review bots already in the PR conversation** — and only if something was pushed. The allowlist is:
    - `chatgpt-codex-connector` → `gh pr comment <n> --body '@codex review'`
    - `coderabbitai` → `gh pr comment <n> --body '@coderabbitai review'`
-   - Cursor Bugbot → `gh pr comment <n> --body 'bugbot run'`
-   - Other agents in the conversation → their documented trigger comment.
 7. **Wait for required CI and the re-triggered bot reviews**, then repeat from step 1 on the new head while real issues keep surfacing.
 
 ## What counts as real
@@ -80,11 +98,11 @@ gh api graphql -f threadId=ID -f query='
 
 All true for the latest pushed head:
 
-- All six reviewers report no real findings.
+- Every reviewer selected by the runtime gate — plus the cursor reviewers when opted in — reports no real findings.
 - No actionable unresolved discussion threads remain.
 - Required CI passes, or a failure is proven unrelated and reported as such.
-- Every bot in the conversation reviewed the latest head and raised nothing real.
+- Every re-triggered supported bot reviewed the latest head and raised nothing real.
 
 ## Final report
 
-Report: final head SHA, cycles run, fixes made, CI and bot-review status, and remaining thread count. Close with a human-verification handoff: the manual checks automation could not prove (real integrations, UI flows, credentials, deploy behavior), each with exact steps, expected result, and failure signals — or state explicitly that no manual verification is needed.
+Report: final head SHA, runner mode and evidence, reviewer count, cycles run, fixes made, CI and bot-review status, and remaining thread count. Close with a human-verification handoff: the manual checks automation could not prove (real integrations, UI flows, credentials, deploy behavior), each with exact steps, expected result, and failure signals — or state explicitly that no manual verification is needed.
