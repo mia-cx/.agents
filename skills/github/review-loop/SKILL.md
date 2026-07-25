@@ -40,13 +40,15 @@ Mechanics:
 
 ### Cursor reviewers (opt-in)
 
-Only when the user asks for cursor reviews. Adds a third reviewer per aspect — same three aspects, same brief — via the Cursor CLI:
+Only when the user asks for cursor reviews. Adds a third reviewer per aspect — same three aspects, same brief — run locally through the `agent` cursor-cli binary:
 
 ```bash
 agent -p --model auto --mode plan "<same aspect brief>" > "$ARTIFACT_DIR/cursor-<aspect>.md"
 ```
 
 **Always `--model auto`, for every cursor reviewer, every cycle.** `auto` is the only permitted value of this flag. Auto-routed requests are the included Cursor plan usage; every other model id (`gpt-5.6-sol-high`, `claude-opus-5-thinking-high`, `composer-2.5`, anything from `agent --list-models`) bills the API pool per token. Requests to run cursor reviewers on a specific model get the same answer: run `auto`, or skip the cursor path — and say which. The model-picking rubric in CLAUDE.md governs the Claude and GPT reviewers only; it never selects a cursor model.
+
+**This path is the local `agent` CLI only.** Cursor's PR-side bots are a different mechanism and are never a substitute here: leave `@cursor review`, `@bugbot run`, and every other PR comment trigger out of it. Bots already present in the PR conversation are handled by the bot-allowlist step of the loop, which does not include Cursor.
 
 `--mode plan` keeps the reviewer read-only. Run all three in parallel alongside the gate-selected reviewers, feed their findings through the same verification in step 3, and report the cursor reviewer count in the final report.
 
