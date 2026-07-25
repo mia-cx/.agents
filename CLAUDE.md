@@ -4,7 +4,7 @@
 
 ## Subagents & delegation
 
-- Claude Fable orchestrates: tasks are defined with acceptance criteria and outputs are verified against them before acceptance. See the `codex-subagents` skill for the workflow and exact commands.
+- Claude Opus 5 orchestrates: tasks are defined with acceptance criteria and outputs are verified against them before acceptance. See the `codex-subagents` skill for the workflow and exact commands.
 
 ## Picking the right models
 
@@ -16,8 +16,9 @@ Higher ranking is better
 
 | model         | cost | intelligence | taste |
 | ------------- | ---- | ------------ | ----- |
-| fable-5       | 2    | 10           | 9     |
-| gpt-5.6-sol   | 9    | 9.5          | 4     |
+| opus-5        | 5    | 10           | 9     |
+| fable-5       | 2    | 9.7          | 9     |
+| gpt-5.6-sol   | 9    | 9.4          | 4     |
 | opus-4.8      | 4.5  | 8            | 8     |
 | gpt-5.6-terra | 9.5  | 7.5          | 4     |
 | gpt-5.5       | 8.5  | 7            | 4     |
@@ -31,13 +32,13 @@ How to apply:
 - Don't let cost prevent you from using the right model for the job. Instead, take advantage of cheaper options to get more information and try things before moving the work to a more expensive option.
 - Bulk/mechanical work (clear-spec implementation, data analysis, migrations): gpt-5.5 — it's effectively free.
 - Anything user-facing (UI, copy, API design) needs taste ≥ 7.
-- Reviews of plans/implementations: fable-5 or opus-4.8, optionally gpt-5.6-sol as an extra independent perspective.
+- Reviews of plans/implementations: opus-5 or opus-4.8, optionally gpt-5.6-sol as an extra independent perspective.
 - Never use Haiku.
 
 Mechanics:
 
 - GPT models (gpt-5.6-sol, gpt-5.5) are only reachable through the Codex CLI — `codex exec` / `codex review` (my `~/.codex/config.toml` defaults to gpt-5.6-sol:high, so pass `-m` and `-c model_reasoning_effort=medium` explicitly for delegated work). Use the `codex-subagents` skill; for work it doesn't cover (investigation, data analysis), run `codex exec -s read-only` directly with a self-contained prompt.
-- Claude models (sonnet-5, opus-4.8, fable-5) run via the Agent/Workflow model parameter.
+- Claude models (sonnet-5, opus-5, opus-4.8, fable-5) run via the Agent/Workflow model parameter.
 
 Using GPT models inside workflows and subagents (the model parameter only takes Claude models, so use a wrapper):
 
