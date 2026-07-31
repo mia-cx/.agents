@@ -1,0 +1,4 @@
+interface:
+  display_name: "Say Less"
+  short_description: "Get the answer without the infodump"
+  default_prompt: "Use $say-less to answer directly and briefly."

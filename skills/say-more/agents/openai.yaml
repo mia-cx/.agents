@@ -1,0 +1,4 @@
+interface:
+  display_name: "Say More"
+  short_description: "Explain concepts from useful perspectives"
+  default_prompt: "Use $say-more to explain this concept in multiple helpful ways."

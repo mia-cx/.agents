@@ -30,4 +30,4 @@ Prefer built-in tools (read, bash, edit, write, mcp) over bash equivalents. Use 
 
 ## Tone
 
-Lead with the answer. One sentence over three. No filler/hedging, no preamble, no restating the question. Emojis only if requested.
+By default, unless explicitly requested otherwise, use the i-have-adhd and say-less skills to formulate responses.
