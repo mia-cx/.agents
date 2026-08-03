@@ -59,9 +59,9 @@ Each reviewer gets the same brief: the PR diff target, the acceptance criteria, 
 1. **Gather context.** `gh pr view --json number,title,body,headRefName,baseRefName,url`, `gh pr diff`, acceptance criteria from the PR body / linked issue / plan file, and unresolved review threads (query below). Record the head SHA.
 2. **Spawn the mode-selected reviewers in parallel** against that head: three in Codex-native mode, six in mixed mode, plus three more when cursor reviews are opted in.
 3. **Verify findings yourself.** Read the cited code before acting; dedupe across reviewers. A finding survives only with a concrete failure mode — see "What counts as real". Agreement between both sides of an aspect is strong signal, but a single verified finding is enough.
-4. **Fix real findings at the right level.** Prefer making the bug class unrepresentable (types, ownership, API shape) over spot-patches; check for sibling instances of the same bug; add a test proving the fix. Same standard for findings from external threads.
+4. **Fix real findings.** See "Fixing" for the required sequence: baseline, reproduce, fix at the right level, prove with a red→green test, re-verify against the baseline. Same standard for findings from external threads.
 5. **Resolve discussions.** For each unresolved thread: fixed → reply with the commit SHA and rationale; false positive or already handled → reply with the evidence (exact code path). Then resolve the thread.
-6. **Commit and push** (conventional commits, one per concern), then **re-trigger supported review bots already in the PR conversation** — and only if something was pushed. The allowlist is:
+6. **Commit and push** (conventional commits, one per concern, each verified against the baseline before it leaves the machine), then **re-trigger supported review bots already in the PR conversation** — and only if something was pushed. The allowlist is:
    - `chatgpt-codex-connector` → `gh pr comment <n> --body '@codex review'`
    - `coderabbitai` → `gh pr comment <n> --body '@coderabbitai review'`
 7. **Wait for required CI and the re-triggered bot reviews**, then repeat from step 1 on the new head while real issues keep surfacing.
@@ -78,6 +78,29 @@ Stop rather than churn on:
 - Hypothetical fault chains with no credible runtime path, and coverage of states already excluded by types.
 
 Impact and plausibility decide — not whether a reviewer can imagine a scenario. Give extra scrutiny to high-impact boundaries (auth, persistence, destructive operations, concurrency) even when failure odds are low.
+
+## Fixing
+
+Step 4 in detail. This loop writes code into a PR whose shape someone already agreed to, and it grades its own work on the next pass — so a fix that trades a reported bug for an unreported one reads as progress. The sequence below exists to make that trade visible while it is still cheap to undo.
+
+**Baseline before the first fix of a cycle.** Run the project's checks — test suite, typecheck, build, lint gate — and record what passes and what is already failing. Without this, "checks pass" after a fix is uninterpretable: you cannot separate a failure you caused from one that was red when you arrived. Pre-existing failures stay pre-existing and get reported, not folded into an unrelated fix.
+
+**Reproduce before fixing.** Every finding gets a failing test or a concretely traced execution path first. A finding you cannot reproduce is not verified — return it to step 3 rather than fixing on faith.
+
+**Fix at the right level.** Prefer making the bug class unrepresentable (types, ownership, API shape) over spot-patches, and check for sibling instances of the same bug. If the right-level fix turns out to need restructuring beyond what this PR is for, stop: report it as a blocker, apply the spot-patch as an explicit interim, and say which it is. Do not silently grow the PR.
+
+**Red then green.** The test proving the fix must fail before the fix and pass after. A test written afterward that never went red proves nothing, and it will keep passing when the bug returns.
+
+**Blast-radius pass on the fix itself, before moving to the next finding:**
+
+- Trace what the change touches — callers, callees, shared state ownership, persistence, permissions, concurrency, external contracts.
+- Name what becomes newly possible: stale state, broken compatibility, privilege expansion, data loss, races, a second path that bypasses the new guard.
+- Put safeguards inside the fix rather than stacking guards at call sites.
+- Cover credible induced failures with tests. Not every theoretical one.
+
+**Re-run the baseline. Any check that went pass → fail is your regression.** Revert the fix and redesign it — a regression is not a new finding to schedule, it is evidence the fix was wrong. Do not adjust the check to accommodate the new behavior. The one exception is a test that was asserting the buggy behavior itself; that requires saying so explicitly in the commit message and the thread reply, with the reason the old assertion was wrong.
+
+**Fixes are findings too.** From cycle 2 onward, before treating a finding as an original defect, check whether it lands in code an earlier cycle of this loop touched. If it does, the earlier fix is the defect — revisit its design instead of patching its output. Otherwise the loop will happily converge on a tower of corrections to its own mistakes.
 
 ## Discussion thread mechanics
 
@@ -106,7 +129,10 @@ All true for the latest pushed head:
 - No actionable unresolved discussion threads remain.
 - Required CI passes, or a failure is proven unrelated and reported as such.
 - Every re-triggered supported bot reviewed the latest head and raised nothing real.
+- The project's checks pass locally, with nothing regressed from the baseline recorded at the start of the last cycle.
+- The worktree and the pushed PR head agree.
+- The acceptance criteria still hold against the full cumulative diff, not just the last cycle's changes.
 
 ## Final report
 
-Report: final head SHA, runner mode and evidence, reviewer count, cycles run, fixes made, CI and bot-review status, and remaining thread count. Close with a human-verification handoff: the manual checks automation could not prove (real integrations, UI flows, credentials, deploy behavior), each with exact steps, expected result, and failure signals — or state explicitly that no manual verification is needed.
+Report: final head SHA, runner mode and evidence, reviewer count, cycles run, fixes made, any regression the loop caused and reverted, pre-existing failures left in place, CI and bot-review status, and remaining thread count. Close with a human-verification handoff: the manual checks automation could not prove (real integrations, UI flows, credentials, deploy behavior), each with exact steps, expected result, and failure signals — or state explicitly that no manual verification is needed.
