@@ -38,7 +38,7 @@ How to apply:
 Mechanics:
 
 - GPT models (gpt-5.6-sol, gpt-5.5) are only reachable through the Codex CLI — `codex exec` / `codex review` (my `~/.codex/config.toml` defaults to gpt-5.6-sol:high, so pass `-m` and `-c model_reasoning_effort=medium` explicitly for delegated work). Use the `codex-subagents` skill; for work it doesn't cover (investigation, data analysis), run `codex exec -s read-only` directly with a self-contained prompt.
-- Claude models (sonnet-5, opus-5, opus-4.8, fable-5) run via the Agent/Workflow model parameter.
+- Claude models run via the Agent/Workflow `model` parameter, but that parameter is **unversioned** — it accepts only `opus`, `sonnet`, `fable`, `haiku`, each resolving to the current release of that tier (so `sonnet` is sonnet-5, not sonnet-4.6). Older point releases in the table above are therefore not selectable through Agent/Workflow. When the rubric picks one, either accept the current release and say so, or use a mechanism that takes an explicit model id.
 
 Using GPT models inside workflows and subagents (the model parameter only takes Claude models, so use a wrapper):
 
