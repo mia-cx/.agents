@@ -53,10 +53,13 @@ Summarize the PR's impact with personality — a senior dev proud of what the te
 Merge immediately after the comment — no approval round-trip:
 
 ```bash
-gh pr merge <number> --merge --subject "type(scope): short imperative description (#N)"
+gh pr merge <number> --merge --delete-branch --subject "type(scope): short imperative description (#N)"
 ```
 
 - Subject only, **no body** — the flavour lives in the comment.
+- `--delete-branch` matters most in a stack: GitHub retargets a child PR onto the merged base only
+  when the head branch is deleted, so keeping it means retargeting every child by hand. Merged
+  branches are recoverable from the merge commit, so this costs nothing.
 - Under ~72 chars, no trailing period, PR number at the end.
 - `--merge` by default; match the repo's convention (`--squash` / `--rebase`) when it has one — check `gh api repos/{owner}/{repo} --jq '.allow_merge_commit, .allow_squash_merge, .allow_rebase_merge'` if unsure.
 
