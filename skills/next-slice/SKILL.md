@@ -17,7 +17,7 @@ Transition from a just-merged slice to the next one. This skill handles the in-b
 ### 1. Verify the current slice is done
 
 - Identify the repo root (the main worktree, not a `.worktrees/` child), the current worktree, and its feature branch.
-- Confirm the PR for the current slice is merged. If not, stop and report — the slice isn't done (`review-loop` / `pr-merge` come first).
+- Confirm the PR for the current slice is merged. If not, stop and report — the slice isn't done (`review-relay` / `pr-merge` come first).
 
 ### 2. Clean up the finished slice
 
