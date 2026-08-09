@@ -20,6 +20,8 @@ Drive the PR for the current branch to merge-readiness as a relay race: each pro
 
 One reviewer per leg, from one provider, covering all three domains at once. Fix before every handoff — a fresh pair of eyes on fresh code is the point.
 
+With Cursor omitted, the normal relay alternates Codex and Claude indefinitely. The host-aware first leg below only decides which of those two starts. A user may override the lineup for one run; record that as runtime state and never persist it into this skill's defaults.
+
 Set the lineup from the host — the agent that invoked this skill — classified once at loop start:
 
 | Host | Lineup (laps) | Classified by |
@@ -28,12 +30,19 @@ Set the lineup from the host — the agent that invoked this skill — classifie
 | Codex | claude → codex → cursor | `REVIEW_LOOP_RUNNER=codex`, `CODEX_THREAD_ID`, or `CODEX_CI` |
 | Cursor | codex → claude → cursor | `REVIEW_LOOP_RUNNER=cursor` or `CURSOR_AGENT` |
 
-The host never runs the first leg: the first opinion on the diff comes from outside the agent that wrote it. Workflow wrappers that do not preserve their host's environment set `REVIEW_LOOP_RUNNER` before invoking this skill. **Cursor is opt-in** — drop it from the lineup unless the user asked for cursor reviews, leaving a two-provider lap. Record the host, its evidence, and the resulting lineup in the final report.
+The host never runs the first leg: the first opinion on the diff comes from outside the agent that wrote it. Workflow wrappers that do not preserve their host's environment set `REVIEW_LOOP_RUNNER` before invoking this skill. **Cursor is opt-in** — drop it from the lineup unless the user asked for cursor reviews, leaving the alternating two-provider lap. Record the host, its evidence, and the resulting lineup in the final report.
 
 Provider mechanics, at high reasoning effort in every case:
 
 - **claude** — spawn via the Agent tool (or Workflow `agent()`) with a read-only mandate, at the top-intelligence model from CLAUDE.md "Picking the right models".
-- **codex** — the `codex-review` skill, at the top-intelligence GPT model from the same rubric.
+- **codex** — use this skill's runtime wrapper with the top-intelligence GPT model selected by the local Codex configuration:
+
+  ```bash
+  review_relay_skill_dir="<directory containing this SKILL.md>"
+  "$review_relay_skill_dir/scripts/run-codex-review.sh" "$PROMPT_FILE" "$ARTIFACT_DIR/codex-$LEG"
+  ```
+
+  Resolve the script path relative to this `SKILL.md`. It runs `codex -s danger-full-access review -`; the read-only sandbox fails at the first bundled bubblewrap tool call, while `codex exec` with stdin can exit successfully with an empty report. Exit 0 is insufficient: the wrapper rejects an empty report.
 - **cursor** — the local `agent` cursor-cli binary:
 
   ```bash
@@ -43,6 +52,30 @@ Provider mechanics, at high reasoning effort in every case:
   **Always `--model auto`.** `auto` is the only permitted value of this flag. Auto-routed requests are the included Cursor plan usage; every other model id (`gpt-5.6-sol-high`, `claude-opus-5-thinking-high`, `composer-2.5`, anything from `agent --list-models`) bills the API pool per token. Requests to run the cursor reviewer on a specific model get the same answer: run `auto`, or drop cursor from the lineup — and say which. The CLAUDE.md model rubric governs the claude and codex legs only; it never selects a cursor model. `--mode plan` keeps the reviewer read-only.
 
   This path is the local `agent` CLI only. Cursor's PR-side bots are a different mechanism and never a substitute: leave `@cursor review`, `@bugbot run`, and every other PR comment trigger out of it. Bots already in the PR conversation are handled by the bot-allowlist step, which does not include Cursor.
+
+### Codex runtime contract
+
+Keep the Codex prompt at 25 physical lines or fewer; long briefs cause the CLI reviewer to stall or fail to produce a final report. Its first line is:
+
+```text
+Do not invoke any skill, and do not spawn sub-agents. Review yourself; do not edit files.
+```
+
+Compress the shared reviewer brief without dropping its content: target diff and SHA; acceptance criteria; correctness/security/coverage; concrete failure format; breadth-first and sibling sweep; dry-pass requirement; resolved-finding ledger; focused verification commands. Treat repository decisions and recon as authoritative. Browse or re-scrape a live integration only for a concrete unresolved contradiction, because unconstrained recon can turn one leg into a duplicate investigation.
+
+Codex writes the report only when the process finishes. A zero-byte report while the process is alive is not a failure; keep waiting and give the user progress updates. A finished nonzero process or empty report is a failed attempt: record it, fix the invocation, and rerun the same lineup slot. It never counts as a leg.
+
+## Runtime state and resume
+
+Create a stable artifact directory for the PR under the system temp directory and keep `state.md` there. Before the first leg — or when resuming a handoff — record and verify:
+
+- PR number, base/head branches, baton SHA, host evidence, lineup, and next leg.
+- Acceptance-criteria sources and the open PR stack (`gh pr list --json number,headRefName,baseRefName,headRefOid`). Compare descendant diffs when deciding whether a finding is live, already fixed downstream, or superseded; a base defect that descendants inherit is still live.
+- Baseline commands/results, required CI, supported bots present, unresolved thread IDs, and which bot reviews target the baton SHA.
+- Every attempted leg: provider, reviewed SHA, report/trace paths, outcome, and whether it counts.
+- A finding ledger: stable ID, failure mode, disposition, evidence, fixing SHA, affected files, and induced regression if any.
+
+On resume, compare the PR head with the recorded baton before doing work. Reuse valid completed legs and dispositions; rerun only stale, interrupted, failed, or empty-report attempts. Feed reviewers a compact resolved-finding ledger so a repeated rejection needs new evidence rather than another vote.
 
 ## Reviewer brief
 
@@ -77,7 +110,7 @@ The next provider in the lineup takes the baton and runs steps 1–7. Then the h
    - `chatgpt-codex-connector` → `gh pr comment <n> --body '@codex review'`
    - `coderabbitai` → `gh pr comment <n> --body '@coderabbitai review'`
 6. **Resolve discussions**, now that the fixes have SHAs. For each unresolved thread: fixed → reply with the commit SHA and rationale; false positive or already handled → reply with the evidence (exact code path). Then resolve the thread.
-7. **Wait for required CI and the re-triggered bot reviews**, then hand the baton to the next provider in the lineup.
+7. **Wait for required CI and the re-triggered bot reviews**, then hand the baton to the next provider in the lineup. A PR bot review counts only when its reviewed commit OID equals the current baton. Reviews racing in on an older head are recorded as stale, and the bot is re-triggered after the next push rather than credited to the new head.
 
 A leg that produces no fixes still hands off; skip the push and bot re-trigger, since nothing changed.
 
@@ -147,6 +180,7 @@ All true for the latest pushed head:
 - The project's checks pass locally, with nothing regressed from the baseline recorded at the start of the last leg.
 - The worktree and the pushed PR head agree.
 - The acceptance criteria still hold against the full cumulative diff, not just the last leg's changes.
+- Any behavior that depends on a real sandbox, browser, credential, deployment, or third-party integration has either been smoke-tested in that environment or remains an explicit manual handoff. More static review legs do not substitute for this evidence.
 
 ### Converged: the leg went test-only
 
@@ -160,4 +194,4 @@ This never suppresses a finding. Everything real still gets fixed in that final 
 
 ## Final report
 
-Report: final head SHA, host and the evidence that classified it, the lineup used, the legs actually run in order, fixes made, any regression the loop caused and reverted, pre-existing failures left in place, CI and bot-review status, and remaining thread count. Close with a human-verification handoff: the manual checks automation could not prove (real integrations, UI flows, credentials, deploy behavior), each with exact steps, expected result, and failure signals — or state explicitly that no manual verification is needed.
+Report: final head SHA, host and the evidence that classified it, lineup used, the legs and failed attempts actually run in order, fixes made, any regression the loop caused and reverted, pre-existing failures left in place, CI and latest-head bot-review status, and remaining thread count. Close with a human-verification handoff: the manual checks automation could not prove (real integrations, UI flows, credentials, deploy behavior), each with exact steps, expected result, and failure signals — or state explicitly that no manual verification is needed.
