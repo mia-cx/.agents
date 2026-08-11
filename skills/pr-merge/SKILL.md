@@ -29,7 +29,32 @@ The user's request to merge is authoritative confirmation that required human va
 
 If the PR is not ready, report the blockers and stop. Do not merge a PR that isn't green.
 
-### 3. Post the flavour comment
+### 3. Retarget any stacked children first
+
+Before merging, find open PRs whose base is *this* PR's head branch:
+
+```bash
+head="$(gh pr view <number> --json headRefName --jq '.headRefName')"
+gh pr list --state open --json number,baseRefName \
+  --jq ".[] | select(.baseRefName == \"$head\") | .number"
+```
+
+Retarget each onto this PR's base **before** the merge:
+
+```bash
+gh api -X PATCH repos/{owner}/{repo}/pulls/<child> -f base="$base"
+```
+
+Do not skip this and rely on GitHub retargeting them for you. Deleting a branch that is still the
+base of an open PR **closes that PR**, and the recovery is awkward: a closed PR cannot be retargeted,
+and it cannot be reopened while its base branch is missing — you have to push the deleted branch
+back, reopen, retarget, then delete it again. GitHub's own retarget-on-merge does not reliably beat
+the branch deletion to it.
+
+`gh pr edit --base` is the obvious command and it fails on repos with Projects (classic) enabled, so
+prefer the REST call above.
+
+### 4. Post the flavour comment
 
 Before merging, post the narrative as a PR comment so it lives in GitHub's timeline:
 
@@ -48,7 +73,7 @@ Summarize the PR's impact with personality — a senior dev proud of what the te
 **chore:**
 > *"I fought the deps and the deps won"* — bumped everything that wasn't pinned, fixed the two breaking changes, and updated the lockfile. CI is green and the audit is clean.
 
-### 4. Merge
+### 5. Merge
 
 Merge immediately after the comment — no approval round-trip:
 
@@ -63,7 +88,7 @@ gh pr merge <number> --merge --delete-branch --subject "type(scope): short imper
 - Under ~72 chars, no trailing period, PR number at the end.
 - `--merge` by default; match the repo's convention (`--squash` / `--rebase`) when it has one — check `gh api repos/{owner}/{repo} --jq '.allow_merge_commit, .allow_squash_merge, .allow_rebase_merge'` if unsure.
 
-### 5. Fast-forward the local base branch
+### 6. Fast-forward the local base branch
 
 Update the local base (the PR's `baseRefName`, usually `main`) so the repo is ready for the next slice:
 
@@ -86,7 +111,7 @@ fi
 
 If the fast-forward fails because the local base is dirty or diverged, report that the PR merged but the local base needs attention. Do not reset, stash, or discard local work.
 
-### 6. Close linked issues
+### 7. Close linked issues
 
 Close every still-open issue recorded in step 1 as completed, with the completion evidence in the timeline:
 
