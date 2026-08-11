@@ -4,8 +4,8 @@ description: >-
   Drives a pull request to merge-readiness as a relay race: one adversarial
   reviewer per leg, rotating providers (Claude, Codex, optionally Cursor) over
   correctness, security and coverage, fixing real findings between legs,
-  resolving discussion threads, and re-triggering supported PR review bots
-  until a full lap comes back clean. Use when the user asks for a review relay
+  resolving discussion threads, and optionally re-triggering explicitly enabled
+  PR review bots until a full lap comes back clean. Use when the user asks for a review relay
   or review loop, a PR review, to address review comments or resolve
   discussions, or to get a PR merge-ready.
 ---
@@ -35,14 +35,13 @@ The host never runs the first leg: the first opinion on the diff comes from outs
 Provider mechanics, at high reasoning effort in every case:
 
 - **claude** — spawn via the Agent tool (or Workflow `agent()`) with a read-only mandate, at the top-intelligence model from CLAUDE.md "Picking the right models".
-- **codex** — use this skill's runtime wrapper with the top-intelligence GPT model selected by the local Codex configuration:
+- **codex** — launch a regular interactive Codex instance in a PTY with the top-intelligence GPT model selected by the local Codex configuration:
 
   ```bash
-  review_relay_skill_dir="<directory containing this SKILL.md>"
-  "$review_relay_skill_dir/scripts/run-codex-review.sh" "$PROMPT_FILE" "$ARTIFACT_DIR/codex-$LEG"
+  codex -s danger-full-access --no-alt-screen "$(<"$PROMPT_FILE")"
   ```
 
-  Resolve the script path relative to this `SKILL.md`. It runs `codex -s danger-full-access review -`; the read-only sandbox fails at the first bundled bubblewrap tool call, while `codex exec` with stdin can exit successfully with an empty report. Exit 0 is insufficient: the wrapper rejects an empty report.
+  Do not use the `codex review` or `codex exec` subcommands. Give the regular Codex instance the review task in its initial prompt, wait for its completion event rather than polling it, capture its final response as the leg report, then close the interactive session. A missing final response is a failed attempt and never counts as a leg.
 - **cursor** — the local `agent` cursor-cli binary:
 
   ```bash
@@ -55,15 +54,15 @@ Provider mechanics, at high reasoning effort in every case:
 
 ### Codex runtime contract
 
-Keep the Codex prompt at 25 physical lines or fewer; long briefs cause the CLI reviewer to stall or fail to produce a final report. Its first line is:
+Do not impose an arbitrary line limit or compress away reviewer requirements. Give Codex the complete reviewer brief. Its first line is:
 
 ```text
-Do not invoke any skill, and do not spawn sub-agents. Review yourself; do not edit files.
+Do not invoke any skill or delegation tool, and do not spawn sub-agents. Review yourself; do not edit files.
 ```
 
-Compress the shared reviewer brief without dropping its content: target diff and SHA; acceptance criteria; correctness/security/coverage; concrete failure format; breadth-first and sibling sweep; dry-pass requirement; resolved-finding ledger; focused verification commands. Treat repository decisions and recon as authoritative. Browse or re-scrape a live integration only for a concrete unresolved contradiction, because unconstrained recon can turn one leg into a duplicate investigation.
+Include the shared reviewer brief without dropping its content: target diff and SHA; acceptance criteria; correctness/security/coverage; concrete failure format; breadth-first and sibling sweep; dry-pass requirement; resolved-finding ledger; focused verification commands. Treat repository decisions and recon as authoritative. Browse or re-scrape a live integration only for a concrete unresolved contradiction, because unconstrained recon can turn one leg into a duplicate investigation.
 
-Codex writes the report only when the process finishes. A zero-byte report while the process is alive is not a failure; keep waiting and give the user progress updates. A finished nonzero process or empty report is a failed attempt: record it, fix the invocation, and rerun the same lineup slot. It never counts as a leg.
+Codex produces the report at the end of its interactive turn. Keep the terminal session attached and wait for the completion event; do not poll on a timer. A turn that ends without a final report is a failed attempt: record it, fix the invocation, and rerun the same lineup slot. It never counts as a leg.
 
 ## Runtime state and resume
 
@@ -71,7 +70,7 @@ Create a stable artifact directory for the PR under the system temp directory an
 
 - PR number, base/head branches, baton SHA, host evidence, lineup, and next leg.
 - Acceptance-criteria sources and the open PR stack (`gh pr list --json number,headRefName,baseRefName,headRefOid`). Compare descendant diffs when deciding whether a finding is live, already fixed downstream, or superseded; a base defect that descendants inherit is still live.
-- Baseline commands/results, required CI, supported bots present, unresolved thread IDs, and which bot reviews target the baton SHA.
+- Baseline commands/results, required CI, bot opt-ins, supported bots present, unresolved thread IDs, and which enabled bot reviews target the baton SHA.
 - Every attempted leg: provider, reviewed SHA, report/trace paths, outcome, and whether it counts.
 - A finding ledger: stable ID, failure mode, disposition, evidence, fixing SHA, affected files, and induced regression if any.
 
@@ -85,16 +84,26 @@ Spell the domains out in full; the reviewer is responsible for all three:
 
 - **Correctness** — behavior that deviates from the acceptance criteria, wrong results, broken edge cases, off-by-ones, mishandled null/empty/boundary inputs, contract violations between caller and callee, error paths that swallow or mask failures, state that goes stale, races and ordering assumptions, and compatibility broken for existing callers or persisted data.
 - **Security** — exploitable issues reachable by a real client: injection (SQL, command, template, path), missing or wrong authz on a route or record, secret and token leaks into logs, responses or the repo, unsafe handling of untrusted input, unsafe deserialization, SSRF, weak or absent validation at trust boundaries, and permission expansion. Treat anything a network client can hit directly as reachable regardless of what the UI exposes.
-- **Coverage** — failing or flaky tests, and changed behavior in this PR that is testable but untested. Judge by mutation: if the behavior could be broken without a test going red, it is uncovered. Name the specific behavior and where the test belongs, not a coverage percentage.
+- **Coverage** — failing or flaky required tests are functional findings. Missing tests for otherwise-correct behavior are advisory coverage observations: name the specific behavior and where a test would belong, but report them separately and do not count them as real findings. A reviewer may use mutation reasoning to assess confidence, but absence of a regression test is not itself a defect.
 
-**Run the leg to the line — exhaustiveness is a hard requirement, not a preference.** One reviewer owns all three domains, so a shallow sweep loses coverage that used to come from three parallel agents. A reviewer that stops at the first few findings hands the next provider a fresh batch, and every extra lap costs a full round of fixes, pushes and bot re-reviews. Worse, it disguises the signal that matters: when lap 3 surfaces something lap 2 could have found, that is indistinguishable from a regression the lap-2 fixes introduced. Put these in the brief verbatim:
+**Run the leg to the line — exhaustiveness is a hard requirement, not a preference.** One reviewer owns all three domains, so a shallow sweep loses coverage that used to come from three parallel agents. A reviewer that stops at the first few findings hands the next provider a fresh batch, and every extra lap costs a full round of fixes, pushes and bot re-reviews. Worse, it disguises the signal that matters: when lap 3 surfaces something lap 2 could have found, that is indistinguishable from a regression the lap-2 fixes introduced. Put these in the brief verbatim, prominently and without softening them:
 
+- This is not a conventional PR review with an implicit finding cap. On a large cumulative diff,
+  20+ real correctness/security findings in one leg is normal. A report containing only 3–7 real
+  findings is a reason to assume the sweep is incomplete and continue looking, not a reason to
+  conclude. Coverage observations do not pad this count.
+- Findings are not the review budget. Maintain a changed-file × correctness/security/coverage
+  checklist and do not conclude until every cell has been examined, including unchanged callers,
+  callees, persisted formats, and lifecycle siblings affected by the diff.
 - Cover every changed file in every domain before going deep on any one of them, then go deep. Breadth first, so nothing is missed for lack of attention rather than lack of defects.
 - Sweep the domains one at a time, start to finish. Finishing correctness on a file is not permission to skip its security or coverage pass.
 - Do not stop at a satisfying find. After each one, ask what *else* is wrong — in the same file, in its siblings, and in the code that calls it.
 - Check for further instances of every defect found. A bug that appears once usually appears three times; report each site.
 - Before concluding, name what was inspected and found sound, per domain, not just what failed. A reviewer that cannot list its coverage has not swept it.
-- End only on a genuinely dry pass: one more sweep across all three domains that surfaces nothing new. Say explicitly that the pass was dry.
+- End only on a genuinely dry pass across the complete diff and all three domains. Any pass that
+  discovers a new real finding is not the dry pass: record the finding, then start another
+  independent full pass. Stop after an entire pass surfaces zero new real findings, even if it has
+  advisory coverage observations, and say explicitly that it was clean.
 
 Length is not the goal and padding the report with speculation is worse than a short one — the bar for reporting a finding is unchanged. What changes is when the reviewer is allowed to stop looking.
 
@@ -104,19 +113,23 @@ The next provider in the lineup takes the baton and runs steps 1–7. Then the h
 
 1. **Take the baton.** `gh pr view --json number,title,body,headRefName,baseRefName,url`, `gh pr diff`, acceptance criteria from the PR body / linked issue / plan file, and unresolved review threads (query below). Record the head SHA.
 2. **Run this leg's reviewer** against that head with the full brief. One reviewer, three domains, no parallel siblings.
-3. **Verify findings yourself.** Read the cited code before acting; dedupe against findings earlier legs already dispositioned. A finding survives only with a concrete failure mode — see "What counts as real". A single verified finding is enough; a repeat of something an earlier provider raised and you rejected needs new evidence, not a second vote.
+3. **Verify findings yourself.** Read the cited code before acting; dedupe against findings earlier legs already dispositioned. A finding survives only with a concrete failure mode — see "What counts as real". Missing coverage without a corresponding functional defect is advisory and the leg is clean. A single verified real finding is enough; a repeat of something an earlier provider raised and you rejected needs new evidence, not a second vote.
 4. **Fix real findings.** See "Fixing" for the required sequence: baseline, reproduce, fix at the right level, prove with a red→green test, re-verify against the baseline. Same standard for findings from external threads.
-5. **Commit and push through the `git-commit-and-push` skill** — every leg, no hand-rolled `git commit`. Skip only its step 2 (`gh issue list` and `Fixes #N` refs): the PR already carries the issue link, and a review fix closes nothing. Everything else applies as written — one commit per concern, conventional subject, flavourful body, `Co-Authored-By` trailer, push at the end. Each commit is verified against the baseline before it leaves the machine. Then **re-trigger supported review bots already in the PR conversation** — and only if something was pushed. The allowlist is:
-   - `chatgpt-codex-connector` → `gh pr comment <n> --body '@codex review'`
-   - `coderabbitai` → `gh pr comment <n> --body '@coderabbitai review'`
+5. **Commit and push through the `git-commit-and-push` skill** — every leg, no hand-rolled `git commit`. Skip only its step 2 (`gh issue list` and `Fixes #N` refs): the PR already carries the issue link, and a review fix closes nothing. Everything else applies as written — one commit per concern, conventional subject, flavourful body, `Co-Authored-By` trailer, push at the end. Each commit is verified against the baseline before it leaves the machine. Then re-trigger only enabled review bots, and only if something was pushed:
+   - **GitHub Codex bot is opt-in.** Never post `@codex review` merely because `chatgpt-codex-connector` appears in the PR conversation. Enable it only when the user explicitly asks for the GitHub Codex bot during this relay run; record that opt-in in runtime state. When enabled: `gh pr comment <n> --body '@codex review'`.
+   - `coderabbitai` remains presence-based: when it already appears in the PR conversation, run `gh pr comment <n> --body '@coderabbitai review'`.
+
+   The local Codex reviewer in the relay lineup is independent of the GitHub Codex bot. Keeping the bot disabled does not remove or replace local Codex legs.
 6. **Resolve discussions**, now that the fixes have SHAs. For each unresolved thread: fixed → reply with the commit SHA and rationale; false positive or already handled → reply with the evidence (exact code path). Then resolve the thread.
-7. **Wait for required CI and the re-triggered bot reviews**, then hand the baton to the next provider in the lineup. A PR bot review counts only when its reviewed commit OID equals the current baton. Reviews racing in on an older head are recorded as stale, and the bot is re-triggered after the next push rather than credited to the new head.
+7. **Wait for required CI and only the bot reviews triggered in step 5**, then hand the baton to the next provider in the lineup. A disabled bot is neither triggered nor a merge-readiness gate. An enabled PR bot review counts only when its reviewed commit OID equals the current baton. Reviews racing in on an older head are recorded as stale, and the bot is re-triggered after the next push rather than credited to the new head.
 
 A leg that produces no fixes still hands off; skip the push and bot re-trigger, since nothing changed.
 
 ## What counts as real
 
 Loop-worthy: evidence-backed problems that can plausibly cause wrong results, crashes, security exposure, data loss or corruption, broken compatibility, acceptance-criteria violations, or an unreliable required CI gate.
+
+Missing or incomplete test coverage is not a real finding by itself. Report coverage observations separately, classify a coverage-only leg as clean, and do not fix or push them unless the user separately asks. If review of a gap exposes an actual wrong runtime outcome, report the runtime defect as the finding and the missing test only as supporting evidence.
 
 Stop rather than churn on:
 
@@ -182,16 +195,19 @@ All true for the latest pushed head:
 - The acceptance criteria still hold against the full cumulative diff, not just the last leg's changes.
 - Any behavior that depends on a real sandbox, browser, credential, deployment, or third-party integration has either been smoke-tested in that environment or remains an explicit manual handoff. More static review legs do not substitute for this evidence.
 
-### Converged: the leg went test-only
+### Coverage-only is clean
 
-The condition above can be deferred forever. The coverage domain hunts testable-but-untested behavior under a standing mutation bar, so a reviewer can always find one more unpinned conjunct — and every constraint a fix adds is new surface for the next provider to report. Left alone, the loop converges on hardening its own hardening.
-
-**When a leg's surviving findings are entirely test-hardening, and the constraints they pin were introduced by an earlier leg of this relay, that is convergence.** Harden them in a single commit, push, and stop looping. Do not hand that commit to the next provider.
-
-Judge the mix, not the count. The leg is test-only when no finding in it describes code that computes a wrong answer, crashes, exposes data, or violates the acceptance criteria — only code whose correctness no test would notice regressing. One genuine defect anywhere in the leg means the relay continues normally.
-
-This never suppresses a finding. Everything real still gets fixed in that final commit; what ends is the *looping*, not the work. Say in the final report that the loop stopped on test-only convergence, and name the constraints hardened in the last pass so the reader can see what the reviewers were reduced to.
+A leg with no correctness, security, compatibility, reliability, or required-CI defect is clean even when the reviewer identifies untested behavior. Record those coverage observations as advisory context, do not convert them into relay fixes, and continue the lineup from the unchanged baton. Coverage must never keep the relay alive by itself.
 
 ## Final report
 
-Report: final head SHA, host and the evidence that classified it, lineup used, the legs and failed attempts actually run in order, fixes made, any regression the loop caused and reverted, pre-existing failures left in place, CI and latest-head bot-review status, and remaining thread count. Close with a human-verification handoff: the manual checks automation could not prove (real integrations, UI flows, credentials, deploy behavior), each with exact steps, expected result, and failure signals — or state explicitly that no manual verification is needed.
+When every stop condition is satisfied and the PR appears mergeable, stop and hand control to the user. Do not merge, approve, or otherwise advance the stack. Give the user a reviewable merge-readiness overview containing:
+
+- The final head SHA, PR/base branches, lineup, and every leg and failed attempt in order.
+- Every reported finding, grouped by disposition: real and fixed; rejected with concrete evidence; already fixed or superseded; and advisory coverage observations. Preserve stable finding IDs and severity where available.
+- For every real finding: the concrete failure mode, the fix, fixing commit SHA, affected files, and regression proof.
+- Any regression introduced during the relay and how it was corrected or reverted.
+- The complete verification result: local checks, required CI, unresolved-thread count, bot opt-ins and any enabled bot result against the final SHA.
+- Remaining risks and exact manual checks for anything automation could not prove, including expected results and failure signals; explicitly say when none remain.
+
+End by asking the user to review and either merge or provide corrections. This overview is a mandatory user gate, not merely a progress update, even when every reviewer and check is clean.
