@@ -16,7 +16,7 @@ Higher ranking is better
 
 | model         | cost | intelligence | taste |
 | ------------- | ---- | ------------ | ----- |
-| opus-5        | 5    | 10           | 9     |
+| opus-5        | 6    | 9            | 9     |
 | fable-5       | 2    | 9.7          | 9     |
 | gpt-5.6-sol   | 9    | 9.4          | 4     |
 | opus-4.8      | 4.5  | 8            | 8     |
@@ -33,6 +33,7 @@ How to apply:
 - Bulk/mechanical work (clear-spec implementation, data analysis, migrations): gpt-5.5 — it's effectively free.
 - Anything user-facing (UI, copy, API design) needs taste ≥ 7.
 - Reviews of plans/implementations: opus-5 or opus-4.8, optionally gpt-5.6-sol as an extra independent perspective.
+- Fable-5 is an explicit-request model only, rare even then: it tops the intelligence column, but drains usage limits about twice as fast even at slightly better token efficiency. Reach for opus-5 instead.
 - Never use Haiku.
 
 Mechanics:
