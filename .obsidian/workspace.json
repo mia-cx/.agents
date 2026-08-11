@@ -4,17 +4,21 @@
     "type": "split",
     "children": [
       {
-        "id": "445a2d0510bce530",
+        "id": "425c0d8d0b79e492",
         "type": "tabs",
         "children": [
           {
-            "id": "1d42aaffc0542698",
+            "id": "75e0a90c48123733",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
+              "type": "markdown",
+              "state": {
+                "file": "skills/gh-comment/SKILL.md",
+                "mode": "source",
+                "source": false
+              },
               "icon": "lucide-file",
-              "title": "New tab"
+              "title": "SKILL"
             }
           }
         ]
@@ -89,6 +93,7 @@
             "state": {
               "type": "localgraph",
               "state": {
+                "file": "skills/gh-comment/SKILL.md",
                 "options": {
                   "collapse-filter": true,
                   "search": "",
@@ -116,7 +121,7 @@
                 }
               },
               "icon": "lucide-git-fork",
-              "title": "Graph view"
+              "title": "Local graph"
             }
           },
           {
@@ -175,7 +180,9 @@
               "type": "file-explorer",
               "state": {
                 "sortOrder": "alphabetical",
-                "autoReveal": false
+                "autoReveal": false,
+                "showSearch": false,
+                "searchQuery": ""
               },
               "icon": "lucide-folder-closed",
               "title": "Files"
@@ -210,7 +217,10 @@
             "type": "leaf",
             "state": {
               "type": "bookmarks",
-              "state": {},
+              "state": {
+                "showSearch": false,
+                "searchQuery": ""
+              },
               "icon": "lucide-bookmark",
               "title": "Bookmarks"
             }
@@ -235,12 +245,33 @@
       "iconic:Open rulebook": false
     }
   },
-  "active": "1d42aaffc0542698",
+  "active": "75e0a90c48123733",
   "lastOpenFiles": [
+    "skills/file-upload/SKILL.md",
+    "skills/review-relay/SKILL.md",
+    "skills/review-relay/references/reviewer-prompt.md",
+    "skills/review-relay/references",
+    "skills/pr-file/SKILL.md",
+    "skills/pr-file",
+    "skills/gh-comment/SKILL.md",
+    "skills/gh-comment",
+    "skills/file-upload/scripts/upload.sh",
+    "skills/file-upload/references/clients.md",
+    "skills/file-upload/scripts",
+    "skills/file-upload/references",
+    "skills/file-upload/config.example",
+    "skills/file-upload",
+    "skills/code-review/SKILL.off",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "skills/ui-design/SKILL.md",
+    "skills/pr-merge/SKILL.md",
+    "skills/say-more/SKILL.md",
+    "skills/say-less/SKILL.md",
+    "skills/refine-rules-and-skills/SKILL.md",
     "Untitled.md",
     "Book 1 - Ash and Bloom/Chapter 1 — Nalla.md",
     "Glossary/Research & Development/Magic-System/Elemental-Theory.md",
-    "AGENTS.md",
     "Glossary/Research & Development/SCHEMAS.md",
     "Book 1 - Ash and Bloom/Research & Development/SCHEMAS.md",
     "Book 1 - Ash and Bloom/Research & Development/Characters/Eranu.md",
@@ -250,29 +281,7 @@
     "Book 1 - Ash and Bloom/Research & Development/Characters/Kuori.md",
     "Book 1 - Ash and Bloom/Research & Development/Characters/Kaela.md",
     "Book 1 - Ash and Bloom/Research & Development/Characters/Ruvan.md",
-    "Glossary/Research & Development/Future-Books/Book-4-Notes.md",
-    "Glossary/Research & Development/Future-Books/Book-3-Notes.md",
-    "Glossary/Research & Development/Future-Books/Book-2-Notes.md",
-    "Glossary/Research & Development/Magic-System/Lost-Knowledge.md",
-    "Glossary/Research & Development/World-Building/Languages.md",
-    "Book 1 - Ash and Bloom/Research & Development/Magic/Elementals-and-Magic.md",
-    "Book 1 - Ash and Bloom/Research & Development/Timelines/Chapter-Pacing.md",
-    "Glossary/Research & Development/World-Building/Cultures.md",
-    "Book 1 - Ash and Bloom/Research & Development/Timelines/Book-1-Timeline.md",
-    "Book 1 - Ash and Bloom/Research & Development/Locations/POIs.md",
-    "Book 1 - Ash and Bloom/Research & Development/Locations/Papa.md",
-    "Book 1 - Ash and Bloom/Research & Development/Locations/Akea.md",
-    "Book 1 - Ash and Bloom/Research & Development/Locations/Tokalani.md",
     "Book 1 - Ash and Bloom/Research & Development/Magic",
-    "Book 1 - Ash and Bloom/Research & Development/Timelines",
-    "Book 1 - Ash and Bloom/Research & Development/Locations",
-    "Glossary/Research & Development/World-Building",
-    "Glossary/Research & Development/Magic-System",
-    "Glossary/Research & Development/Future-Books",
-    "Glossary/Research & Development",
-    "Book 1 - Ash and Bloom/Research & Development/Characters",
-    "Glossary/Old/legacy",
-    "Glossary/Old",
     "Characters/Nalla/Nalla.png",
     "Characters/Nalla/Nalla.jpg",
     "Characters/Nalla/World (Tokalea)/Tokalea Archipelago reference 2.png",
