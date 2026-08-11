@@ -6,6 +6,16 @@ Adversarially review this pull request at the specified head. Actively try to br
 - Head: `{{HEAD_SHA}}`
 - Diff target: `{{DIFF_TARGET}}`
 
+## Scope: the diff, and only the diff
+
+**Every finding must be caused by this diff** — a defect these changes introduce, or a latent one they newly expose. Anchor each finding to a line the diff touched, even when the damage lands elsewhere.
+
+Read as widely as you need to: callers, callees, tests, config, persisted formats, anything that tells you what the change breaks. That reading is how blast radius gets judged, and it is encouraged. What it is not is a review target — a bug that predates this branch and that the diff does not touch or worsen is out of scope, however real. Someone else's PR owns it.
+
+The distinction in practice: the diff changes a function's return shape and an unchanged caller mishandles it — in scope, cite the changed line and name the caller as the consequence. That same caller was already mishandling a case the diff never touches — out of scope, leave it.
+
+Reviewing beyond the diff is the most common way one leg turns into an unbounded audit. Stay inside it.
+
 ## Acceptance criteria
 
 {{ACCEPTANCE_CRITERIA}}
@@ -42,7 +52,7 @@ Review all three, weighting real runtime code above test code.
 - Findings are not the review budget. Maintain a changed-file × correctness/security/coverage checklist and do not conclude until every cell has been examined, including unchanged callers, callees, persisted formats, and lifecycle siblings affected by the diff.
 - Cover every changed file in every domain before going deep on any one of them, then go deep. Breadth first, so nothing is missed for lack of attention rather than lack of defects.
 - Sweep the domains one at a time, start to finish. Finishing correctness on a file is not permission to skip its security or coverage pass.
-- After each find, ask what *else* is wrong — in the same file, in its siblings, and in the code that calls it.
-- Check for further instances of every defect found. A bug that appears once usually appears three times; report each site.
+- After each find, ask what *else* the diff got wrong — elsewhere in the same changed file, in its changed siblings, and in whatever the change reaches.
+- Check the rest of the diff for further instances of every defect found. A bug that appears once usually appears three times; report each site the diff touches. The same pattern in untouched code is context worth one line, not a finding.
 - Before concluding, name what was inspected and found sound, per domain, not just what failed. A reviewer that cannot list what it checked has not swept it.
 - End only on a genuinely dry pass across the complete diff and all three domains. A pass that discovers a new real finding is not the dry pass: record it, then start another independent full pass. Stop after an entire pass surfaces zero new real findings — advisory coverage observations do not disqualify it — and say explicitly that the pass was clean.

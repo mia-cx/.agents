@@ -219,7 +219,9 @@ A leg that produces no fixes still hands off; skip the push and bot re-trigger, 
 
 ## What counts as real
 
-Loop-worthy: evidence-backed problems that can plausibly cause wrong results, crashes, security exposure, data loss or corruption, broken compatibility, acceptance-criteria violations, or an unreliable required CI gate.
+Loop-worthy: evidence-backed problems **this diff causes** — introduced by the change, or latent and newly exposed by it — that can plausibly cause wrong results, crashes, security exposure, data loss or corruption, broken compatibility, acceptance-criteria violations, or an unreliable required CI gate.
+
+Scope is the diff. Reviewers read whatever they need for context and blast radius, but a defect the branch neither touches nor worsens belongs to another PR: log it as advisory and leave the code alone. Fixing it here grows the diff every later leg has to review, and buries the change the PR was actually opened for.
 
 Missing or incomplete test coverage is not a real finding by itself. Report coverage observations separately, classify a coverage-only leg as clean, and do not fix or push them unless the user separately asks. If review of a gap exposes an actual wrong runtime outcome, report the runtime defect as the finding and the missing test only as supporting evidence.
 
