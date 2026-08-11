@@ -1,9 +1,6 @@
 ---
 name: refine-rules-and-skills
-description: >-
-  Audits and refines agent guidance files — memory files (CLAUDE.md, AGENTS.md, SYSTEM.md), skills (SKILL.md), rules, and agent definitions — keeping tribal knowledge and removing noise. Applies refactoring patterns (Vague→Specific, Negative→Positive, Imprecise→Precise, Verbose→High-signal) to tighten guidance.
-  Use when the user asks to audit, optimize, refine, clean up, or tighten rules, skills, memory files, or agent prompts.
-  Use when authoring new skills and editing skills to ensure they don't need to be audited after.
+description: Use when authoring or editing SKILL.md, AGENTS.md, CLAUDE.md, SYSTEM.md, memory files, agent rules, or agent prompts, and when the user asks to audit or tighten agent guidance.
 ---
 
 # Refine Rules & Skills
@@ -13,7 +10,7 @@ Refine agent guidance — while authoring it or auditing it later — by focusin
 ## Targets
 
 - **Memory files**: CLAUDE.md, AGENTS.md — loaded every session; every line costs tokens forever.
-- **Skills**: `skills/**/SKILL.md` — discovered recursively, including namespaced skills, and loaded on trigger; the description is all the model sees until invocation.
+- **Skills**: `skills/**/SKILL.md` — discovered recursively, including namespaced skills; descriptions are injected at bootstrap to select skills, while bodies load only after invocation.
 - **Rules**: standalone rule files, whatever the harness calls them.
 - **Agent definitions**: subagent/agent prompt files (`agents/*.md`).
 
@@ -36,7 +33,11 @@ For every rule, skill, memory entry, or agent prompt:
 ### Skills (`SKILL.md`)
 
 - [ ] **Right invocation mode**: a skill only ever fired by hand gets `disable-model-invocation: true` — zero context load, and its description becomes a human-facing one-liner. Model-invoked descriptions list one trigger per distinct use; synonyms restating the same trigger are duplication.
-- [ ] **Description carries the trigger**: it must state when to invoke, in the words a user would use — the model sees nothing else when deciding. Models undertrigger, so err pushy: name every distinct context that should fire the skill, including ones where the user doesn't name the topic — while keeping one trigger per distinct use (synonym spam is duplication). Sanity-check against near-misses: adjacent prompts sharing keywords but belonging elsewhere shouldn't match.
+- [ ] **Description is trigger-only**: treat it as bootstrap routing metadata, not a summary of what the skill does. State only when to invoke, using the words a user would use; move capabilities, workflow, and value propositions into the body. Models undertrigger, so name every distinct context that should fire the skill, including ones where the user doesn't name the topic. Sanity-check near-misses so adjacent prompts sharing keywords do not match.
+
+  **Before:** `Creates and edits polished presentation decks with layout and visual QA.`
+
+  **After:** `Use when the user asks to create, edit, or review a presentation, slide deck, PowerPoint, or PPTX.`
 - [ ] **Checkable completion criteria**: each workflow step ends on a condition the agent can verify — and where it matters, exhaustive ("every modified file accounted for", not "produce a list"). Vague criteria invite declaring done early.
 - [ ] **Remove bloat**: cut motivational prose about why the *topic* matters — it persuades readers, not agents. One-clause "because Y" constraints on individual rules stay. Test each sentence in isolation: does it change behavior versus the model's default? Delete failing sentences whole rather than trimming words.
 - [ ] **Keep examples concrete**: runnable/adaptable, not generic.

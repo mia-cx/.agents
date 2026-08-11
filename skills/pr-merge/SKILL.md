@@ -1,10 +1,6 @@
 ---
 name: pr-merge
-description: >-
-  Merges a pull request with style. Posts a flavourful summary comment, merges
-  with a clean conventional commit subject, closes directly linked issues, then
-  fast-forwards the local base branch. Use when a PR is ready to merge and the
-  user asks to merge or land it.
+description: Use when the user asks to merge or land a pull request, or says "ship it" for an already-reviewed PR.
 ---
 
 # Merge a Pull Request

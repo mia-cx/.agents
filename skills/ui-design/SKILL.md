@@ -1,14 +1,6 @@
 ---
 name: ui-design
-description: >-
-  Design, build, review, or refine any user interface — product UI (dashboards,
-  admin panels, SaaS tools, settings, data views) and marketing surfaces
-  (landing pages, portfolios, redesigns). Use when choosing layout, color,
-  typography, spacing, motion, tokens, or component structure; when UI reads
-  generic or templated and needs craft; when auditing UX, accessibility, or
-  design consistency — even if the user never says "design". Chart/graph
-  internals belong to the dataviz skill; module/API interface design is not
-  UI and belongs elsewhere.
+description: Use when designing, building, reviewing, or refining product UI or marketing pages; choosing layout, color, typography, spacing, motion, or component structure; fixing generic or templated interfaces; or auditing UX, accessibility, or design consistency.
 ---
 
 # UI Design
