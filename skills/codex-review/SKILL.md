@@ -1,13 +1,9 @@
 ---
 name: codex-review
 description: >-
-  Ask the Codex CLI (gpt-5.6-sol) for an independent code review of
-  uncommitted changes, a branch diff, a commit, or a specific implementation.
-  Use when the user asks for a Codex or GPT review or a second-pass review,
-  when CLAUDE.md's model rubric calls for an extra independent review
-  perspective, or when Codex should audit a diff, find bugs or regressions, or
-  compare an implementation against requirements. For a review by Claude
-  itself, use the normal review process instead.
+  Get an independent code review from the Codex CLI (gpt-5.6-sol) — uncommitted
+  changes, a branch diff, a commit, or a specific implementation.
+disable-model-invocation: true
 ---
 
 # Codex Review
