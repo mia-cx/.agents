@@ -74,7 +74,7 @@ Create a stable artifact directory for the PR under the system temp directory an
 - Acceptance-criteria sources and the open PR stack (`gh pr list --json number,headRefName,baseRefName,headRefOid`). Compare descendant diffs when deciding whether a finding is live, already fixed downstream, or superseded; a base defect that descendants inherit is still live.
 - Baseline commands/results, required CI, bot opt-ins, supported bots present, unresolved thread IDs, and which enabled bot reviews target the baton SHA.
 - Every attempted leg: provider, reviewed SHA, report/trace paths, outcome, and whether it counts.
-- A finding ledger: stable ID, failure mode, disposition, evidence, fixing SHA, affected files, and induced regression if any.
+- A finding ledger: stable ID, failure mode, disposition, evidence, fixing SHA, affected files, GitHub thread/comment IDs, and induced regression if any.
 
 On resume, compare the PR head with the recorded baton before doing work. Reuse valid completed legs and dispositions; rerun only stale, interrupted, failed, or empty-report attempts. Feed reviewers a compact resolved-finding ledger so a repeated rejection needs new evidence rather than another vote.
 
@@ -187,15 +187,19 @@ The log is the source the final report is written from — so write entries for 
 
 Number findings `[F1]`, `[F2]`, … across the whole relay, and head each section with the leg number and provider. That numbering is what lets you hand a provider only what it has not seen.
 
-### Publishing it to the PR
+### Publishing findings to the PR
 
-The log goes on the PR through the **`gh-comment` skill**, so the reasoning behind every fix, rejection, and deferral is visible to reviewers who were never in the relay — the temp file dies with the session, the comment outlives it.
+`$RELAY_LOG` stays local relay state. Do not publish it, summarize it into a conversation comment, or maintain a cumulative relay comment on the PR.
 
-**Keep one comment for the whole relay and edit it in place** after each leg, rather than adding a comment per leg. The log is cumulative, so a fresh comment each leg reposts what is already there and notifies every subscriber for it; editing keeps the PR conversation readable and makes re-posting after a retried leg idempotent.
+After step 3 verifies a real finding and step 4 reproduces it, publish it through the **`gh-comment` skill** as its own inline diff thread against the reviewed head SHA, immediately before changing the code. The body contains only the attribution header, stable finding ID, severity, concrete failure mode, and the shortest useful reproduction or evidence. A reviewer claim that gets Rejected is not a finding and stays in `$RELAY_LOG`; clean-leg notes, provider transcripts, and relay progress stay there too.
+
+Anchor the thread to the exact affected diff line. When that line is not commentable, anchor it to the nearest causative changed line and name the exact affected location in the body; do not fall back to a normal PR conversation comment. Record the returned comment/thread ID in runtime state and `$RELAY_LOG` before continuing, so a retry updates or replies to the existing thread instead of duplicating it.
+
+After the fix is pushed, reply in that finding's thread with the fixing SHA, rationale, and verification, then resolve it. Leave a Deferred finding unresolved as a visible blocker. If later evidence overturns an already-published finding, reply with the concrete rejection evidence and resolve it rather than deleting history.
 
 **Visual evidence is rare — text is the finding.** A relay can go start to finish, every leg, without a single image, and that is the normal outcome. Reach for one only when a defect cannot be stated in words: a layout that breaks at a specific viewport, a wrong-looking render, an animation that never settles. When one of those does come up and a desktop environment is available — a Chromium debug port, or computer use via the `codex-computer-use` skill — reproduce it there, capture the screenshot or recording, host it with the `file-upload` skill, and embed the returned URL through `gh-comment`. Put the same URL in the log entry so later legs can see what you saw. A screenshot of a stack trace or a diff is not visual evidence; paste the text.
 
-`gh` is authenticated as the user, so the comment publishes under their name. Open it with a line identifying it as review-relay output listing the providers in the lineup — a reader who assumes a human wrote these verdicts will trust them further than the relay has earned. Post the dispositions and reasoning; leave out `$RELAY_LOG`'s path and anything else local to the session.
+`gh` is authenticated as the user, so every thread and reply uses the attribution header required by `gh-comment`. Leave out `$RELAY_LOG`'s path and anything else local to the session.
 
 **Your rejections invite challenge; they do not suppress.** Every Rejected entry is a call you made, and you are the one participant in the relay who has been staring at this diff since leg 1 — the least fresh pair of eyes in the race. A later reviewer that disagrees is doing its job, and the relay's whole value is the leg that sees what the previous pass dismissed. What the log forbids is the *unargued* repeat: re-raising `[F8]` with no new evidence is noise, re-raising it with a second unmount path is a finding, and it is your own rejection that was wrong. Hand a reviewer a list framed as settled and it will agree with you — that is the failure mode this section is written against.
 
@@ -206,13 +210,13 @@ The next provider in the lineup takes the baton and runs steps 1–7. Then the h
 1. **Take the baton.** `gh pr view --json number,title,body,headRefName,baseRefName,url`, `gh pr diff`, acceptance criteria from the PR body / linked issue / plan file, and unresolved review threads (query below). Record the head SHA.
 2. **Run this leg's reviewer** against that head with the rendered reviewer prompt. One reviewer, three domains, no parallel siblings.
 3. **Verify findings yourself.** Read the cited code before acting; dedupe against `$RELAY_LOG`. A finding survives only with a concrete failure mode — see "What counts as real". Missing coverage without a corresponding functional defect is advisory and the leg is clean. A single verified real finding is enough. A repeat of something an earlier leg rejected needs new evidence, not a second vote — but weigh the new evidence on the code, not on the fact that it was already rejected once.
-4. **Fix real findings.** See "Fixing" for the required sequence: baseline, reproduce, fix at the right level, prove with a red→green test, re-verify against the baseline. Same standard for findings from external threads.
+4. **Reproduce, publish, and fix real findings.** See "Fixing" for the required sequence: baseline, reproduce, publish each surviving finding as one inline thread, fix at the right level, prove with a red→green test, re-verify against the baseline. Publish only after reproduction and before changing the cited code; rejected claims remain local. Same standard for findings from external threads, except they already have threads.
 5. **Commit and push through the `git-commit-and-push` skill** — every leg, no hand-rolled `git commit`. Skip only its step 2 (`gh issue list` and `Fixes #N` refs): the PR already carries the issue link, and a review fix closes nothing. Everything else applies as written — one commit per concern, conventional subject, flavourful body, `Co-Authored-By` trailer, push at the end. Each commit is verified against the baseline before it leaves the machine. Then re-trigger only enabled review bots, and only if something was pushed:
    - **GitHub Codex bot is opt-in.** Never post `@codex review` merely because `chatgpt-codex-connector` appears in the PR conversation. Enable it only when the user explicitly asks for the GitHub Codex bot during this relay run; record that opt-in in runtime state. When enabled: `gh pr comment <n> --body '@codex review'`.
    - `coderabbitai` remains presence-based: when it already appears in the PR conversation, run `gh pr comment <n> --body '@coderabbitai review'`.
 
    The local Codex reviewer in the relay lineup is independent of the GitHub Codex bot. Keeping the bot disabled does not remove or replace local Codex legs.
-6. **Resolve discussions**, now that the fixes have SHAs. For each unresolved thread: fixed → reply with the commit SHA and rationale; false positive or already handled → reply with the evidence (exact code path). Then resolve the thread. Then **publish this leg's log section** — edit the relay's existing PR comment via the `gh-comment` skill, or create it if this is the first leg.
+6. **Resolve discussions**, now that the fixes have SHAs. For each unresolved external or relay-created thread: fixed → reply with the commit SHA, rationale, and verification; false positive or already handled → reply with the evidence (exact code path). Then resolve the thread. Leave Deferred blockers unresolved. Do not publish the relay log or a leg summary to the PR.
 7. **Wait for required CI and only the bot reviews triggered in step 5**, then hand the baton to the next provider in the lineup: the new head SHA and `$RELAY_LOG` with this leg's section appended. A disabled bot is neither triggered nor a merge-readiness gate. An enabled PR bot review counts only when its reviewed commit OID equals the current baton. Reviews racing in on an older head are recorded as stale, and the bot is re-triggered after the next push rather than credited to the new head.
 
 A leg that produces no fixes still hands off; skip the push and bot re-trigger, since nothing changed. It still writes its log section — "reviewed `<sha>`, nothing real, here is what was inspected" is the entry that proves the lap is going clean rather than going unrecorded.
@@ -299,7 +303,7 @@ When every stop condition is satisfied and the PR appears mergeable, stop and ha
 
 - The final head SHA, PR/base branches, host and the evidence that classified it, lineup, and every leg and failed attempt in order.
 - Every reported finding, grouped by disposition: real and fixed; rejected with concrete evidence; deferred upstream; already fixed or superseded; and advisory coverage observations. Preserve stable finding IDs and severity where available. Surface the **Rejected** and **Deferred** groups explicitly — they are decisions the relay made on the user's behalf without changing any code, so they are the entries most likely to be wrong and least likely to be noticed.
-- For every real finding: the concrete failure mode, the fix, fixing commit SHA, affected files, and regression proof.
+- For every real finding: the concrete failure mode, inline thread, fix, fixing commit SHA, affected files, and regression proof.
 - Any regression introduced during the relay and how it was corrected or reverted, plus pre-existing failures left in place.
 - The complete verification result: local checks, required CI, unresolved-thread count, bot opt-ins and any enabled bot result against the final SHA.
 - Remaining risks and exact manual checks for anything automation could not prove (real integrations, UI flows, credentials, deploy behavior), including expected results and failure signals; explicitly say when none remain.
