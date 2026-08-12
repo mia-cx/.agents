@@ -123,7 +123,7 @@ CLI reviewers routinely outrun a 10-minute Bash timeout — pass an explicit lon
 ```text
 Verdicts on your three findings from the last leg:
 - [F4] session.ts:88 expired token on retry — FIXED in 9d3e0f1. The retry path now
-  revalidates expiry before reuse, covered by a red→green test.
+  revalidates expiry before reuse; replaying the expired-token path now rejects it.
 - [F5] Toast.tsx:40 timeout not cleared — REJECTED. The component unmounts only with
   its portal, which clears the timer at Portal.tsx:61, so no leak path exists.
 - [F6] migrate.ts:12 non-transactional migration — DEFERRED upstream. Real, but the fix
@@ -172,14 +172,14 @@ Append one entry per finding, at the moment you disposition it:
 ```markdown
 ## Leg 2 — codex @ 4f1c2ab
 - **[F7] `src/auth/session.ts:88`** — expired refresh token accepted on the retry path.
-  **Fixed** in `9d3e0f1` — the retry now revalidates expiry; red→green test `session.retry.expired`.
+  **Fixed** in `9d3e0f1` — the retry now revalidates expiry; replaying the expired-token path rejects it.
 - **[F8] `src/ui/Toast.tsx:40`** — toast timeout not cleared on unmount.
   **Rejected** — the component unmounts only with the portal, which clears the timer at `Portal.tsx:61`. No leak path.
 - **[F9] `src/db/migrate.ts:12`** — non-transactional migration.
   **Deferred** — real, but the fix restructures migration ownership beyond this PR. Reported as a blocker.
 ```
 
-Every finding gets exactly one of **Fixed** (with SHA and the test that proves it), **Rejected** (with the evidence that killed it — the code path you traced, not an opinion), or **Deferred** (with the reason it outgrew this PR). A finding with no disposition means the leg is not finished.
+Every finding gets exactly one of **Fixed** (with SHA and the verification that proves it), **Rejected** (with the evidence that killed it — the code path you traced, not an opinion), or **Deferred** (with the reason it outgrew this PR). A finding with no disposition means the leg is not finished.
 
 The log is the source the final report is written from — so write entries for a reader who was not there.
 
@@ -210,7 +210,7 @@ The next provider in the lineup takes the baton and runs steps 1–7. Then the h
 1. **Take the baton.** `gh pr view --json number,title,body,headRefName,baseRefName,url`, `gh pr diff`, acceptance criteria from the PR body / linked issue / plan file, and unresolved review threads (query below). Record the head SHA.
 2. **Run this leg's reviewer** against that head with the rendered reviewer prompt. One reviewer, three domains, no parallel siblings.
 3. **Verify findings yourself.** Read the cited code before acting; dedupe against `$RELAY_LOG`. A finding survives only with a concrete failure mode — see "What counts as real". Missing coverage without a corresponding functional defect is advisory and the leg is clean. A single verified real finding is enough. A repeat of something an earlier leg rejected needs new evidence, not a second vote — but weigh the new evidence on the code, not on the fact that it was already rejected once.
-4. **Reproduce, publish, and fix real findings.** See "Fixing" for the required sequence: baseline, reproduce, publish each surviving finding as one inline thread, fix at the right level, prove with a red→green test, re-verify against the baseline. Publish only after reproduction and before changing the cited code; rejected claims remain local. Same standard for findings from external threads, except they already have threads.
+4. **Reproduce, publish, and fix real findings.** See "Fixing" for the required sequence: baseline, reproduce, publish each surviving finding as one inline thread, fix at the right level, prove the fix against the reproduction, re-verify against the baseline. Publish only after reproduction and before changing the cited code; rejected claims remain local. Same standard for findings from external threads, except they already have threads.
 5. **Commit and push through the `git-commit-and-push` skill** — every leg, no hand-rolled `git commit`. Skip only its step 2 (`gh issue list` and `Fixes #N` refs): the PR already carries the issue link, and a review fix closes nothing. Everything else applies as written — one commit per concern, conventional subject, flavourful body, `Co-Authored-By` trailer, push at the end. Each commit is verified against the baseline before it leaves the machine. Then re-trigger only enabled review bots, and only if something was pushed:
    - **GitHub Codex bot is opt-in.** Never post `@codex review` merely because `chatgpt-codex-connector` appears in the PR conversation. Enable it only when the user explicitly asks for the GitHub Codex bot during this relay run; record that opt-in in runtime state. When enabled: `gh pr comment <n> --body '@codex review'`.
    - `coderabbitai` remains presence-based: when it already appears in the PR conversation, run `gh pr comment <n> --body '@coderabbitai review'`.
@@ -248,14 +248,14 @@ Step 4 in detail. The loop grades its own work on the next pass, so a fix that t
 
 **Fix at the right level.** Prefer making the bug class unrepresentable (types, ownership, API shape) over spot-patches, and check for sibling instances of the same bug. If the right-level fix turns out to need restructuring beyond what this PR is for, stop: report it as a blocker, apply the spot-patch as an explicit interim, and say which it is. Do not silently grow the PR.
 
-**Red then green.** The test proving the fix must fail before the fix and pass after. A test written afterward that never went red proves nothing, and it will keep passing when the bug returns.
+**Prove the fix; do not grow coverage by default.** Re-run the original reproduction and the existing relevant checks after the change. Do not add a test merely because the relay found a bug. Add or update one only when it protects stable, externally observable behavior at an appropriate boundary and is likely to outlive the current PR stack; when a test is justified, demonstrate that it fails before the fix and passes after. For changing internals or behavior a later PR will replace, use the concrete execution trace or runtime reproduction plus the existing checks.
 
 **Blast-radius pass on the fix itself, before moving to the next finding:**
 
 - Trace what the change touches — callers, callees, shared state ownership, persistence, permissions, concurrency, external contracts.
 - Name what becomes newly possible: stale state, broken compatibility, privilege expansion, data loss, races, a second path that bypasses the new guard.
 - Put safeguards inside the fix rather than stacking guards at call sites.
-- Cover credible induced failures with tests. Not every theoretical one.
+- Prove credible induced failures using the same verification policy above; new tests are not the default.
 
 **Re-run the baseline. Any check that went pass → fail is your regression.** Revert the fix and redesign it — a regression is not a new finding to schedule, it is evidence the fix was wrong. Do not adjust the check to accommodate the new behavior. The one exception is a test that was asserting the buggy behavior itself; that requires saying so explicitly in the commit message and the thread reply, with the reason the old assertion was wrong.
 
