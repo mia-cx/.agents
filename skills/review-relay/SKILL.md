@@ -159,6 +159,7 @@ This path is the local `agent` CLI only. Cursor's PR-side bots are a different m
 | `{{HEAD_SHA}}` | the head SHA recorded in step 1 |
 | `{{DIFF_TARGET}}` | the command that reproduces the diff under review, e.g. `git diff <baseRefName>...<HEAD_SHA>` |
 | `{{ACCEPTANCE_CRITERIA}}` | criteria verbatim from the PR body, linked issue, or plan file — or "None stated" |
+| `{{ENVIRONMENT}}` | the posture decided by the trigger test, plus one line on what surrounds this code, e.g. "Cooperative: a Tampermonkey userscript sharing a document with wplace. wplace does not know this code exists." |
 | `{{PRIOR_LEGS}}` | the content of `$RELAY_LOG` in full, never its path — or "You are the first leg; nothing has been reviewed yet." on leg 1. Resumed sessions get only the delta, via the follow-up form above |
 
 ## The relay log
@@ -209,7 +210,7 @@ The next provider in the lineup takes the baton and runs steps 1–7. Then the h
 
 1. **Take the baton.** `gh pr view --json number,title,body,headRefName,baseRefName,url`, `gh pr diff`, acceptance criteria from the PR body / linked issue / plan file, and unresolved review threads (query below). Record the head SHA.
 2. **Run this leg's reviewer** against that head with the rendered reviewer prompt. One reviewer, three domains, no parallel siblings.
-3. **Verify findings yourself.** Read the cited code before acting; dedupe against `$RELAY_LOG`. A finding survives only with a concrete failure mode — see "What counts as real". Missing coverage without a corresponding functional defect is advisory and the leg is clean. A single verified real finding is enough. A repeat of something an earlier leg rejected needs new evidence, not a second vote — but weigh the new evidence on the code, not on the fact that it was already rejected once.
+3. **Verify findings yourself.** Read the cited code before acting; dedupe against `$RELAY_LOG`. A finding survives only with a concrete failure mode — see "What counts as real". Missing coverage without a corresponding functional defect is advisory and the leg is clean. A single verified real finding is enough. A repeat of something an earlier leg rejected needs new evidence, not a second vote — but weigh the new evidence on the code, not on the fact that it was already rejected once. Record the trigger line in `$RELAY_LOG` for every finding you carry into step 4. A finding you cannot write one for does not reach step 4 — and if you find yourself writing the pointer as a paraphrase of the reviewer's claim rather than as somewhere you looked, that is the tell.
 4. **Reproduce, publish, and fix real findings.** See "Fixing" for the required sequence: baseline, reproduce, publish each surviving finding as one inline thread, fix at the right level, prove the fix against the reproduction, re-verify against the baseline. Publish only after reproduction and before changing the cited code; rejected claims remain local. Same standard for findings from external threads, except they already have threads.
 5. **Commit and push through the `git-commit-and-push` skill** — every leg, no hand-rolled `git commit`. Skip only its step 2 (`gh issue list` and `Fixes #N` refs): the PR already carries the issue link, and a review fix closes nothing. Everything else applies as written — one commit per concern, conventional subject, flavourful body, `Co-Authored-By` trailer, push at the end. Each commit is verified against the baseline before it leaves the machine. Then re-trigger only enabled review bots, and only if something was pushed:
    - **GitHub Codex bot is opt-in.** Never post `@codex review` merely because `chatgpt-codex-connector` appears in the PR conversation. Enable it only when the user explicitly asks for the GitHub Codex bot during this relay run; record that opt-in in runtime state. When enabled: `gh pr comment <n> --body '@codex review'`.
@@ -232,11 +233,32 @@ Missing or incomplete test coverage is not a real finding by itself. Report cove
 Stop rather than churn on:
 
 - Naming/style preferences and test-helper polish.
-- States unreachable in practice: the code tolerates them, but no caller or route can produce them and no planned work will introduce one. Fixing those is speculation, not correctness. Carve-out: anything a network client can hit directly is reachable regardless of what the frontend exposes — CORS and UI validation gate browsers, not curl — so unreachability never waives checks at a real trust boundary.
+- States nothing produces. See the trigger test below — it is the one check a reviewer cannot argue you out of.
 - Edge-case exhaustion in tests, and extra tests for behavior already covered at the right boundary. Tests exist to prove the code works; piling on cases to make the suite look thorough is testing the tests.
 - Hypothetical fault chains with no credible runtime path, and states already excluded by types.
 
 Impact and plausibility decide — not whether a reviewer can imagine a scenario. Give extra scrutiny to high-impact boundaries (auth, persistence, destructive operations, concurrency) even when failure odds are low.
+
+### The trigger test
+
+Apply it **before** you read the failure mode, not after.
+
+A reviewer's job is to describe a failure vividly, and a good one always will. Vividness is not evidence, and a concrete consequence says nothing about whether anything causes it. So before a finding survives step 3, write one line:
+
+> **`<actor>` does `<action>`, and here is where that happens: `<pointer>`.**
+
+The last clause is the entire test. It has to point at something that exists: a line in this repo, a line in a dependency, a documented platform or browser behaviour, a filed issue, a report from a user. "A host could", "an attacker might", "a caller may one day", "nothing stops the page from" — these fill in nothing. They are the reviewer imagining an actor, and **a finding whose actor is imaginary is Rejected however concrete its consequence.** Write the rejection with the clause you could not fill, so the reviewer learns which half was missing.
+
+Name the environment's posture once per relay, in runtime state, because most findings turn on it:
+
+- **Cooperative** — a page you share a document with, a framework you run inside, a CLI that invokes you, a library you call. It will re-render, remove, replace, reorder and race you, all by accident. Guard against that. It will not go looking for your DOM to reparent into an iframe, rewrite your stylesheet's rules through CSSOM, or mint an element under your id to impersonate you. Those need intent the environment does not have, and a defence against them is speculation wearing a threat model's clothes.
+- **Adversarial** — untrusted input crossing a boundary you own. Here intent is the premise, and the trigger is satisfied by the boundary itself: anything a network client can reach is reachable whatever the UI exposes, because CORS and form validation gate browsers, not curl.
+
+Most surfaces are cooperative. Deciding this once, in writing, stops it being re-litigated by every reviewer that finds an unguarded door in a house with no burglars.
+
+### Fixes to speculation are not free
+
+They cost a fix, its blast radius, the tests that pin it, and every later leg's attention — and they add surface that the next leg reviews as real code. A relay that fixed three imagined findings in a row produced exactly one genuine defect from them: the second fix's own comparison never matched, and reinstalled a stylesheet on every frame for two legs. That is the normal yield. Speculation does not merely waste a leg; it manufactures the next one's findings.
 
 ## Fixing
 

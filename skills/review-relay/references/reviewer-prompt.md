@@ -16,6 +16,12 @@ The distinction in practice: the diff changes a function's return shape and an u
 
 Reviewing beyond the diff is the most common way one leg turns into an unbounded audit. Stay inside it.
 
+## The environment
+
+{{ENVIRONMENT}}
+
+Report what this environment does — including by accident, which is most of it. Do not report what it would have to go out of its way to do to you. A finding that needs the surrounding system to deliberately reach into this code's internals is not a finding here; name the actor and the observable behaviour that makes them do it, or leave it out.
+
 ## Acceptance criteria
 
 {{ACCEPTANCE_CRITERIA}}
@@ -48,7 +54,7 @@ Review all three, weighting real runtime code above test code.
 
 ## Exhaustiveness
 
-- This is not a conventional PR review with an implicit finding cap. On a large cumulative diff, 20+ real correctness/security findings in one leg is normal. A report containing only 3–7 real findings is a reason to assume the sweep is incomplete and keep looking, not a reason to conclude. Coverage observations do not pad this count.
+- This is not a conventional PR review with an implicit finding cap, and it is not a quota either. On a large or early diff, 20+ real findings in one leg is normal; on a diff that several legs have already worked over, two is normal and zero is the goal. Judge the sweep by coverage — every changed file, every domain, examined — never by the count it produced. **A low count is a reason to check your checklist, not a reason to lower the bar.** If a full pass turns up nothing that passes the trigger test, the correct report is a clean one, and saying so is worth more than anything you could manufacture to avoid it. Coverage observations do not pad this count.
 - Findings are not the review budget. Maintain a changed-file × correctness/security/coverage checklist and do not conclude until every cell has been examined, including unchanged callers, callees, persisted formats, and lifecycle siblings affected by the diff.
 - Cover every changed file in every domain before going deep on any one of them, then go deep. Breadth first, so nothing is missed for lack of attention rather than lack of defects.
 - Sweep the domains one at a time, start to finish. Finishing correctness on a file is not permission to skip its security or coverage pass.
