@@ -1,9 +1,10 @@
 ---
 name: review-relay
 description: >-
-  Use when the user asks for a review relay or review loop, a review of a pull
-  request, a second opinion on a PR, to address review comments or resolve
-  review discussions, or to get a PR merge-ready.
+  Use when the user asks for a review relay or review loop, for repeated or
+  multi-provider review passes on a pull request, for a PR to be reviewed until
+  it is clean or merge-ready, or to address review comments and resolve review
+  discussions on a PR. A request for one review pass over a diff is not a relay.
 ---
 
 # Review Relay
@@ -11,6 +12,16 @@ description: >-
 Drive the PR for the current branch to merge-readiness as a relay race: each provider runs a leg — reviews the head, you fix what is real — then hands the fixed head to the next provider. The race ends when a full lap comes back clean. Do not merge — that is a separate, explicit request.
 
 **The baton is the head SHA.** Every handoff passes a head that already absorbed the previous leg's findings; a provider reviewing a stale head is a dropped baton, and its leg does not count.
+
+## Scope: the diff, and only the diff
+
+**Every finding must be caused by this diff** — a defect these changes introduce, or a latent one they newly expose. Anchor each finding to a line the diff touched, even when the damage lands elsewhere.
+
+Read as widely as you need to: callers, callees, tests, config, persisted formats, anything that tells you what the change breaks. That reading is how blast radius gets judged, and it is encouraged. What it is not is a review target — a bug that predates this branch and that the diff does not touch or worsen is out of scope, however real. Someone else's PR owns it.
+
+The distinction in practice: the diff changes a function's return shape and an unchanged caller mishandles it — in scope, cite the changed line and name the caller as the consequence. That same caller was already mishandling a case the diff never touches — out of scope, leave it.
+
+Reviewing beyond the diff is the most common way one leg turns into an unbounded audit. Stay inside it. The pressure to leave it comes from the reviewer, and it is persuasive by construction: an out-of-scope finding arrives fully argued with a real defect attached, so agreeing feels like diligence rather than drift. Scope is yours to hold and never the reviewer's to widen — decide it here, before the first report lands.
 
 ## The lineup
 
@@ -30,9 +41,11 @@ The host never runs the first leg: the first opinion on the diff comes from outs
 
 ## Picking each leg's model
 
-Every leg runs at high reasoning effort. **Intelligence outranks everything** — a leg run cheap costs a whole lap to discover. Taste breaks ties, and it only earns its weight on a UI-heavy diff, where the defect is a bad interaction or a wrong-feeling layout that a high-intelligence, low-taste reviewer scores as working code. Cost never breaks a tie here; reviewing is where the budget goes.
+Every leg runs at high reasoning effort on the top-intelligence model **within its own provider** — the relay's value is provider diversity, so a leg never switches provider to chase a score. That is **opus-5 for the claude leg and gpt-5.6-sol for the codex leg**. Fable-5 stays out despite topping the rubric: it drains usage limits about twice as fast, so it is explicit-request only.
 
-Higher is better in every column, cost included — the cost score is per task actually run, so a model that burns usage limits fast scores low no matter what its per-token price says.
+Intelligence outranks everything here, because a leg run cheap costs a whole lap to discover, and cost never breaks a tie — reviewing is where the budget goes. Taste breaks ties only on a UI-heavy diff, where the defect is a bad interaction or a wrong-feeling layout that a high-intelligence, low-taste reviewer scores as working code.
+
+Higher is better in every column, cost included — the cost score is per task actually run, so a model that burns usage limits fast scores low no matter what its per-token price says. The table is carried here rather than referenced, because it lives in `~/.agents/CLAUDE.md` and a codex or cursor host reads `AGENTS.md` instead; keep the two in sync when either changes.
 
 | model         | cost | intelligence | taste |
 | ------------- | ---- | ------------ | ----- |
@@ -46,7 +59,7 @@ Higher is better in every column, cost included — the cost score is per task a
 | gpt-5.6-luna  | 10   | 5.5          | 3     |
 | sonnet-4.6    | 6.5  | 3.5          | 7.5   |
 
-Pick the top-intelligence model **within the leg's provider** — the relay's value is provider diversity, so a leg never switches provider to chase a score. That gives opus-5 for the claude leg and gpt-5.6-sol for the codex leg. Fable-5 is a very rare and explicit-request model only, because it drains usage limits about twice as fast, even at slightly better token efficiency. Selection mechanics:
+Selection mechanics:
 
 - **claude** — `model: 'opus'` for the Agent tool or Workflow `agent()`; that parameter is unversioned and takes only `opus`/`sonnet`/`fable`/`haiku`. The `claude --model` CLI flag also accepts a full versioned id, which is the only way to pin an older release like opus-4.8.
 - **codex** — the top-intelligence GPT model selected by the local Codex configuration; see the runtime contract below for how the leg is launched.
@@ -56,13 +69,9 @@ No GPT model scores above 4 on taste, so a UI-heavy relay gets its taste coverag
 
 ### Codex runtime contract
 
-Do not impose an arbitrary line limit or compress away reviewer requirements. Give Codex the complete reviewer brief. Its first line is:
+Codex gets the same rendered prompt as every other leg, at full length — no line limit, nothing summarized away. `--codex` prepends the one line that keeps it read-only despite the sandbox flag it needs.
 
-```text
-Do not invoke any skill or delegation tool, and do not spawn sub-agents. Review yourself; do not edit files.
-```
-
-Include the shared reviewer brief without dropping its content: target diff and SHA; acceptance criteria; correctness/security/coverage; concrete failure format; breadth-first and sibling sweep; dry-pass requirement; resolved-finding ledger; focused verification commands. Treat repository decisions and recon as authoritative. Browse or re-scrape a live integration only for a concrete unresolved contradiction, because unconstrained recon can turn one leg into a duplicate investigation.
+Treat repository decisions and recon as authoritative. Browse or re-scrape a live integration only for a concrete unresolved contradiction, because unconstrained recon can turn one leg into a duplicate investigation.
 
 Codex produces the report at the end of its interactive turn. Keep the terminal session attached and wait for the completion event; do not poll on a timer. A turn that ends without a final report is a failed attempt: record it, fix the invocation, and rerun the same lineup slot. It never counts as a leg.
 
@@ -71,6 +80,7 @@ Codex produces the report at the end of its interactive turn. Keep the terminal 
 Create a stable artifact directory for the PR under the system temp directory and keep `state.md` there. Before the first leg — or when resuming a handoff — record and verify:
 
 - PR number, base/head branches, baton SHA, host evidence, lineup, and next leg.
+- The environment's posture — cooperative or adversarial, per the trigger test — written once and reused as `{{ENVIRONMENT}}` by every leg, so it is decided rather than re-litigated per reviewer.
 - Acceptance-criteria sources and the open PR stack (`gh pr list --json number,headRefName,baseRefName,headRefOid`). Compare descendant diffs when deciding whether a finding is live, already fixed downstream, or superseded; a base defect that descendants inherit is still live.
 - Baseline commands/results, required CI, bot opt-ins, supported bots present, unresolved thread IDs, and which enabled bot reviews target the baton SHA.
 - Every attempted leg: provider, reviewed SHA, report/trace paths, outcome, and whether it counts.
@@ -88,12 +98,18 @@ On resume, compare the PR head with the recorded baton before doing work. Reuse 
 | codex | interactive `codex` in a PTY | native codex subagent, else the same PTY call | interactive `codex` in a PTY |
 | cursor | `agent` CLI | `agent` CLI | `agent` CLI |
 
-**Render before launching.** The template in `references/` is not sendable as-is: every `{{FIELD}}` in it must be substituted first, per the field table under "Reviewer prompt". Read the template, substitute the four fields, and write the result to a fresh file per leg with the Write tool — not with `sed`, since acceptance criteria are arbitrary prose that routinely contains `/`, `&`, and newlines that `sed` mangles silently.
+**Render before launching.** The template in `references/` is not sendable as-is: every `{{FIELD}}` must be substituted first. The script below does it — one fresh file per leg, substituting literally so prose full of `/`, `&`, and newlines survives, and failing loudly on a field it cannot fill rather than sending the reviewer at a head it has to guess. Rendering by hand instead is where paraphrase creeps into a prompt that has to go whole. Its path is absolute because a leg runs with the target repo as cwd, not this skill's directory.
 
 ```bash
-PROMPT="$(mktemp "${TMPDIR:-/tmp}/relay-prompt-<leg>.XXXXXX.md")"   # write the rendered prompt here
+PROMPT="$(mktemp "${TMPDIR:-/tmp}/relay-prompt-<leg>.XXXXXX.md")"
 REPORT="$(mktemp "${TMPDIR:-/tmp}/relay-<provider>-<leg>.XXXXXX.md")"
-grep -c '{{' "$PROMPT"   # must print 0 — an unrendered field sends the reviewer at a head it has to guess
+
+~/.claude/skills/review-relay/scripts/render-prompt.py \
+  --pr-url "$PR_URL" --head "$HEAD" --diff-target "git diff $BASE...$HEAD" \
+  --environment 'Cooperative: <what surrounds this code>' \
+  --acceptance-criteria @/path/to/criteria.md \
+  --prior-legs @"$RELAY_LOG" \
+  -o "$PROMPT"                       # add --codex for the codex leg
 ```
 
 Pass the rendered file rather than an inline string — the prompt is long and full of markdown and backticks that a shell argument mangles. The native subagent path takes the same rendered text as its prompt.
@@ -113,45 +129,19 @@ The codex leg is the exception to redirecting into `$REPORT`: it runs interactiv
 
 CLI reviewers routinely outrun a 10-minute Bash timeout — pass an explicit longer timeout, or run in the background and poll for the report file.
 
-**Re-running the same provider** — after a stale-head review, or a second pass once this leg's fixes landed — resumes that reviewer's session instead of paying for the full prompt again: send the follow-up as the next turn in the still-attached codex session, or `claude --continue`. A resumed reviewer still holds the contract it was given, so the follow-up carries only what changed. Write it in this order — it answers "what happened to my work?" before asking for more:
+**Re-running the same provider** — after a stale-head review, or a second pass once this leg's fixes landed — resumes that reviewer's session rather than paying for the full prompt again, and the follow-up carries only what changed. That path has its own ordering, and getting it wrong costs a lap: [`references/resuming-a-reviewer.md`](references/resuming-a-reviewer.md). A cross-provider handoff is never a resume — a fresh process gets the whole rendered file.
 
-1. **Verdicts on that reviewer's own findings**, every one it raised last leg, in the order it raised them. Each gets its disposition, the reasoning behind it, and — where it was fixed — one sentence on how. This is the only feedback a reviewer ever gets about its own accuracy; a provider whose speculative findings keep coming back Rejected with a traced code path calibrates within a lap.
-2. **Then the other legs' findings and verdicts**, same breakdown, introduced as what the other reviewers turned up while it was idle. Attribute them by provider — it tells the reviewer which ground a different pair of eyes already covered, and which of its own misses were caught elsewhere.
-3. **Then the baton**: the new head SHA and diff target, said as a handoff — the branch has moved, this is the head to review now.
-4. **Then the ask**: run another leg against the same contract.
-
-```text
-Verdicts on your three findings from the last leg:
-- [F4] session.ts:88 expired token on retry — FIXED in 9d3e0f1. The retry path now
-  revalidates expiry before reuse; replaying the expired-token path now rejects it.
-- [F5] Toast.tsx:40 timeout not cleared — REJECTED. The component unmounts only with
-  its portal, which clears the timer at Portal.tsx:61, so no leak path exists.
-- [F6] migrate.ts:12 non-transactional migration — DEFERRED upstream. Real, but the fix
-  restructures migration ownership beyond this PR; filed as a blocker.
-
-Since then, codex reviewed the same branch and found:
-- [F7] queue.ts:22 duplicate job on retry — FIXED in 1a2b3c4. Jobs are now keyed by
-  idempotency token.
-
-You have the baton again: the head is now 7c4d9e2, diff target `git diff main...7c4d9e2`.
-Run another leg against the same contract.
-```
-
-Track what each provider has been shown by finding number, so step 2 is a slice and not a judgement call. Re-pasting an entry a provider already has is harmless; omitting a new one costs a lap.
-
-Send the short form **only** into a session that already received the full prompt. A new leg is a new process with no memory — the rendered prompt is what makes it exhaustive, read-only, and comparable to its predecessors, so a cross-provider handoff always gets the whole file. A bare "review again" to a fresh reviewer buys a shallow skim.
-
-Keep reviewers read-only: `--permission-mode plan` for claude, `--mode plan` for cursor. A reviewer that can write starts fixing what it finds, which strands edits outside the fix sequence in "Fixing". The codex leg is the weak point — it runs `-s danger-full-access` per its runtime contract, so nothing but that prompt's opening line stops it editing. Send that line verbatim, and check `git status` after the leg.
+Keep reviewers read-only: `--permission-mode plan` for claude, `--mode plan` for cursor. A reviewer that can write starts fixing what it finds, which strands edits outside the fix sequence in "Fixing". The codex leg is the weak point — it runs `-s danger-full-access` per its runtime contract, so nothing but the `--codex` preamble stops it editing. Check `git status` after that leg.
 
 Cursor specifics:
 
-**Always `--model auto`.** `auto` is the only permitted value of this flag. Auto-routed requests are the included Cursor plan usage; every other model id (`gpt-5.6-sol-high`, `claude-opus-5-thinking-high`, `composer-2.5`, anything from `agent --list-models`) bills the API pool per token. Requests to run the cursor reviewer on a specific model get the same answer: run `auto`, or drop cursor from the lineup — and say which. Cost, not capability, decides this leg's model; the model table governs the claude and codex legs only.
+**Always `--model auto`.** `auto` is the only permitted value of this flag. Auto-routed requests are the included Cursor plan usage; every other model id (`gpt-5.6-sol-high`, `claude-opus-5-thinking-high`, `composer-2.5`, anything from `agent --list-models`) bills the API pool per token. Requests to run the cursor reviewer on a specific model get the same answer: run `auto`, or drop cursor from the lineup — and say which. Cost, not capability, decides this leg's model; the rubric governs the claude and codex legs only.
 
 This path is the local `agent` CLI only. Cursor's PR-side bots are a different mechanism and never a substitute: leave `@cursor review`, `@bugbot run`, and every other PR comment trigger out of it. Bots already in the PR conversation are handled by the bot-allowlist step, which does not include Cursor.
 
 ## Reviewer prompt
 
-[`references/reviewer-prompt.md`](references/reviewer-prompt.md) is the complete reviewer prompt — once rendered, it goes to the reviewer whole, never summarized or paraphrased, and nothing from this skill gets appended to it. Every leg renders its own copy, because three of the four fields change per leg.
+[`references/reviewer-prompt.md`](references/reviewer-prompt.md) is the complete reviewer prompt — once rendered, it goes to the reviewer whole, never summarized or paraphrased, and nothing from this skill gets appended to it. Every leg renders its own copy, because the head, the diff target, and the log all move between legs.
 
 | Field | Filled with |
 | --- | --- |
@@ -160,7 +150,7 @@ This path is the local `agent` CLI only. Cursor's PR-side bots are a different m
 | `{{DIFF_TARGET}}` | the command that reproduces the diff under review, e.g. `git diff <baseRefName>...<HEAD_SHA>` |
 | `{{ACCEPTANCE_CRITERIA}}` | criteria verbatim from the PR body, linked issue, or plan file — or "None stated" |
 | `{{ENVIRONMENT}}` | the posture decided by the trigger test, plus one line on what surrounds this code, e.g. "Cooperative: a Tampermonkey userscript sharing a document with wplace. wplace does not know this code exists." |
-| `{{PRIOR_LEGS}}` | the content of `$RELAY_LOG` in full, never its path — or "You are the first leg; nothing has been reviewed yet." on leg 1. Resumed sessions get only the delta, via the follow-up form above |
+| `{{PRIOR_LEGS}}` | `--prior-legs @"$RELAY_LOG"`, which inlines the log's full content and never its path — or "You are the first leg; nothing has been reviewed yet." on leg 1. Resumed sessions get only the delta, per [`references/resuming-a-reviewer.md`](references/resuming-a-reviewer.md) |
 
 ## The relay log
 
@@ -184,7 +174,7 @@ Every finding gets exactly one of **Fixed** (with SHA and the verification that 
 
 The log is the source the final report is written from — so write entries for a reader who was not there.
 
-**Reviewers receive log content as prompt text; `$RELAY_LOG` itself stays with you.** Never hand a reviewer the path. The file is live — you append to it during the very leg the reviewer is running, so a reviewer that opens it reads whichever half-written state it happened to catch, and two legs given "the log" are no longer comparable. It also sits outside the repo, where a sandboxed reviewer may fail to open it at all and silently review without it. Pasting the content keeps you in control of exactly what each leg saw, which is what makes a leg reproducible.
+**Reviewers receive log content as prompt text; `$RELAY_LOG` itself stays with you.** Never hand a reviewer the path. The file is live — you append to it during the very leg the reviewer is running, so a reviewer that opens it reads whichever half-written state it happened to catch, and two legs given "the log" are no longer comparable. It also sits outside the repo, where a sandboxed reviewer may fail to open it at all and silently review without it. Rendering the log into the prompt at launch freezes the snapshot that leg saw, which is what makes the leg reproducible.
 
 Number findings `[F1]`, `[F2]`, … across the whole relay, and head each section with the leg number and provider. That numbering is what lets you hand a provider only what it has not seen.
 
@@ -226,7 +216,7 @@ A leg that produces no fixes still hands off; skip the push and bot re-trigger, 
 
 Loop-worthy: evidence-backed problems **this diff causes** — introduced by the change, or latent and newly exposed by it — that can plausibly cause wrong results, crashes, security exposure, data loss or corruption, broken compatibility, acceptance-criteria violations, or an unreliable required CI gate.
 
-Scope is the diff. Reviewers read whatever they need for context and blast radius, but a defect the branch neither touches nor worsens belongs to another PR: log it as advisory and leave the code alone. Fixing it here grows the diff every later leg has to review, and buries the change the PR was actually opened for.
+Scope is the diff, per the rule at the top of this skill. Reviewers read whatever they need for context and blast radius, but a defect the branch neither touches nor worsens belongs to another PR: log it as advisory and leave the code alone. Fixing it here grows the diff every later leg has to review, and buries the change the PR was actually opened for.
 
 Missing or incomplete test coverage is not a real finding by itself. Report coverage observations separately, classify a coverage-only leg as clean, and do not fix or push them unless the user separately asks. If review of a gap exposes an actual wrong runtime outcome, report the runtime defect as the finding and the missing test only as supporting evidence.
 
@@ -306,7 +296,7 @@ gh api graphql -f threadId=ID -f query='
 
 All true for the latest pushed head:
 
-- A full lap is clean: every provider in the lineup has reviewed a head no later leg changed, and none of them found anything real. A provider that reviewed an older head never got the current baton — it runs again.
+- A full lap is clean: every provider in the lineup has reviewed a head no later leg changed, and none of them found anything real. A provider that reviewed an older head never got the current baton — it runs again. A leg whose only output was coverage observations counts as clean and hands off the unchanged baton; coverage never keeps the relay alive by itself.
 - No actionable unresolved discussion threads remain.
 - Required CI passes, or a failure is proven unrelated and reported as such.
 - Every re-triggered supported bot reviewed the latest head and raised nothing real.
@@ -314,10 +304,6 @@ All true for the latest pushed head:
 - The worktree and the pushed PR head agree.
 - The acceptance criteria still hold against the full cumulative diff, not just the last leg's changes.
 - Any behavior that depends on a real sandbox, browser, credential, deployment, or third-party integration has either been smoke-tested in that environment or remains an explicit manual handoff. More static review legs do not substitute for this evidence.
-
-### Coverage-only is clean
-
-A leg with no correctness, security, compatibility, reliability, or required-CI defect is clean even when the reviewer identifies untested behavior. Record those coverage observations as advisory context, do not convert them into relay fixes, and continue the lineup from the unchanged baton. Coverage must never keep the relay alive by itself.
 
 ## Final report
 
