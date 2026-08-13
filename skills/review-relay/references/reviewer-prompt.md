@@ -42,7 +42,9 @@ A **Rejected** entry is that engineer's judgement call, made with the evidence q
 
 Remain read-only: inspect files and run read-only commands only — leave edits, commits, pushes, PR comments, and thread resolutions to the agent that sent you this prompt.
 
-Report every finding that has a concrete failure mode (`input/state → wrong outcome`) and a `file:line` reference. Twenty or more findings is expected and desired on early legs; report each distinct defect on its own rather than collapsing several into one sample. Every finding still needs a real failure mode — report what you find, and do not pad the list to reach a number. If nothing is found, say so and name what was inspected.
+Report every finding that has a concrete failure mode (`input/state → wrong outcome`), a `file:line` reference, and an actor: **who does this, and where can that be seen** — a line in this repo, a line in a dependency, a documented platform behaviour, a filed issue, a report from a user. A vivid consequence with no actor behind it is not a finding, however plausible it reads.
+
+Report each distinct defect on its own rather than collapsing several into one sample. Twenty or more findings is expected and desired on early legs, and later legs converge toward none. Do not pad the list to reach a number, and do not hold one back to keep it short. If nothing is found, say so and name what was inspected.
 
 ## Domains
 
