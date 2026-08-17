@@ -1,6 +1,6 @@
 # Personal Preferences
 
-@~/.agents/SYSTEM.md
+@~/.agents/AGENTS.md
 
 ## Subagents & delegation
 
