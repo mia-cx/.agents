@@ -4,17 +4,21 @@
     "type": "split",
     "children": [
       {
-        "id": "bd731d9b6dde21e0",
+        "id": "4710e477802ba3cf",
         "type": "tabs",
         "children": [
           {
-            "id": "399a361516b8faaf",
+            "id": "26a2f8f8ef7a0789",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
+              "type": "markdown",
+              "state": {
+                "file": "skills/review-relay/SKILL.md",
+                "mode": "source",
+                "source": false
+              },
               "icon": "lucide-file",
-              "title": "New tab"
+              "title": "SKILL"
             }
           }
         ]
@@ -240,12 +244,16 @@
       "iconic:Open rulebook": false
     }
   },
-  "active": "399a361516b8faaf",
+  "active": "26a2f8f8ef7a0789",
   "lastOpenFiles": [
+    "skills/review-relay/references/fixer-prompt.md",
+    "skills/review-relay/references/resuming-a-reviewer.md",
+    "skills/review-relay/scripts/render-prompt.py",
+    "skills/review-relay/scripts",
+    "skills/review-relay/SKILL.md",
+    "skills/review-relay/references/reviewer-prompt.md",
     "AGENTS.md",
     "AGENTS.local.md",
-    "skills/review-relay/references/reviewer-prompt.md",
-    "skills/review-relay/SKILL.md",
     "skills/gh-comment/SKILL.md",
     "skills/file-upload/SKILL.md",
     "skills/review-relay/references",
@@ -258,7 +266,6 @@
     "skills/file-upload/references",
     "skills/file-upload/config.example",
     "skills/file-upload",
-    "skills/code-review/SKILL.off",
     "CLAUDE.md",
     "skills/ui-design/SKILL.md",
     "skills/pr-merge/SKILL.md",
@@ -275,9 +282,6 @@
     "Book 1 - Ash and Bloom/Research & Development/Characters/Joshuara-Mother.md",
     "Book 1 - Ash and Bloom/Research & Development/Characters/Soren.md",
     "Book 1 - Ash and Bloom/Research & Development/Characters/Kuori.md",
-    "Book 1 - Ash and Bloom/Research & Development/Characters/Kaela.md",
-    "Book 1 - Ash and Bloom/Research & Development/Characters/Ruvan.md",
-    "Book 1 - Ash and Bloom/Research & Development/Magic",
     "Characters/Nalla/Nalla.png",
     "Characters/Nalla/Nalla.jpg",
     "Characters/Nalla/World (Tokalea)/Tokalea Archipelago reference 2.png",
