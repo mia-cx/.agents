@@ -1,11 +1,9 @@
 ---
 name: create-prd
 description: >-
-  Create a PRD through user interview, codebase exploration, and module design,
-  then submit it as a GitHub issue. The default entrypoint for planning
-  anything bigger than a single feature or slice: multi-feature efforts, new
-  systems, epics, large refactors. Also use when the user wants to write a
-  PRD, create a product requirements document, or plan a new feature.
+  Use when the user wants to write a PRD or plan anything bigger than a single
+  feature or slice — multi-feature efforts, new systems, epics, large
+  refactors.
 ---
 
 # Create PRD
@@ -24,15 +22,11 @@ Interview the user, verify against the codebase, design the modules, then file t
 
 ## Issue metadata
 
-Discover available metadata before creating the issue and apply best-fit values:
+Discover available metadata (labels, milestones, projects, collaborators) with `gh` before creating the issue and apply best-fit values. Issue types need the GraphQL API:
 
 ```bash
 gh api graphql -f query='{organization(login:"OWNER"){issueTypes(first:20){nodes{name}}}}' \
   --jq '.data.organization.issueTypes.nodes[].name' 2>/dev/null || true
-gh label list --json name,description
-gh api "/repos/OWNER/REPO/milestones?state=open" --jq '.[].title'
-gh project list --owner OWNER --format json --jq '.projects[].title' 2>/dev/null || true
-gh api "/repos/OWNER/REPO/collaborators" --jq '.[].login'
 ```
 
 - **Issue type** — when the org has types, set one on the issue; types replace type-labels:

@@ -1,18 +1,13 @@
 ---
 name: codex-computer-use
 description: >-
-  Ask the Codex CLI (gpt-5.6-sol) to run local app verification that needs
-  computer use: browser automation, simulators, screenshots, app launching, or
-  independent runtime inspection. Use when the user asks to test a flow,
-  verify UI behavior, inspect a running app, capture screenshots, or report
-  confirmation and feedback about implemented behavior that benefits from
-  computer use. For code reading, typechecking, linting, or tests, run them
-  directly instead.
+  Use when the user asks to test a flow, verify UI behavior, inspect a running
+  app, or capture screenshots.
 ---
 
 # Codex Computer Use
 
-Use Codex as a separate local verification agent when the task needs real UI interaction, screenshots, simulator/browser/device state, or an independent runtime check outside the current context.
+Use Codex as a separate local verification agent when the task needs real UI interaction, screenshots, simulator/browser/device state, or an independent runtime check outside the current context. For code reading, typechecking, linting, or tests, run them directly instead — no computer use needed.
 
 Launching apps, simulators, or browsers to verify the requested work is fine without asking; ask first only if the run could disrupt the user's environment beyond that (closing their apps, changing system settings, acting on real accounts or data).
 

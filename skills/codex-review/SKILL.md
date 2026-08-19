@@ -25,13 +25,13 @@ REPORT="$ARTIFACT_DIR/report.md"
 PROMPT="$ARTIFACT_DIR/prompt.md"
 
 # Review staged, unstaged, and untracked changes.
-codex review --uncommitted > "$REPORT"
+codex review --uncommitted </dev/null > "$REPORT"
 
 # Review current branch against a base branch.
-codex review --base main > "$REPORT"
+codex review --base main </dev/null > "$REPORT"
 
 # Review a single commit.
-codex review --commit <sha> > "$REPORT"
+codex review --commit <sha> </dev/null > "$REPORT"
 
 # Use custom instructions instead of a built-in target.
 codex review - < "$PROMPT" > "$REPORT"
@@ -39,7 +39,7 @@ codex review - < "$PROMPT" > "$REPORT"
 
 - The model comes from `~/.codex/config.toml` (gpt-5.6-sol:high — the right tier for review depth); override with `-c model="..."` when the rubric says otherwise.
 - `--uncommitted`, `--base`, and `--commit` are mutually exclusive with a custom `PROMPT`. Use one of the first three command shapes for a built-in target; use the final shape when custom instructions matter more.
-- Stdin carries only the custom prompt in the final shape, so `</dev/null` does not apply there.
+- Built-in targets take `</dev/null` so codex doesn't wait on input; the custom shape uses stdin for the prompt instead.
 - Long reviews can exceed Bash's 10-minute timeout: pass an explicit timeout, or run in the background and poll for `$REPORT`.
 
 ## Review Prompt
