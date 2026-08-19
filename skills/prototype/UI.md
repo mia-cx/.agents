@@ -45,6 +45,8 @@ This works whether the user is here to push back or not.
 
 ### 2. Generate radically different variants
 
+Invoke the `ui-design` skill before drafting — it governs the design choices (layout, color, typography, spacing, motion) within each variant.
+
 Draft each variant. Hold each one to:
 
 - The page's purpose and the data it has access to.
