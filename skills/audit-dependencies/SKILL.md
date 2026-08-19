@@ -1,12 +1,8 @@
 ---
 name: audit-dependencies
 description: >-
-  Audits project dependencies — security (CVEs) plus the e18e.dev classes:
-  cleanup (dependency-tree debt), speedup (runtime performance), levelup
-  (modern lean alternatives). Applies safe security fixes directly; proposes
-  everything else without applying. Use when the user asks to audit or check
-  dependencies, or mentions outdated packages, vulnerabilities, CVEs,
-  dependency bloat, install size, or upgrades.
+  Use when the user asks to audit, check, or upgrade dependencies, or mentions
+  vulnerabilities, outdated packages, or dependency bloat.
 ---
 
 # Audit Dependencies
@@ -39,7 +35,7 @@ Per vulnerability: package, installed version, patched version, CVE, direct or t
 
 **Safe fixes are applied directly**: a patched version exists within the same major (patch/minor bump). Update, then verify with typecheck + test before committing. Fixes that require a major bump or API changes become proposals like everything else.
 
-For transitive vulnerabilities, propose one of: bump the direct dep that pulls in the fix; a documented override (`pnpm.overrides`) linking the upstream issue; or a written risk acceptance when the vulnerable path is unreachable.
+For transitive vulnerabilities, propose one of: bump the direct dep that pulls in the fix; a documented override (`pnpm.overrides`) linking the upstream issue and naming its removal condition; or a written risk acceptance when the vulnerable path is unreachable.
 
 ### 3. ✨ Cleanup
 
@@ -74,7 +70,7 @@ pnpm outdated            # stale direct deps
 
 ### 6. Propose
 
-Present one summary, grouped by class, every item actionable:
+Present one summary, grouped by class, every item actionable. Each cleanup/levelup item states its dependency-count or size delta; each speedup item cites its measurement. Keep majors and replacements separately acceptable — one proposal per concern, never batched.
 
 ```markdown
 ## Dependency Audit
@@ -108,10 +104,3 @@ Present one summary, grouped by class, every item actionable:
 ```
 
 For approved majors and levelups, draft a `gh issue create` with: why, breaking changes, worktree setup, upgrade steps, and acceptance criteria (typecheck, lint, test pass; affected features verified).
-
-## Rules
-
-- **Apply safe security fixes; propose everything else.** Safe = patched version within the same major, typecheck + test green after. All cleanup, speedup, and levelup work starts only after the user picks proposals.
-- **One proposal per concern.** Each major bump and each replacement carries its own risk; keep them separately acceptable.
-- **Quantify graph impact.** Every cleanup/levelup proposal states the dependency-count or size delta; every speedup proposal cites a measurement.
-- **Overrides are documented loans.** Any proposed override links the upstream issue and names its removal condition.
