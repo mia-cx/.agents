@@ -47,13 +47,15 @@ Lead with the answer or outcome. Stop when the request is satisfied.
 
 ## Prose: AI tells
 
+Each bullet names a tell, then its fix. Quoted phrases and terms after "Avoid" are the tells; what follows is the replacement.
+
 ### Words
 
-- AI vocabulary becomes the everyday word: additionally, crucial, delve, enduring, enhance, foster, garner, interplay, intricate, pivotal, showcase, testament, underscore, vibrant, abstract "landscape"/"tapestry".
+- AI vocabulary becomes the everyday word. Avoid: additionally, crucial, delve, enduring, enhance, foster, garner, interplay, intricate, pivotal, showcase, testament, underscore, vibrant, abstract "landscape"/"tapestry".
 - Prefer the plain word: "utilize" is "use", "leverage" is "use", "facilitate" is "help", "numerous" is "many", "in the event that" is "if". The fancier synonym is rarely clearer.
 - Fancy ways to say "is": "serves as", "stands as", "boasts", "features" become "is" or "has".
 - Promotional words ("nestled", "breathtaking", "groundbreaking", "renowned", "stunning", "must-visit") become neutral description.
-- Metaphor jargon becomes the concrete word: substrate, wedge, vector, locus, nexus, bedrock, scaffolding (as metaphor), modality, paradigm, primitive (as noun), north star, flywheel, ratchet, gold-plating, endgame, evacuate (for moving code). "Substrate" is "base", "wedge in" is "add", "vector" is "method", "ratchet" is "a limit that only tightens", "gold-plating" is "more than the job needs", "endgame" is "the last phase".
+- Metaphor jargon becomes the concrete word. Avoid: substrate, wedge, vector, locus, nexus, bedrock, scaffolding (as metaphor), modality, paradigm, primitive (as noun), north star, flywheel, ratchet, gold-plating, endgame, evacuate (for moving code). Replacements: "substrate" is "base", "wedge in" is "add", "vector" is "method", "ratchet" is "a limit that only tightens", "gold-plating" is "more than the job needs", "endgame" is "the last phase".
 - Idioms ("circle back", "on the same page") become the literal action.
 
 ### Sentences
@@ -62,8 +64,8 @@ Lead with the answer or outcome. Stop when the request is satisfied.
 - Active voice: catch "is/are/was/were + past participle" and name the actor ("the compiler validates queries", not "queries are validated"). Passive only when the actor is unknown or irrelevant.
 - Cut adverbs or use the number: "significantly improves" becomes the measured delta; "runs quickly" becomes "is fast" or the benchmark. An adverb propping up a weak verb means the verb is wrong.
 - "Not just X, but Y": state the point directly.
-- Rule of three: use the natural number of items.
-- Synonym cycling: pick one word and repeat it.
+- Rule of three (forcing ideas into groups of three): use the natural number of items.
+- Synonym cycling ("protagonist", "main character", "central figure" in one paragraph): pick one word and repeat it.
 - False ranges ("from X to Y" with no real scale): list the topics directly.
 - Superficial -ing tails ("...highlighting the importance of", "...ensuring reliability", "...showcasing"): delete, or expand into a sentence with a real fact.
 
