@@ -1,4 +1,0 @@
-# Real config belongs in ~/.config/i-upload/config, never next to the script.
-# This repo is public — ignore it here in case someone copies it into place.
-config
-*.env
