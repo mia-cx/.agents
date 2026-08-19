@@ -27,11 +27,7 @@ Detect the manager from the lockfile and use its `audit`/`outdated` commands. Fo
 
 ### 2. Security
 
-```bash
-pnpm audit --json 2>/dev/null || pnpm audit
-```
-
-Per vulnerability: package, installed version, patched version, CVE, direct or transitive. Severity sets urgency: critical/high → before next release; moderate → near term; low → when convenient.
+Run the manager's audit command. Per vulnerability: package, installed version, patched version, CVE, direct or transitive. Severity sets urgency: critical/high → before next release; moderate → near term; low → when convenient.
 
 **Safe fixes are applied directly**: a patched version exists within the same major (patch/minor bump). Update, then verify with typecheck + test before committing. Fixes that require a major bump or API changes become proposals like everything else.
 
@@ -39,14 +35,7 @@ For transitive vulnerabilities, propose one of: bump the direct dep that pulls i
 
 ### 3. ✨ Cleanup
 
-Discover the state of the tree, then flag debt:
-
-```bash
-npx knip                 # unused deps and exports
-pnpm dedupe --check      # duplicate versions in the graph
-pnpm why <package>       # who pulls in a suspect package
-pnpm outdated            # stale direct deps
-```
+Discover the state of the tree — unused deps and exports (knip), duplicate versions, who pulls in a suspect package, stale direct deps — then flag debt:
 
 - Visualize suspects with [npmgraph](https://npmgraph.js.org/) (tree complexity) and [pkg-size.dev](https://pkg-size.dev) (install size).
 - Flag deps pulling in large subtrees not used elsewhere — with e18e's caveat: some depth exists for good reasons (older Node support, shared modules); check before proposing removal.
