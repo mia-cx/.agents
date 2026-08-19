@@ -22,11 +22,15 @@ Interview the user, verify against the codebase, design the modules, then file t
 
 ## Issue metadata
 
-Discover available metadata (labels, milestones, projects, collaborators) with `gh` before creating the issue and apply best-fit values. Issue types need the GraphQL API:
+Discover available metadata before creating the issue and apply best-fit values:
 
 ```bash
 gh api graphql -f query='{organization(login:"OWNER"){issueTypes(first:20){nodes{name}}}}' \
   --jq '.data.organization.issueTypes.nodes[].name' 2>/dev/null || true
+gh label list --json name,description
+gh api "/repos/OWNER/REPO/milestones?state=open" --jq '.[].title'
+gh project list --owner OWNER --format json --jq '.projects[].title' 2>/dev/null || true
+gh api "/repos/OWNER/REPO/collaborators" --jq '.[].login'
 ```
 
 - **Issue type** — when the org has types, set one on the issue; types replace type-labels:

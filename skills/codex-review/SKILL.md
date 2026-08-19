@@ -64,8 +64,4 @@ Add task-specific context when useful: requirements, risky areas, expected behav
 
 ## Reporting Back
 
-Before relaying a finding, inspect the cited code or diff enough to decide whether it is real. In the user-facing response, separate confirmed issues from unverified Codex suggestions.
-
-If Codex finds nothing, say that clearly and mention what review target it inspected.
-
-If `codex` is not installed or the command fails, report the error and offer to review the changes directly instead.
+Before relaying a finding, inspect the cited code or diff enough to decide whether it is real. In the user-facing response, separate confirmed issues from unverified Codex suggestions. If Codex finds nothing, say that clearly and mention what review target it inspected.

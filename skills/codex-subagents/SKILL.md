@@ -56,6 +56,4 @@ ${task}
 4. **Iterate** — `resume` with criteria-referenced feedback, ~3 rounds; then do it yourself or surface the blocker.
 5. **Integrate** — final assembly, commits, and user-facing summary stay with the orchestrator.
 
-Skip delegation for trivial single-file lookups — dispatch only work that outweighs the overhead.
-
 When a worker misbehaves, ask what went wrong and append the fix here.

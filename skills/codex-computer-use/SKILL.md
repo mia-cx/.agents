@@ -22,9 +22,8 @@ Capability depends on where this runs — check before dispatching:
 ## Workflow
 
 1. Confirm the target is reachable: app running, URL or app name known, test credentials if the flow needs them.
-2. Create a temporary artifact directory for the report and screenshots.
-3. Run `codex exec` with a verification prompt.
-4. Read the report, view the screenshots yourself, and verify important claims before presenting them.
+2. Create a temporary artifact directory; write the verification prompt to `$ARTIFACT_DIR/prompt.md`.
+3. Run `codex exec`:
 
 ```bash
 ARTIFACT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/codex-verify.XXXXXX")"
@@ -58,8 +57,4 @@ Keep "do not edit" — the 5.6 models (sol especially) are eager to start fixing
 
 ## Reporting Back
 
-Before relaying findings, read the report and look at the screenshots yourself; separate confirmed behavior from Codex claims you did not verify.
-
-If Codex reports everything passing, relay that with the evidence (which steps, which screenshots).
-
-If computer use is unavailable in this environment or the command fails, report that and offer the non-GUI fallback instead.
+Read the report and look at the screenshots yourself before relaying anything; separate confirmed behavior from Codex claims you did not verify, and relay results with their evidence (which steps, which screenshots).
