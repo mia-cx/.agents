@@ -1,10 +1,6 @@
 ---
 name: address-issue
-description: >-
-  Use when the user says "address issue", asks to implement or work a GitHub
-  issue end-to-end, or wants issue work done as TODOs with one commit per TODO
-  and a PR. Not for filing or merging an already-finished branch (pr-file /
-  pr-merge), and not for triage alone.
+description: Use when the user asks to address or implement an issue.
 ---
 
 # Address Issue

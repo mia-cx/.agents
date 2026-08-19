@@ -1,6 +1,6 @@
 ---
 name: refine-rules-and-skills
-description: Use when authoring or editing SKILL.md, AGENTS.md, CLAUDE.md, SYSTEM.md, memory files, agent rules, or agent prompts, and when the user asks to audit or tighten agent guidance.
+description: Use when the user asks to author, edit, or audit agent guidance.
 ---
 
 # Refine Rules & Skills
@@ -32,12 +32,12 @@ For every rule, skill, memory entry, or agent prompt:
 
 ### Skills (`SKILL.md`)
 
-- [ ] **Right invocation mode**: a skill only ever fired by hand gets `disable-model-invocation: true` — zero context load, and its description becomes a human-facing one-liner. Model-invoked descriptions list one trigger per distinct use; synonyms restating the same trigger are duplication.
-- [ ] **Description is trigger-only**: treat it as bootstrap routing metadata, not a summary of what the skill does. State only when to invoke, using the words a user would use; move capabilities, workflow, and value propositions into the body. Models undertrigger, so name every distinct context that should fire the skill, including ones where the user doesn't name the topic. Sanity-check near-misses so adjacent prompts sharing keywords do not match.
+- [ ] **Right invocation mode**: a skill only ever fired by hand gets `disable-model-invocation: true` — zero context load, and its description becomes a human-facing one-liner.
+- [ ] **Description is one trigger sentence**: `Use when the user asks to …` — the user's words, not a capability summary, synonym catalog, or near-miss exclusion list. Move those into the body.
 
   **Before:** `Creates and edits polished presentation decks with layout and visual QA.`
 
-  **After:** `Use when the user asks to create, edit, or review a presentation, slide deck, PowerPoint, or PPTX.`
+  **After:** `Use when the user asks to create or edit a presentation.`
 - [ ] **Checkable completion criteria**: each workflow step ends on a condition the agent can verify — and where it matters, exhaustive ("every modified file accounted for", not "produce a list"). Vague criteria invite declaring done early.
 - [ ] **Remove bloat**: cut motivational prose about why the *topic* matters — it persuades readers, not agents. One-clause "because Y" constraints on individual rules stay. Test each sentence in isolation: does it change behavior versus the model's default? Delete failing sentences whole rather than trimming words.
 - [ ] **Keep examples concrete**: runnable/adaptable, not generic.
