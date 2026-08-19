@@ -7,7 +7,7 @@ description: >-
 
 # Refine
 
-Route, then apply: pick the branch for the target, Read its SKILL.md, and run its checks on top of the core levers below.
+Route, then apply: pick the branch for the target, Read its SKILL.md, and run its checks on top of the core levers below. The levers are the audit form of the [agent-copy](../agent-copy/SKILL.md) reference — reach for it when a lever needs its full definition, or when writing a document from scratch rather than refining one.
 
 | Target | Branch |
 | --- | --- |
