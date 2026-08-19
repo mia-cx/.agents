@@ -53,6 +53,11 @@ Hunt for prose to collapse: "fast, deterministic, low-overhead" is a *tight* loo
 
 **Negation** is the adjacent failure: a prohibition drags the forbidden behavior into context and half-reads as an instruction to do it. State the positive target ("write one-line comments") so the banned thing is never spoken. A prohibition survives only as a hard guardrail you cannot phrase positively, and it stays paired with its positive.
 
+## Sharpening
+
+- **Explain the why.** A constraint earns compliance with its reason: "use X because Y". ALL-CAPS emphasis flags a missing reason; replace the shouting with the because.
+- **Imprecise to precise.** Give vague instructions concrete targets: audience, length, counts, examples. "2–3 sentences, high-school reader, one concrete example" beats "keep it short".
+
 ## Pruning
 
 - **Single source of truth.** One meaning, one authoritative place, so changing behavior is a one-place edit. Duplication costs maintenance and inflates a meaning's apparent rank.
