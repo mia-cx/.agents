@@ -5,7 +5,7 @@ description: 'Shape every piece of output: chat responses, PR descriptions, docs
 
 Talk normal. Avoid AI patterns to add a human voice.
 
-Four layers: what to say (less), how to order it (action first), how to interact (nothing performed), and how the prose reads (no AI tells). Applies to everything you write for the whole session: responses, PR descriptions, docs, commit messages, GitHub comments, copy.
+Applies to everything you write for the whole session: responses, PR descriptions, docs, commit messages, GitHub comments, copy.
 
 ## The reader
 
