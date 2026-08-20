@@ -8,9 +8,9 @@ description: >-
   commits from the current working tree.
 ---
 
-# Git Commit and Push
+# Git commit and push
 
-Organize uncommitted changes into atomic, single-concern commits (one per: config, formatting, behavior, tests, docs) so history stays readable. Execute every commit and push — run immediately, no approval round-trip.
+Organize uncommitted changes into atomic, single-concern commits (one per: config, formatting, behavior, tests, docs) so history stays readable. Execute every commit and push. Run immediately, no approval round-trip.
 
 ## Workflow
 
@@ -41,7 +41,7 @@ When a file spans two concerns, assign it to the dominant one and note the mix i
 
 ### 4. Execute and push
 
-For each commit in order: `git add <paths>`, then `git commit` with subject, flavourful body, issue refs, and a `Co-Authored-By` trailer with your actual model name (e.g. `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` — whatever model you actually are). Execute every commit via Bash — printing the commands is not committing.
+For each commit in order: `git add <paths>`, then `git commit` with subject, flavourful body, issue refs, and a `Co-Authored-By` trailer with your actual model name (e.g. `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`, whatever model you actually are). Execute every commit via Bash; printing the commands is not committing.
 
 After the final commit: `git push`. Confirm with a summary table of what landed.
 
@@ -57,10 +57,12 @@ Types: `chore`, `feat`, `fix`, `docs`, `test`, `style`, `refactor`. Present tens
 
 ### Body (flavour zone)
 
-Every commit gets a body: genuinely useful (the *why*, tricky decisions, breaking changes) with a light touch of fun — dry wit, a pun, a lyric, a mini-poem. The flavour complements the content; the *why* always comes through.
+Every commit gets a body: genuinely useful (the *why*, tricky decisions, breaking changes) with a light touch of fun. Dry wit, a pun, a lyric, a mini-poem. The flavour complements the content; the *why* always comes through.
+
+This body is a sanctioned flavour zone: it overrides global style rules that ban idioms, metaphors, and wordplay, on purpose.
 
 **fix:**
-> We had a real commitment issue. The index was off by one, which is ironic for a commit tool. Fixed now — no more therapy needed.
+> We had a real commitment issue. The index was off by one, which is ironic for a commit tool. Fixed now, no more therapy needed.
 
 **style:**
 > Roses are red,
@@ -69,7 +71,7 @@ Every commit gets a body: genuinely useful (the *why*, tricky decisions, breakin
 > no logic at all.
 
 **chore:**
-> *"Another one bites the dust"* — dependency edition. Bumped @types/node, wired up the validate script, and sent CI's complaints to voicemail.
+> *"Another one bites the dust"*, dependency edition. Bumped @types/node, wired up the validate script, and sent CI's complaints to voicemail.
 
 Full example:
 
