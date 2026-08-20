@@ -1,77 +1,72 @@
 {
   "version": 3,
   "skills": {
-    "find-skills": {
-      "source": "vercel-labs/skills",
+    "codebase-design": {
+      "source": "mattpocock/skills",
       "sourceType": "github",
-      "sourceUrl": "https://github.com/vercel-labs/skills.git",
-      "skillPath": "skills/find-skills/SKILL.md",
-      "skillFolderHash": "76a98a285cb0434f3d39e1a873823556330e398b",
-      "installedAt": "2026-07-21T12:04:09.049Z",
-      "updatedAt": "2026-07-21T12:04:11.350Z"
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/engineering/codebase-design/SKILL.md",
+      "skillFolderHash": "344e3efc88ee60663b2e989555c2efdb548fbd42",
+      "pluginName": "mattpocock-skills",
+      "installedAt": "2026-08-20T19:57:01.966Z",
+      "updatedAt": "2026-08-20T19:57:01.966Z"
     },
-    "better-accessibility": {
-      "source": "jakubkrehel/skills",
+    "resolving-merge-conflicts": {
+      "source": "mattpocock/skills",
       "sourceType": "github",
-      "sourceUrl": "https://github.com/jakubkrehel/skills.git",
-      "skillPath": "skills/better-accessibility/SKILL.md",
-      "skillFolderHash": "de3c03dd915359ff07bbf20bf532339c39d660b1",
-      "installedAt": "2026-08-02T17:59:28.847Z",
-      "updatedAt": "2026-08-02T17:59:28.847Z"
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/engineering/resolving-merge-conflicts/SKILL.md",
+      "skillFolderHash": "77f0d7de3143abbf03e55a63522d30bff31ae908",
+      "pluginName": "mattpocock-skills",
+      "installedAt": "2026-08-20T19:57:49.797Z",
+      "updatedAt": "2026-08-20T19:57:49.797Z"
     },
-    "better-colors": {
-      "source": "jakubkrehel/skills",
+    "writing-beats": {
+      "source": "mattpocock/skills",
       "sourceType": "github",
-      "sourceUrl": "https://github.com/jakubkrehel/skills.git",
-      "skillPath": "skills/better-colors/SKILL.md",
-      "skillFolderHash": "efb5db3cbc324ea836305baac585d07e4c725696",
-      "installedAt": "2026-08-02T17:59:28.850Z",
-      "updatedAt": "2026-08-02T17:59:28.850Z"
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/in-progress/writing-beats/SKILL.md",
+      "skillFolderHash": "3a28fb076fdaaec0927080718abb98fc0f340011",
+      "installedAt": "2026-08-20T19:57:49.799Z",
+      "updatedAt": "2026-08-20T19:57:49.799Z"
     },
-    "better-interface": {
-      "source": "jakubkrehel/skills",
+    "writing-fragments": {
+      "source": "mattpocock/skills",
       "sourceType": "github",
-      "sourceUrl": "https://github.com/jakubkrehel/skills.git",
-      "skillPath": "skills/better-interface/SKILL.md",
-      "skillFolderHash": "b22cb60dec45b446adb9125fb2c159b125c1c6be",
-      "installedAt": "2026-08-02T17:59:28.851Z",
-      "updatedAt": "2026-08-02T17:59:28.851Z"
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/in-progress/writing-fragments/SKILL.md",
+      "skillFolderHash": "98e500e0097ec80f52f6a024c5a2ff6d15235bdb",
+      "installedAt": "2026-08-20T19:57:49.800Z",
+      "updatedAt": "2026-08-20T19:57:49.800Z"
     },
-    "better-layout": {
-      "source": "jakubkrehel/skills",
+    "writing-shape": {
+      "source": "mattpocock/skills",
       "sourceType": "github",
-      "sourceUrl": "https://github.com/jakubkrehel/skills.git",
-      "skillPath": "skills/better-layout/SKILL.md",
-      "skillFolderHash": "7b95fd9f974618314df4f073079e0dd95587cdd8",
-      "installedAt": "2026-08-02T17:59:28.851Z",
-      "updatedAt": "2026-08-02T17:59:28.851Z"
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/in-progress/writing-shape/SKILL.md",
+      "skillFolderHash": "ac92229646fccf7315ae139c37b479b3790617f2",
+      "installedAt": "2026-08-20T19:57:49.800Z",
+      "updatedAt": "2026-08-20T19:57:49.800Z"
     },
-    "better-typography": {
-      "source": "jakubkrehel/skills",
+    "teach": {
+      "source": "mattpocock/skills",
       "sourceType": "github",
-      "sourceUrl": "https://github.com/jakubkrehel/skills.git",
-      "skillPath": "skills/better-typography/SKILL.md",
-      "skillFolderHash": "a175046f0135de4056196a8d69e856f1583a9b6e",
-      "installedAt": "2026-08-02T17:59:28.852Z",
-      "updatedAt": "2026-08-02T17:59:28.852Z"
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/productivity/teach/SKILL.md",
+      "skillFolderHash": "2ab11f2f51f3c29771edb5d4258d807a49462491",
+      "pluginName": "mattpocock-skills",
+      "installedAt": "2026-08-20T19:57:49.801Z",
+      "updatedAt": "2026-08-20T19:57:49.801Z"
     },
-    "better-ui": {
-      "source": "jakubkrehel/skills",
+    "to-questionnaire": {
+      "source": "mattpocock/skills",
       "sourceType": "github",
-      "sourceUrl": "https://github.com/jakubkrehel/skills.git",
-      "skillPath": "skills/better-ui/SKILL.md",
-      "skillFolderHash": "3965b5bc70657d64f0163a65389990c6044d0290",
-      "installedAt": "2026-08-02T17:59:28.852Z",
-      "updatedAt": "2026-08-02T17:59:28.852Z"
-    },
-    "better-writing": {
-      "source": "jakubkrehel/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/jakubkrehel/skills.git",
-      "skillPath": "skills/better-writing/SKILL.md",
-      "skillFolderHash": "901c085a23945001618b2aee838accedae2d1a27",
-      "installedAt": "2026-08-02T17:59:28.853Z",
-      "updatedAt": "2026-08-02T17:59:28.853Z"
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/productivity/to-questionnaire/SKILL.md",
+      "skillFolderHash": "46dfbeeba12a9e52eef446676f42e7551023d9a9",
+      "pluginName": "mattpocock-skills",
+      "installedAt": "2026-08-20T19:57:49.801Z",
+      "updatedAt": "2026-08-20T19:57:49.801Z"
     }
   },
   "dismissed": {
