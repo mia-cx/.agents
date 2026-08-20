@@ -21,13 +21,29 @@ boardroom/memos/*-narration.mp3
 .ant-colony/
 __pycache__/
 
-# Vendored skills owned by the `skills` CLI, recorded in .skill-lock.json.
-# Unmodified upstream copies: restore with `skills experimental_install`.
-# Anything edited locally stays tracked, so its diff against upstream is in git.
+# Skills owned by the `skills` CLI, one entry each in .skill-lock.json.
+# Restore with `skills experimental_install`; always pass -g in this repo,
+# or the CLI installs into a nested .agents/skills/ instead.
+# Local changes do not survive `skills update`: upstream a PR, or drop the
+# skill from the lock to take ownership of it here.
+skills/ask-matt/
 skills/codebase-design/
+skills/diagnosing-bugs/
+skills/domain-modeling/
+skills/grill-with-docs/
+skills/grilling/
+skills/handoff/
+skills/improve-codebase-architecture/
+skills/loop-me/
+skills/prototype/
 skills/resolving-merge-conflicts/
+skills/setup-matt-pocock-skills/
+skills/tdd/
 skills/teach/
 skills/to-questionnaire/
+skills/triage/
+skills/wayfinder/
+skills/wizard/
 skills/writing-beats/
 skills/writing-fragments/
 skills/writing-shape/
