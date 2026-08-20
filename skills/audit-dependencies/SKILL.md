@@ -3,6 +3,7 @@ name: audit-dependencies
 description: >-
   Use when the user asks to audit, check, or upgrade dependencies, or mentions
   vulnerabilities, outdated packages, or dependency bloat.
+disable-model-invocation: true
 ---
 
 # Audit Dependencies
