@@ -4,16 +4,44 @@
     "type": "split",
     "children": [
       {
-        "id": "4710e477802ba3cf",
+        "id": "6ef2c5d85ff3ab6b",
         "type": "tabs",
         "children": [
+          {
+            "id": "1dc71cb32b668684",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "skills/talk-normal/SKILL.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "SKILL"
+            }
+          },
+          {
+            "id": "876b2408603172fd",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "skills/say-less/SKILL.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "SKILL"
+            }
+          },
           {
             "id": "26a2f8f8ef7a0789",
             "type": "leaf",
             "state": {
               "type": "markdown",
               "state": {
-                "file": "skills/review-relay/SKILL.md",
+                "file": "skills/talk-normal/SKILL.md",
                 "mode": "source",
                 "source": false
               },
@@ -93,6 +121,7 @@
             "state": {
               "type": "localgraph",
               "state": {
+                "file": "skills/talk-normal/SKILL.md",
                 "options": {
                   "collapse-filter": true,
                   "search": "",
@@ -244,44 +273,43 @@
       "iconic:Open rulebook": false
     }
   },
-  "active": "26a2f8f8ef7a0789",
+  "active": "1dc71cb32b668684",
   "lastOpenFiles": [
-    "skills/review-relay/references/fixer-prompt.md",
-    "skills/review-relay/references/resuming-a-reviewer.md",
-    "skills/review-relay/scripts/render-prompt.py",
-    "skills/review-relay/scripts",
-    "skills/review-relay/SKILL.md",
-    "skills/review-relay/references/reviewer-prompt.md",
-    "AGENTS.md",
-    "AGENTS.local.md",
-    "skills/gh-comment/SKILL.md",
-    "skills/file-upload/SKILL.md",
-    "skills/review-relay/references",
-    "skills/pr-file/SKILL.md",
-    "skills/pr-file",
-    "skills/gh-comment",
-    "skills/file-upload/scripts/upload.sh",
-    "skills/file-upload/references/clients.md",
-    "skills/file-upload/scripts",
-    "skills/file-upload/references",
-    "skills/file-upload/config.example",
-    "skills/file-upload",
-    "CLAUDE.md",
-    "skills/ui-design/SKILL.md",
-    "skills/pr-merge/SKILL.md",
-    "skills/say-more/SKILL.md",
+    "skills/unslop/SKILL.md",
+    "SKILL.md",
+    "skills/unslop",
+    "skills/ui-design/unslop",
+    "Unslop.md",
+    "skills/talk-normal/split/01-say-less.md",
+    "skills/talk-normal/split/02-respect-the-reader.md",
+    "skills/i-have-adhd",
+    "skills/momentum/SKILL.md",
+    "skills/momentum",
+    "skills/curiosity-engine/SKILL.md",
+    "skills/curiosity-engine",
+    "skills/talk-normal/split/07-pre-send-check.md",
+    "skills/talk-normal/split/06-when-to-break-the-rules.md",
+    "skills/talk-normal/split/05-longer-form-soul.md",
+    "skills/talk-normal/split/04-strip-ai-tells.md",
+    "skills/talk-normal/split/03-shape-for-action.md",
+    "skills/talk-normal/split/00-intro.md",
+    "skills/talk-normal/split",
+    "skills/talk-normal/SKILL.md",
     "skills/say-less/SKILL.md",
-    "skills/refine-rules-and-skills/SKILL.md",
-    "Untitled.md",
-    "Book 1 - Ash and Bloom/Chapter 1 — Nalla.md",
-    "Glossary/Research & Development/Magic-System/Elemental-Theory.md",
-    "Glossary/Research & Development/SCHEMAS.md",
-    "Book 1 - Ash and Bloom/Research & Development/SCHEMAS.md",
-    "Book 1 - Ash and Bloom/Research & Development/Characters/Eranu.md",
-    "Book 1 - Ash and Bloom/Research & Development/Characters/Mister-Capy.md",
-    "Book 1 - Ash and Bloom/Research & Development/Characters/Joshuara-Mother.md",
-    "Book 1 - Ash and Bloom/Research & Development/Characters/Soren.md",
-    "Book 1 - Ash and Bloom/Research & Development/Characters/Kuori.md",
+    "skills/i-have-adhd/SKILL.md",
+    "skills/review-relay/SKILL.md",
+    "skills/agent-copy/SKILL.md",
+    "skills/agent-copy",
+    "skills/refine-plan/SKILL.md",
+    "skills/refine-plan",
+    "skills/refine-rule/SKILL.md",
+    "skills/refine-rule",
+    "skills/refine-skill/SKILL.md",
+    "skills/refine-skill",
+    "skills/refine/SKILL.md",
+    "skills/upload-file/references/clients.md",
+    "skills/upload-file/SKILL.md",
+    "skills/cloudflare-turnstile-spin/tests/validation.md",
     "Characters/Nalla/Nalla.png",
     "Characters/Nalla/Nalla.jpg",
     "Characters/Nalla/World (Tokalea)/Tokalea Archipelago reference 2.png",
