@@ -3,7 +3,7 @@ name: pr-file
 description: Use when the user asks to file a pull request or put the current branch up for review.
 ---
 
-# File a Pull Request
+# File a pull request
 
 Rebase the finished branch, push it safely, and open a real PR. Run immediately
 when the user asks to file the PR; do not add an approval round-trip.
@@ -83,7 +83,6 @@ Made with <actual model> using <actual harness>.
   important context. State only checks actually run.
 - Directly reference only issues that should be completed by the merge. The
   paired `pr-merge` skill treats every direct issue reference as close intent.
-- Keep personality subtle here; `pr-merge` adds the flavour comment at landing.
 
 ### 5. Push and create the PR
 

@@ -3,7 +3,7 @@ name: address-issue
 description: Use when the user asks to address or implement an issue.
 ---
 
-# Address Issue
+# Address issue
 
 Implement a provided issue in the harness- or user-supplied workspace and Git
 context. Core loop: plan → atomic TODOs → one commit per TODO → PR (or
@@ -14,7 +14,7 @@ comment+close when no code change).
 ### 1. Identify the issue and repo state
 
 - Parse the issue number or URL; ask only if ambiguous.
-- Harness-supplied repo root, worktree, branch, and base are authoritative —
+- Harness-supplied repo root, worktree, branch, and base are authoritative;
   change them only on explicit user request. Do not relocate the task to dodge a
   dirty tree.
 - From that root:
@@ -36,7 +36,7 @@ and conventions.
 
 If no code change is warranted (question, duplicate, already fixed,
 works-as-intended): post findings as an issue comment, close with
-`gh issue close <n> --reason "not planned"` or `completed`, and stop — no branch,
+`gh issue close <n> --reason "not planned"` or `completed`, and stop. No branch,
 no PR.
 
 When plans are part of the repo's conventions, create/update
@@ -101,7 +101,7 @@ On failure: diagnose, fix, or record residual risk before filing the PR.
 ### 5. Push and file the PR
 
 Push the current harness-provided branch (no rename/replace). Then follow
-[pr-file](../pr-file/SKILL.md) for rebase, title, push mechanics, and creation —
+[pr-file](../pr-file/SKILL.md) for rebase, title, push mechanics, and creation;
 repo templates and CONTRIBUTING win over defaults.
 
 Issue-specific body deltas on top of pr-file:
@@ -109,7 +109,7 @@ Issue-specific body deltas on top of pr-file:
 - Keyword deliberately: `Closes #n` only when this PR fully resolves the issue;
   otherwise `Refs #n` plus one line on scope covered and what remains.
   `pr-merge` closes every directly referenced open issue.
-- Acceptance criteria from the plan/issue — all checked, or defer under a
+- Acceptance criteria from the plan/issue: all checked, or defer under a
   `Refs` issue with the deferral noted.
 - Tests: commands actually run, with real results.
 
@@ -119,7 +119,7 @@ Report the PR URL, branch, completed TODOs, and validation.
 
 - Workspace / worktree / branch / base belong to the harness or explicit user
   instruction.
-- The plan file is source of truth while working — keep it current.
+- The plan file is source of truth while working; keep it current.
 - File the PR only when every TODO is complete or explicitly deferred with a
   reason.
 - Prefer existing repo conventions over this skill's defaults.
