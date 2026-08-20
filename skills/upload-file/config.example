@@ -1,0 +1,22 @@
+# Config for the upload-file skill.
+#
+# Install on a new host:
+#   mkdir -p ~/.config/i-upload
+#   cp config.example ~/.config/i-upload/config
+#   chmod 600 ~/.config/i-upload/config
+#   $EDITOR ~/.config/i-upload/config     # paste the key below
+#
+# Sourced as a shell fragment. Env vars of the same name take precedence,
+# so `UPLOAD_KEY=... upload.sh file.png` works without a config file at all.
+
+# Required. The AUTH_KEY secret of the deployed worker — from Cloudflare
+# (`wrangler secret list` shows only that it exists, not its value), or from
+# whatever you passed to `wrangler secret put AUTH_KEY`. Never commit this.
+UPLOAD_KEY=
+
+# Optional. Override only when pointing at a second deployment or a local
+# `wrangler dev` instance (e.g. http://127.0.0.1:8787).
+#UPLOAD_ENDPOINT=https://i.mia.cx
+
+# Requires: bash, curl, jq, file (all preinstalled on macOS except jq —
+# `brew install jq`).
