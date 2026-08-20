@@ -1,8 +1,7 @@
 ---
 name: codex-review
 description: >-
-  Get an independent code review from the Codex CLI (gpt-5.6-sol) — uncommitted
-  changes, a branch diff, a commit, or a specific implementation.
+  Get an independent code review from the Codex CLI (gpt-5.6-sol) — uncommitted changes, a branch diff, a commit, or a specific implementation.
 disable-model-invocation: true
 ---
 

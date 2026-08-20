@@ -1,8 +1,7 @@
 ---
 name: codex-computer-use
 description: >-
-  Use when the user asks to test a flow, verify UI behavior, inspect a running
-  app, or capture screenshots.
+  Use when the user asks to test a flow, verify UI behavior, inspect a running app, or capture screenshots.
 ---
 
 # Codex Computer Use

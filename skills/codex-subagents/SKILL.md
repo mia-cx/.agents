@@ -1,8 +1,7 @@
 ---
 name: codex-subagents
 description: >-
-  Use when dispatching subagent work to GPT models (gpt-5.6-sol, gpt-5.5) via
-  the Codex CLI, including inside Workflows.
+  Use when dispatching subagent work to GPT models (gpt-5.6-sol, gpt-5.5) via the Codex CLI, including inside Workflows.
 ---
 
 # Codex Subagents
@@ -39,8 +38,13 @@ Return Codex's output verbatim, adding no analysis.
 <task>
 ${task}
 </task>`,
-  { model: 'sonnet', effort: 'low', label: 'gpt-5.6-sol:review-auth', schema: REPORT }
-)
+  {
+    model: "sonnet",
+    effort: "low",
+    label: "gpt-5.6-sol:review-auth",
+    schema: REPORT,
+  },
+);
 ```
 
 - **Label with a `gpt-5.6-sol:` prefix** — the workflow UI shows the wrapper's Claude model, so the label is the only indication of the real worker.

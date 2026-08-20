@@ -1,9 +1,7 @@
 ---
 name: create-prd
 description: >-
-  Use when the user wants to write a PRD or plan anything bigger than a single
-  feature or slice — multi-feature efforts, new systems, epics, large
-  refactors.
+  Use when the user wants to write a PRD or plan anything bigger than a single feature or slice — multi-feature efforts, new systems, epics, large refactors.
 ---
 
 # Create PRD
