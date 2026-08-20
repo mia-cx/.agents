@@ -36,7 +36,7 @@ Defaults get caught here or not at all. Produce all four before proposing a dire
 - **Signature** — one element (visual, structural, or interaction) that could only exist for THIS product. Can't name one? Keep exploring.
 - **Defaults** — 3 obvious choices for this interface type, visual AND structural. You can't avoid patterns you haven't named.
 
-Then plan the direction as a compact token system: palette as 4–6 named hex values; typefaces for 2+ roles (characterful display used with restraint, complementary body, utility face if needed); a layout concept via one-sentence prose + ASCII wireframe; the signature. Review the plan against the brief: any part you'd produce for *any* similar page gets revised before code.
+Then plan the direction as a compact token system: 4–6 named `oklch()` primitive colors plus semantic role tokens; typefaces for 2+ roles (characterful display used with restraint, complementary body, utility face if needed); a layout concept via one-sentence prose + ASCII wireframe; the signature. Preserve an existing project's color notation unless the task is a color-system migration. Review the plan against the brief: any part you'd produce for *any* similar page gets revised before code.
 
 Known AI-default looks to spend freedom away from: warm-cream + high-contrast serif + terracotta accent; near-black + single acid-green/vermilion accent; broadsheet hairlines + zero radius; AI-purple gradients on dark mesh; three equal feature cards; Inter + slate-900; beige/brass/espresso for anything "premium consumer". All legitimate when the brief asks; never as the unchosen default — and don't ship the same palette family twice in a row.
 
@@ -65,6 +65,7 @@ The single biggest "designed vs generated" driver. Defaults produce flatness; cr
 - **Breathe unevenly**: tight within groups, real air between groups. Same card size + same gap + same density everywhere is the sound of no one deciding.
 - **Proportions speak**: a 280px sidebar says "navigation serves content"; 360px says "peers". If you can't articulate what a proportion says, it says nothing.
 - **Mobile first; creativity scales with viewport**: design the smallest screen first, where space buys information density — asymmetry, big whitespace, and artistic moves are luxuries the layout earns as the viewport grows. On a phone, the content *is* the design.
+- **Text contrast is perceptual**: measure every rendered text/background pair in every theme and interactive state. WCAG AA is the floor; use APCA as the legibility check (`|Lc| ≥ 75` body text, `≥ 60` non-body text). When correcting contrast, adjust OKLCH lightness first; preserve chroma and hue where practical.
 - **~60/30/10**: dominant neutral, secondary tone, ~10% accent. One accent used with intention beats five without. Gray builds structure; color communicates.
 - **Optical sizing**: negative tracking on large headings, ~1.5 line-height on body.
 
@@ -140,7 +141,7 @@ Before presenting, run:
 - **Squint test** — hierarchy reads, nothing harsh.
 - **Signature test** — point to five specific places the signature appears; "overall feel" doesn't count.
 - **Token test** — do the variable names belong to this product's world?
-- **A11y is not optional**: semantic HTML first, ARIA where semantics don't cover, a complete keyboard path with visible focus, alt text, WCAG AA contrast everywhere, and a grayscale/high-contrast pass. Ship nothing that fails these.
+- **A11y is not optional**: semantic HTML first, ARIA where semantics don't cover, a complete keyboard path with visible focus, purposeful alt text, and WCAG AA contrast on every rendered text/background and focus-state pair in each theme. Run a grayscale/high-contrast pass. Ship nothing that fails these.
 - **Verify visually** — render or screenshot at desktop + mobile widths, both color modes; fix overlap, blank states, unreadable text before presenting. A picture is worth 1000 tokens. Chanel rule: look in the mirror, remove one accessory.
 - **Guidelines review**: for a compliance pass, fetch the living checklist and report findings as `file:line`:
   `https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/main/command.md`
