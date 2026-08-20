@@ -10,6 +10,7 @@ Credits for the skills this composite was synthesized from. Human-facing — del
 | [web-design-guidelines](https://skills.sh/vercel-labs/agent-skills/web-design-guidelines) | Vercel | `references/web-design-guidelines.md` | Living-guidelines compliance review (fetch URL + file:line reporting) |
 | [ui-ux-pro-max](https://skills.sh/nextlevelbuilder/ui-ux-pro-max-skill/ui-ux-pro-max) | nextlevelbuilder | `references/ui-ux-quick-reference.md`, `references/ui-ux-pro-rules.md` | Searchable design-system database (tool stays installed separately), UX rule reference, pre-delivery checklist |
 | [extract-design-system](https://skills.sh/arvindrk/extract-design-system/extract-design-system) | arvindrk | `references/extract-design-system.md` | Token extraction from public sites |
+| [better-*](https://github.com/jakubkrehel/skills) — `better-layout`, `better-typography`, `better-colors`, `better-ui`, `better-writing` | jakubkrehel | Not vendored; installed alongside as their own skills | Content-driven breakpoints + container queries, logical properties / RTL mirroring and directional icon flipping, controls-look-interactive, `prefers-contrast: more` as a token value-set, the image-outline color rule, truncation stays reachable, 16px mobile inputs, destructive-confirmation labels, link / ON-state-toggle / capitalization copy rules, templated strings with pluralization |
 
 Evaluated but excluded: [design-an-interface](https://skills.sh/mattpocock/skills/design-an-interface) (Matt Pocock) — module/API interface design, not UI.
 
