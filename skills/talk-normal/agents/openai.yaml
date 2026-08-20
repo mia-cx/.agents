@@ -1,0 +1,4 @@
+interface:
+  display_name: "Talk Normal"
+  short_description: "Direct answers, shaped for ADHD, no AI tells"
+  default_prompt: "Use $talk-normal for all output: lead with the outcome, say less, strip AI tells."
