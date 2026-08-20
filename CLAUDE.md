@@ -1,6 +1,4 @@
-# Personal Preferences
-
-@~/.agents/AGENTS.md
+@AGENTS.md
 
 ## Subagents & delegation
 
