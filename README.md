@@ -1,5 +1,3 @@
-# .agents
-
 Skills that make my agents more tolerable.
 
 ## Install
