@@ -3,7 +3,7 @@ Skills that make my agents more tolerable.
 ## Install
 
 ```sh
-npx skills add mia-cx/.agents
+npx skills add mia-cx/skills
 ```
 
 Pick the skills you want from the list. Works with Claude Code, Cursor, Codex, and anything else that reads `SKILL.md` files.
