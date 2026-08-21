@@ -1,8 +1,6 @@
 ---
 name: agent-copy
-description: >-
-  Use when writing text an agent will consume: a skill, rule or memory file,
-  plan, or subagent prompt.
+description: Use when writing text an agent will consume: a skill, rule or memory file, plan, or subagent prompt.
 ---
 
 # Agent copy

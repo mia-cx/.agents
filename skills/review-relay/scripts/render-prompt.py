@@ -22,7 +22,7 @@ import re
 import sys
 
 # Keeps the codex reviewer read-only despite the sandbox flag its leg needs.
-# A fixer leg must never get this: it is dispatched to write.
+# Reviewer legs are always read-only.
 READ_ONLY_PREAMBLE = (
     "Do not invoke any skill or delegation tool, and do not spawn sub-agents. "
     "Review yourself; do not edit files.\n\n"

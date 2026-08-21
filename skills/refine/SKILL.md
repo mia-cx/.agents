@@ -1,8 +1,6 @@
 ---
 name: refine
-description: >-
-  Use when the user asks to refine, slim, or audit an agent-consumed document:
-  a skill, a memory/rules file, or a plan.
+description: Use when the user asks to create, edit, change, refine, slim, or audit an agent-consumed document, like a skill, a memory/rules file, or a plan.
 ---
 
 # Refine
