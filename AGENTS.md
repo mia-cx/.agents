@@ -75,6 +75,7 @@ Never touch production, live databases, or daily-driver build/preview channels u
 Your memory is OptMem:
 - The tool is `~/.optmem/memo`
 - Your memories are in `~/.optmem/memory`
+- OptMem does not work on Windows. Skip Memory section if on Windows.
 
 OptMem outlives every session, compaction, model and vendor change.
 Without it you do not know who you are, or what was decided and tried.
