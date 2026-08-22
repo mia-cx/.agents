@@ -79,7 +79,7 @@ Codex gets the same rendered prompt as every other leg, at full length: no line 
 
 Treat repository decisions and recon as authoritative. Browse or re-scrape a live integration only for a concrete unresolved contradiction, because unconstrained recon can turn one leg into a duplicate investigation.
 
-Codex produces the report at the end of its interactive turn. Keep the terminal session attached and wait for the completion event; do not poll on a timer. A turn that ends without a final report is a failed attempt: record it, fix the invocation, and rerun the same lineup slot. It never counts as a leg.
+Codex produces the report at the end of its turn. Wait for the completion event rather than polling on a timer. How that event reaches you depends on the host, and a host with no terminal to attach to must not run codex interactively at all; see the host sections below. A turn that ends without a final report is a failed attempt: record it, fix the invocation, and rerun the same lineup slot. It never counts as a leg.
 
 ## Runtime state and resume
 
@@ -145,6 +145,57 @@ Cursor specifics:
 **Always `--model auto`.** `auto` is the only permitted value of this flag. Auto-routed requests are the included Cursor plan usage; every other model id (`gpt-5.6-sol-high`, `claude-opus-5-thinking-high`, `composer-2.5`, anything from `agent --list-models`) bills the API pool per token. Requests to run the cursor reviewer on a specific model get the same answer: run `auto`, or drop cursor from the lineup, and say which. Cost, not capability, decides this leg's model; the rubric governs the claude and codex legs only.
 
 This path is the local `agent` CLI only. Cursor's PR-side bots are a different mechanism and never a substitute: leave `@cursor review`, `@bugbot run`, and every other PR comment trigger out of it. Bots already in the PR conversation are handled by the bot-allowlist step, which does not include Cursor.
+
+## Running legs from a Claude Code host
+
+A leg is only useful if the host finds out it finished. Everything below is in service of that one thing: the host must get a completion event it cannot miss, and a report it can read without decoding a terminal.
+
+### The claude leg
+
+Agent tool, `model: 'opus'`, backgrounded. The harness tracks the subagent and notifies you when it returns, so the next turn starts by itself. Pass the rendered prompt file's contents as the agent's prompt; it carries its own read-only instruction. Check `git status` afterwards anyway.
+
+### The codex leg: `codex exec`, never interactive `codex`
+
+```bash
+codex exec -s read-only --color never \
+  -m gpt-5.6-sol -c model_reasoning_effort=high \
+  -o "$REPORT" - < "$PROMPT" > "$LOG" 2>&1
+```
+
+Run it with Bash `run_in_background: true`. A leg on a large diff runs well past the ten-minute foreground timeout, and `codex exec` exits when the turn ends, so backgrounding it produces a real completion notification.
+
+- `-s read-only` is the sandbox enforcing what `--read-only-preamble` only asks for. Reads and `git diff` both work; writes fail. Keep the preamble as the line that stops it trying, and keep the `git status` check.
+- `-o "$REPORT"` writes the final message to a file. **That file is the report**, not stdout. Stdout is progress noise; keep it as `$LOG` for diagnosing a failed leg.
+- `-` reads the prompt from stdin, so the long markdown never goes through argv.
+
+**Interactive `codex` cannot be driven from this host, and the failure is silent.** It does not exit when the turn ends; it returns to its own prompt and waits. A watcher on the process therefore waits forever, and the host sits believing the leg is still working. Observed once at a cost of two hours: the review completed, the log stopped growing, and nothing said so. Its output is also a TUI screen-repaint stream rather than a transcript, so capturing it through `script` yields megabytes of cursor moves with the report interleaved a character at a time and the early findings already scrolled off. There is no report in there worth recovering.
+
+### Watching a leg
+
+The completion notification is the mechanism. Do not build a polling loop around work the harness already tracks; you will be re-invoked.
+
+A watcher is only for a process the harness cannot see, which means one you detached yourself. When you write one, **never `pgrep -f` the command string**: the watcher's own shell carries that string in its command line, so the pattern matches the watcher, the condition never goes false, and the loop runs until it times out. Watch the pid.
+
+### Salvaging a leg someone ran interactively
+
+Codex writes a real transcript to `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl` however it was launched. The report is the last assistant message:
+
+```bash
+python3 -c "
+import json,sys
+msgs=[]
+for line in open(sys.argv[1]):
+    try: d=json.loads(line)
+    except: continue
+    p=d.get('payload',{})
+    if p.get('type')=='message' and p.get('role')=='assistant':
+        t=''.join(c.get('text','') for c in p.get('content',[]))
+        if t.strip(): msgs.append(t)
+print(msgs[-1])
+" "$(ls -t ~/.codex/sessions/**/*.jsonl | head -1)" > "$REPORT"
+```
+
+Match the session file to the leg by its timestamp before trusting it. This rescues a leg already paid for; it is not the path to run one.
 
 ## Reviewer prompt
 
