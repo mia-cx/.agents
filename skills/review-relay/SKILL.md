@@ -154,7 +154,11 @@ A leg is only useful if the host finds out it finished. Everything below is in s
 
 Agent tool, `model: 'opus'`, backgrounded. The harness tracks the subagent and notifies you when it returns, so the next turn starts by itself. Pass the rendered prompt file's contents as the agent's prompt, and check `git status` afterwards.
 
-**Render this leg with `--read-only-preamble` too.** It is not only about writes. Its other half forbids delegation, and a general-purpose subagent has the Agent tool: without that line a reviewer will happily split the diff into areas and fan out to sub-reviewers of its own. That is not a leg. A leg is one reviewer's own judgement over the whole diff, which is what makes it comparable to the leg beside it and reproducible on a rerun; a coordinator merging five area reports it never verified is a second relay hiding inside the first, at several times the cost. Observed on leg 14 of PR #65: one spawn became six.
+**Pick an agent type with no Agent tool in it.** `Explore` is the one to reach for: its toolset is everything a reviewer needs and nothing it needs to be denied, with no Edit, no Write and no Agent. Its blurb describes a search agent, but a toolset is a capability list rather than a job description, and this is the toolset the job wants. `general-purpose` has every tool, delegation included.
+
+That matters because a reviewer handed the Agent tool will use it. Give one a large diff and it splits the work into areas and fans out to sub-reviewers of its own, which is not a leg. A leg is one reviewer's own judgement over the whole diff, and that is what makes it comparable to the leg beside it and reproducible on a rerun; a coordinator merging area reports it never verified is a second relay hiding inside the first. Observed on leg 14 of PR #65: one spawn became six and cost 925k subagent tokens for a single leg.
+
+Render this leg with `--read-only-preamble` as well, which says the same thing in words. Say it and enforce it both: the words are what stops a reviewer that finds another way to delegate, and the toolset is what stops the one that ignores them. Asking was the guard that already failed once.
 
 If a fan-out happens anyway, its reports are still worth reading as raw input, the same way a bot's comments are. They are not that leg. Verify each finding yourself and rerun the leg.
 
