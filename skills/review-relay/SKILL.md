@@ -152,7 +152,11 @@ A leg is only useful if the host finds out it finished. Everything below is in s
 
 ### The claude leg
 
-Agent tool, `model: 'opus'`, backgrounded. The harness tracks the subagent and notifies you when it returns, so the next turn starts by itself. Pass the rendered prompt file's contents as the agent's prompt; it carries its own read-only instruction. Check `git status` afterwards anyway.
+Agent tool, `model: 'opus'`, backgrounded. The harness tracks the subagent and notifies you when it returns, so the next turn starts by itself. Pass the rendered prompt file's contents as the agent's prompt, and check `git status` afterwards.
+
+**Render this leg with `--read-only-preamble` too.** It is not only about writes. Its other half forbids delegation, and a general-purpose subagent has the Agent tool: without that line a reviewer will happily split the diff into areas and fan out to sub-reviewers of its own. That is not a leg. A leg is one reviewer's own judgement over the whole diff, which is what makes it comparable to the leg beside it and reproducible on a rerun; a coordinator merging five area reports it never verified is a second relay hiding inside the first, at several times the cost. Observed on leg 14 of PR #65: one spawn became six.
+
+If a fan-out happens anyway, its reports are still worth reading as raw input, the same way a bot's comments are. They are not that leg. Verify each finding yourself and rerun the leg.
 
 ### The codex leg: `codex exec`, never interactive `codex`
 
